@@ -1,137 +1,110 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang=»ru» data-theme=»dark»>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Workspaces — Панель Преподавателя</title>
-    <link rel="stylesheet" href="/teach/teach.css">
+    <meta charset=»UTF-8»>
+    <meta name=»viewport» content=»width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no»>
+    <title>Workspaces — Личный Кабинет</title>
+    <link rel=»stylesheet» href=»/style.css»>
 </head>
-<body class="ios-theme">
+<body>
 
-    <!-- Форма Входа / Регистрации Учителя -->
-    <div id="teach-auth-card" class="auth-container">
-        <div class="brand">
-            <svg class="icon-3layers" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-            <h2>Workspaces Teach</h2>
+    <!—Переключатель темы (Тёмная/Светлая) 
+    <button class=»theme-toggle-btn» id=»themeToggle» title=»Сменить тему»>🌙</button>
+
+    <!—Контейнер Авторизации (По центру) 
+    <div class=»auth-container» id=»authBox»>
+        <div class=»app-logo»>
+            <svg viewBox=»0 0 24 24»>
+                <path d=»M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5»/>
+            </svg>
         </div>
-        
-        <form id="teach-login-form">
-            <h3>Вход для Преподавателей</h3>
-            <input type="text" id="teach-login" placeholder="Логин или Email" required>
-            <input type="password" id="teach-pass" placeholder="Пароль" required>
-            <button type="submit" class="btn-primary">Войти</button>
-            <p class="toggle-link" onclick="toggleAuthMode('reg')">Регистрация преподавателя</p>
-        </form>
+        <h1 class=»app-title»>Workspaces</h1>
+        <p class=»app-subtitle»>Единый портал колледжа</p>
 
-        <form id="teach-reg-form" class="hidden">
-            <h3>Регистрация Преподавателя</h3>
-            <input type="text" id="reg-username" placeholder="Логин (без мата и спецсимволов)" required>
-            <input type="text" id="reg-fullname" placeholder="ФИО полностью (Фамилия Имя Отчество)" required>
-            <input type="email" id="reg-email" placeholder="Рабочий Email" required>
-            <input type="password" id="reg-password" placeholder="Пароль" required>
-            <button type="submit" class="btn-primary">Зарегистрироваться</button>
-            <p class="toggle-link" onclick="toggleAuthMode('login')">Уже есть аккаунт? Войти</p>
-        </form>
-    </div>
-
-    <!-- Плашка ожидания верификации -->
-    <div id="unverified-banner" class="status-card hidden">
-        <h2>⏳ Ожидание верификации</h2>
-        <p>Сообщите ваш персональный код верифицированному коллеге или Root-администратору:</p>
-        <div id="my-verification-code" class="code-badge">T-0000</div>
-    </div>
-
-    <!-- Основной кабинет учителя (После подтверждения) -->
-    <div id="teach-dashboard" class="dashboard-layout hidden">
-        <aside class="sidebar">
-            <div class="user-info">
-                <span id="teacher-name">Преподаватель</span>
-                <span id="teacher-status-badge" class="badge">Verified Teacher</span>
+        <form id=»loginForm» style=»width: 100%;»>
+            <div class=»form-group»>
+                <input type=»text» id=»loginInput» class=»form-control» placeholder=»Логин или Email» required autocomplete=»username»>
             </div>
-            <nav class="nav-menu">
-                <button data-tab="verifications" class="nav-btn active">👥 Верификация коллег</button>
-                <button data-tab="hw-check" class="nav-btn">📝 Проверка ДЗ</button>
-                <button data-tab="root-settings" id="root-tab-btn" class="nav-btn hidden">⚙️ Настройки Root</button>
-            </nav>
-            <button id="teach-logout" class="btn-logout">Выйти</button>
-        </aside>
+            <div class=»form-group»>
+                <input type=»password» id=»passwordInput» class=»form-control» placeholder=»Пароль» required autocomplete=»current-password»>
+            </div>
+            <button type=»submit» class=»btn-primary»>Войти</button>
+        </form>
 
-        <main class="main-content">
-            <!-- Раздел 1: Верификация новых учителей -->
-            <section id="tab-verifications" class="tab-sec active">
-                <h1>Подтверждение регистраций коллег</h1>
-                <div id="pending-list" class="cards-list"></div>
-            </section>
-
-            <!-- Раздел 2: Проверка ДЗ -->
-            <section id="tab-hw-check" class="tab-sec">
-                <h1>Проверка выполненных ДЗ</h1>
-                <div class="filter-bar">
-                    <input type="text" id="hw-search" placeholder="Поиск по студенту или предмету...">
-                </div>
-                <div id="hw-submissions-list" class="cards-list"></div>
-            </section>
-
-            <!-- Раздел 3: Управление Root Teacher (4 Тумблера) -->
-            <section id="tab-root-settings" class="tab-sec">
-                <h1>Глобальные Настройки Колледжа</h1>
-                <div class="switches-card">
-                    
-                    <div class="switch-row">
-                        <div class="switch-info">
-                            <span class="title">🟢 Режим «Удалёнка»</span>
-                            <span class="desc">Разрешить студентам отправлять фото выполненных ДЗ</span>
-                        </div>
-                        <label class="switch">
-                            <input type="checkbox" id="switch-remote">
-                            <span class="slider"></span>
-                        </label>
-                    </div>
-
-                    <div class="switch-row">
-                        <div class="switch-info">
-                            <span class="title">🔴 Технические работы</span>
-                            <span class="desc">Заблокировать вход для всех студентов</span>
-                        </div>
-                        <label class="switch">
-                            <input type="checkbox" id="switch-maint">
-                            <span class="slider"></span>
-                        </label>
-                    </div>
-
-                    <div class="switch-row">
-                        <div class="switch-info">
-                            <span class="title">🎓 Режим «Экзамены»</span>
-                            <span class="desc">Заблокировать отправку сообщений в чатах для студентов</span>
-                        </div>
-                        <label class="switch">
-                            <input type="checkbox" id="switch-exams">
-                            <span class="slider"></span>
-                        </label>
-                    </div>
-
-                    <div class="switch-row">
-                        <div class="switch-info">
-                            <span class="title">🔒 Режим «Закрытый чат»</span>
-                            <span class="desc">Скрыть доступ к чатам от обычных учителей (включен по умолчанию)</span>
-                        </div>
-                        <label class="switch">
-                            <input type="checkbox" id="switch-private">
-                            <span class="slider"></span>
-                        </label>
-                    </div>
-
-                    <div class="announcement-input-group">
-                        <label>📢 Глобальное объявление для всех пользователей:</label>
-                        <textarea id="announcement-text" placeholder="Введите текст объявления..."></textarea>
-                    </div>
-
-                    <button id="save-settings-btn" class="btn-primary">Сохранить настройки</button>
-                </div>
-            </section>
-        </main>
+        <a href=»/teach» class=»teacher-link-btn»>Портал для преподавателей →</a>
     </div>
 
-    <script src="/teach/teach.js"></script>
+    <!—Клиентский скрипт управления темой и авторизацией 
+    <script>
+        // Переключение тем на лету
+        Const themeBtn = document.getElementById('themeToggle');
+        Const currentTheme = localStorage.getItem('theme') || 'dark';
+        
+        Document.documentElement.setAttribute('data-theme', currentTheme);
+        themeBtn.textContent = currentTheme === 'dark' ? '☀️' : '🌙';
+
+        themeBtn.addEventListener('click', () => {
+            const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', theme);
+            localStorage.setItem('theme', theme);
+            themeBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
+        });
+    </script>
+    <script src=»/socket.io/socket.io.js»></script>
+    <script src=»/app.js»></script>
+</body>
+</html>
+
+```
+### 3. Главный HTML файл портала учителей (public/teach/index.html)
+Обновите файл apple-space-app/public/teach/index.html:
+```html
+<!DOCTYPE html>
+<html lang=»ru» data-theme=»dark»>
+<head>
+    <meta charset=»UTF-8»>
+    <meta name=»viewport» content=»width=device-width, initial-scale=1.0»>
+    <title>Workspaces — Учительский Портал</title>
+    <link rel=»stylesheet» href=»/style.css»>
+</head>
+<body>
+
+    <button class=»theme-toggle-btn» id=»themeToggle»>🌙</button>
+
+    <div class=»auth-container» id=»teacherAuthBox»>
+        <div class=»app-logo»>
+            <svg viewBox=»0 0 24 24»>
+                <path d=»M12 3L1 9l11 6 9-4.91V17h2V9L12 3z M5 13.18v4L12 21l7-3.82v-4L12 17l-7-3.82z»/>
+            </svg>
+        </div>
+        <h1 class=»app-title»>Workspaces Faculty</h1>
+        <p class=»app-subtitle»>Вход для преподавателей и Root</p>
+
+        <form id=»teacherLoginForm» style=»width: 100%;»>
+            <div class=»form-group»>
+                <input type=»text» id=»teacherLogin» class=»form-control» placeholder=»Логин преподавателя» required>
+            </div>
+            <div class=»form-group»>
+                <input type=»password» id=»teacherPassword» class=»form-control» placeholder=»Пароль» required>
+            </div>
+            <button type=»submit» class=»btn-primary»>Авторизоваться</button>
+        </form>
+
+        <a href=»/» class=»teacher-link-btn»>← Вернуться на студенческий портал</a>
+    </div>
+
+    <script>
+        Const themeBtn = document.getElementById('themeToggle');
+        Const currentTheme = localStorage.getItem('theme') || 'dark';
+        Document.documentElement.setAttribute('data-theme', currentTheme);
+        themeBtn.textContent = currentTheme === 'dark' ? '☀️' : '🌙';
+
+        themeBtn.addEventListener('click', () => {
+            const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', theme);
+            localStorage.setItem('theme', theme);
+            themeBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
+        });
+    </script>
 </body>
 </html>
