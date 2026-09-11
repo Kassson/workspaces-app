@@ -1,145 +1,235 @@
+/* --- SF PRO SYSTEM FONTS & APPLE DESIGN SYSTEM --- */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
 :root {
-    --ios-bg: #000000;
-    --ios-card-bg: rgba(28, 28, 30, 0.75);
-    --ios-accent: #0A84FF;
-    --ios-red: #FF453A;
-    --ios-green: #30D158;
-    --ios-text: #FFFFFF;
-    --ios-subtext: #8E8E93;
-    --ios-border: rgba(255, 255, 255, 0.15);
-    --ios-blur: blur(20px);
+    /* Светлая тема (Apple iOS) */
+    --bg-main: #F2F2F7;
+    --card-bg: rgba(255, 255, 255, 0.72);
+    --card-border: rgba(255, 255, 255, 0.5);
+    --text-primary: #000000;
+    --text-secondary: #8E8E93;
+    --input-bg: rgba(230, 230, 235, 0.6);
+    --accent-blue: #007AFF;
+    --accent-blue-hover: #0056B3;
+    --glass-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+    --sidebar-width: 250px;
+}
+
+[data-theme=»dark»] {
+    /* Тёмная тема (macOS Dark) */
+    --bg-main: #000000;
+    --card-bg: rgba(28, 28, 30, 0.75);
+    --card-border: rgba(255, 255, 255, 0.12);
+    --text-primary: #FFFFFF;
+    --text-secondary: #98989D;
+    --input-bg: rgba(44, 44, 46, 0.8);
+    --accent-blue: #0A84FF;
+    --accent-blue-hover: #409CFF;
+    --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
 }
 
 •	{
     Box-sizing: border-box;
     Margin: 0;
     Padding: 0;
-    Font-family: -apple-system, BlinkMacSystemFont, «SF Pro Text», «SF Pro Display», sans-serif;
-    -webkit-tap-highlight-color: transparent;
+    Font-family: 'Inter', -apple-system, BlinkMacSystemFont, «SF Pro Text», «Helvetica Neue», sans-serif;
+    Transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
 }
 
 Body {
-    Background-color: var(--ios-bg);
-    Color: var(--ios-text);
+    Background-color: var(--bg-main);
+    Color: var(--text-primary);
+    Min-height: 100vh;
+    Display: flex;
+    Align-items: center;
+    Justify-content: center;
     Overflow-x: hidden;
 }
 
-/* Общие контейнеры */
-.app-layout {
+/* --- ПЕРЕКЛЮЧАТЕЛЬ ТЕМЫ (ТЕМНАЯ / СВЕТЛАЯ) --- */
+.theme-toggle-btn {
+    Position: fixed;
+    Top: 20px;
+    Right: 20px;
+    Background: var(--card-bg);
+    Border: 1px solid var(--card-border);
+    Backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    Width: 44px;
+    Height: 44px;
+    Border-radius: 50%;
+    Cursor: pointer;
     Display: flex;
-    Min-height: 100vh;
+    Align-items: center;
+    Justify-content: center;
+    Box-shadow: var(--glass-shadow);
+    z-index: 1000;
+    color: var(--text-primary);
+    font-size: 1.2rem;
 }
 
-.content-area {
-    Flex: 1;
-    Padding: 20px;
-    Padding-bottom: 90px; /* Отступ под мобильную панель */
+.theme-toggle-btn:hover {
+    Transform: scale(1.05);
 }
 
-/* Иконка 3 Layers */
-.icon-3layers {
-    Width: 28px;
-    Height: 28px;
-    Fill: none;
-    Stroke: var(--ios-accent);
-    Stroke-width: 2;
-    Stroke-linecap: round;
-    Stroke-linejoin: round;
-}
-
-/* Карточки уроков (Отмены и Замены) */
-.lesson-card {
-    Background: var(--ios-card-bg);
-    Backdrop-filter: var(--ios-blur);
-    Border-radius: 16px;
-    Padding: 16px;
-    Margin-bottom: 12px;
-    Border: 1px solid var(--ios-border);
-    Transition: transform 0.2s ease;
-}
-
-/* 1. ОТМЕНА УРОКА — Темно-черная карточка */
-.lesson-card.canceled {
-    Background: #050505 !important;
-    Border: 1px solid #222 !important;
-    Opacity: 0.8;
-}
-
-.badge-canceled {
-    Background: #222;
-    Color: var(--ios-subtext);
-    Font-size: 11px;
-    Font-weight: bold;
-    Padding: 4px 8px;
-    Border-radius: 6px;
-}
-
-/* 2. ЗАМЕНА УРОКА — Красная рамка/акцент */
-.lesson-card.replaced {
-    Border: 2px solid var(--ios-red) !important;
-    Background: rgba(255, 69, 58, 0.1);
-}
-
-.badge-replacement {
-    Background: var(--ios-red);
-    Color: #FFF;
-    Font-size: 11px;
-    Font-weight: bold;
-    Padding: 4px 8px;
-    Border-radius: 6px;
-}
-
-/* Адаптированность (ПК vs Мобильные) */
-.desktop-sidebar {
-    Width: 260px;
-    Background: rgba(20, 20, 22, 0.9);
-    Backdrop-filter: var(--ios-blur);
-    Border-right: 1px solid var(--ios-border);
-    Padding: 24px;
+/* --- ОПТИМИЗИРОВАННЫЙ ЭКРАН АВТОРИЗАЦИИ / РЕГИСТРАЦИИ ПО ЦЕНТРУ --- */
+.auth-container {
+    Width: 100%;
+    Max-width: 400px;
+    Padding: 40px 30px;
+    Background: var(--card-bg);
+    Backdrop-filter: blur(25px);
+    -webkit-backdrop-filter: blur(25px);
+    Border: 1px solid var(--card-border);
+    Border-radius: 24px;
+    Box-shadow: var(--glass-shadow);
+    Text-align: center;
     Display: flex;
     Flex-direction: column;
-    Justify-content: space-between;
+    Align-items: center;
+    Animation: fadeIn 0.4s ease-in-out;
 }
 
-.mobile-tab-bar {
-    Display: none;
+@keyframes fadeIn {
+    From { opacity: 0; transform: translateY(12px); }
+    To { opacity: 1; transform: translateY(0); }
 }
 
-/* Для мобильных экранов */
-@media (max-width: 768px) {
-    .desktop-sidebar {
-        Display: none;
-    }
-    .mobile-tab-bar {
-        Display: flex;
-        Position: fixed;
-        Bottom: 0;
-        Left: 0;
-        Right: 0;
-        Height: 70px;
-        Background: rgba(20, 20, 20, 0.85);
-        Backdrop-filter: var(--ios-blur);
-        Border-top: 1px solid var(--ios-border);
-        Justify-content: space-around;
-        Align-items: center;
-        z-index: 999;
-    }
-    .tab-item {
-        Background: none;
-        Border: none;
-        Color: var(--ios-subtext);
-        Display: flex;
-        Flex-direction: column;
-        Align-items: center;
-        Font-size: 18px;
-    }
-    .tab-item span {
-        Font-size: 10px;
-        Margin-top: 2px;
-    }
-    .tab-item.active {
-        Color: var(--ios-accent);
-    }
+/* Логотип Apple-style */
+.app-logo {
+    Width: 68px;
+    Height: 68px;
+    Background: linear-gradient(135deg, #007AFF 0%, #5856D6 100%);
+    Border-radius: 18px;
+    Display: flex;
+    Align-items: center;
+    Justify-content: center;
+    Margin-bottom: 16px;
+    Box-shadow: 0 4px 20px rgba(0, 122, 255, 0.35);
 }
 
-.hidden { display: none !important; }
+.app-logo svg {
+    Width: 38px;
+    Height: 38px;
+    Fill: #FFFFFF;
+}
+
+.app-title {
+    Font-size: 1.6rem;
+    Font-weight: 700;
+    Letter-spacing: -0.5px;
+    Margin-bottom: 6px;
+}
+
+.app-subtitle {
+    Font-size: 0.9rem;
+    Color: var(--text-secondary);
+    Margin-bottom: 28px;
+}
+
+/* Элементы формы */
+.form-group {
+    Width: 100%;
+    Margin-bottom: 16px;
+    Text-align: left;
+}
+
+.form-control {
+    Width: 100%;
+    Height: 48px;
+    Background: var(--input-bg);
+    Border: 1px solid transparent;
+    Border-radius: 12px;
+    Padding: 0 16px;
+    Font-size: 0.95rem;
+    Color: var(--text-primary);
+    Outline: none;
+}
+
+.form-control:focus {
+    Border-color: var(--accent-blue);
+    Background: var(--card-bg);
+}
+
+.form-control::placeholder {
+    Color: var(--text-secondary);
+}
+
+.btn-primary {
+    Width: 100%;
+    Height: 48px;
+    Background: var(--accent-blue);
+    Color: #FFFFFF;
+    Border: none;
+    Border-radius: 12px;
+    Font-size: 1rem;
+    Font-weight: 600;
+    Cursor: pointer;
+    Margin-top: 10px;
+    Box-shadow: 0 4px 14px rgba(0, 122, 255, 0.25);
+}
+
+.btn-primary:hover {
+    Background: var(--accent-blue-hover);
+}
+
+/* Кнопка регистрации преподавателя */
+.teacher-link-btn {
+    Margin-top: 20px;
+    Display: inline-block;
+    Color: var(--accent-blue);
+    Font-size: 0.9rem;
+    Font-weight: 500;
+    Text-decoration: none;
+    Cursor: pointer;
+    Padding: 8px 16px;
+    Border-radius: 8px;
+    Transition: background 0.2s ease;
+}
+
+.teacher-link-btn:hover {
+    Background: rgba(0, 122, 255, 0.1);
+}
+
+/* --- СТРУКТУРА ПАНЕЛИ РАБОЧЕГО ПРОСТРАНСТВА (НА ПК В СТОЛБЕЦ) --- */
+.app-dashboard {
+    Display: flex;
+    Width: 100vw;
+    Height: 100vh;
+}
+
+.sidebar {
+    Width: var(--sidebar-width);
+    Background: var(--card-bg);
+    Backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    Border-right: 1px solid var(--card-border);
+    Display: flex;
+    Flex-direction: column; /* ЭЛЕМЕНТЫ СТРОГО В СТОЛБЕЦ */
+    Padding: 24px 16px;
+    Gap: 8px;
+}
+
+.sidebar-item {
+    Display: flex;
+    Align-items: center;
+    Gap: 12px;
+    Padding: 12px 16px;
+    Border-radius: 12px;
+    Color: var(--text-primary);
+    Text-decoration: none;
+    Font-size: 0.95rem;
+    Font-weight: 500;
+    Cursor: pointer;
+}
+
+.sidebar-item:hover, .sidebar-item.active {
+    Background: var(--accent-blue);
+    Color: #FFFFFF;
+}
+
+.main-content {
+    Flex: 1;
+    Padding: 32px;
+    Overflow-y: auto;
+}
