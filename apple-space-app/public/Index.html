@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang=»ru»>
+<head>
+    <meta charset=»UTF-8»>
+    <meta name=»viewport» content=»width=device-width, initial-scale=1.0, viewport-fit=cover»>
+    <title>Workspaces</title>
+    <link rel=»manifest» href=»/manifest.json»>
+    <link rel=»stylesheet» href=»/style.css»>
+    <script src=»/socket.io/socket.io.js»></script>
+</head>
+<body class=»ios-theme»>
+    <!—Баннер объявлений 
+    <div id=»global-announcement» class=»announcement-bar hidden»></div>
+
+    <!—Главный контейнер (Sidebar для ПК, Bottom Bar для телефонов) 
+    <div class=»app-layout»>
+        <!—Боковое меню (для ПК / планшетов) 
+        <aside class=»desktop-sidebar»>
+            <div class=»brand»>
+                <svg class=»icon-3layers» viewBox=»0 0 24 24»><path d=»M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5»/></svg>
+                <span>Workspaces</span>
+            </div>
+            <nav class=»nav-menu»>
+                <button data-tab=»today» class=»nav-item active»>📅 Сегодня</button>
+                <button data-tab=»schedule» class=»nav-item»>🗓️ Расписание</button>
+                <button data-tab=»homework» class=»nav-item»>📝 ДЗ</button>
+                <button data-tab=»chat» id=»nav-chat-btn» class=»nav-item»>💬 Чат</button>
+                <button data-tab=»games» class=»nav-item»>🎮 Игры</button>
+            </nav>
+            <div class=»user-profile-widget»>
+                <span id=»user-display-name»>Загрузка…</span>
+                <button id=»logout-btn» class=»btn-secondary»>Выйти</button>
+            </div>
+        </aside>
+
+        <!—Основная контентная область 
+        <main class=»content-area»>
+            <!—Экран блокировки ТЕХРАБОТЫ 
+            <div id=»maintenance-screen» class=»full-screen-overlay hidden»>
+                <div class=»overlay-card»>
+                    <h2>🛠 Ведутся технические работы</h2>
+                    <p>Платформа обновляется. Пожалуйста, зайдите позже.</p>
+                </div>
+            </div>
+
+            <!—Вкладка 1: Сегодня 
+            <section id=»tab-today» class=»tab-content active»>
+                <header class=»page-header»>
+                    <h1>Сегодня</h1>
+                    <button id=»export-ics-btn» class=»btn-action»>📥 Экспорт (.ics)</button>
+                </header>
+                <div id=»today-schedule-list» class=»cards-grid»></div>
+            </section>
+
+            <!—Вкладка 2: Расписание 
+            <section id=»tab-schedule» class=»tab-content»>
+                <header class=»page-header»>
+                    <h1>Расписание на неделю</h1>
+                </header>
+                <div id=»week-schedule-container» class=»week-grid»></div>
+            </section>
+
+            <!—Вкладка 3: Домашние задания 
+            <section id=»tab-homework» class=»tab-content»>
+                <header class=»page-header»>
+                    <h1>Домашние задания</h1>
+                </header>
+                <div id=»homework-list» class=»cards-list»></div>
+            </section>
+
+            <!—Вкладка 4: Чат 
+            <section id=»tab-chat» class=»tab-content»>
+                <div class=»chat-container»>
+                    <div id=»chat-messages» class=»messages-area»></div>
+                    <div id=»chat-blocked-notice» class=»notice-bar hidden»>🔒 Чат временно заморожен (Режим экзаменов)</div>
+                    <form id=»chat-form» class=»chat-input-bar»>
+                        <input type=»text» id=»chat-input» placeholder=»Написать сообщение…» autocomplete=»off»>
+                        <button type=»submit» class=»btn-send»>Отправить</button>
+                    </form>
+                </div>
+            </section>
+
+            <!—Вкладка 5: Игровой центр 
+            <section id=»tab-games» class=»tab-content»>
+                <header class=»page-header»>
+                    <h1>Игровой Центр</h1>
+                </header>
+                <div id=»games-menu» class=»games-grid»>
+                    <div class=»game-card» onclick=»startGame('2048')»>🎮 2048 Apple</div>
+                    <div class=»game-card» onclick=»startGame('runner')»>🏃 Cyber Runner</div>
+                    <div class=»game-card» onclick=»startGame('brawl')»>💥 Brawl Royale</div>
+                    <div class=»game-card» onclick=»startGame('snake')»>🐍 Snake IO</div>
+                    <div class=»game-card» onclick=»startGame('tanks')»>🚜 Tanks 2D</div>
+                    <div class=»game-card» onclick=»startGame('arena')»>⚔️ Cyber Arena</div>
+                </div>
+                <div id=»game-canvas-container» class=»hidden»>
+                    <div id=»game-lobby» class=»lobby-card hidden»>
+                        <h3>Игровое Лобби</h3>
+                        <div id=»lobby-players»></div>
+                        <button id=»ready-btn» class=»btn-primary»>Готов</button>
+                    </div>
+                    <canvas id=»gameCanvas» width=»800» height=»600»></canvas>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!—Нижняя навигация (для мобильных телефонов) 
+    <nav class=»mobile-tab-bar»>
+        <button data-tab=»today» class=»tab-item active»>📅<span>Сегодня</span></button>
+        <button data-tab=»schedule» class=»tab-item»>🗓️<span>Неделя</span></button>
+        <button data-tab=»homework» class=»tab-item»>📝<span>ДЗ</span></button>
+        <button data-tab=»chat» id=»mobile-nav-chat-btn» class=»tab-item»>💬<span>Чат</span></button>
+        <button data-tab=»games» class=»tab-item»>🎮<span>Игры</span></button>
+    </nav>
+
+    <script src=»/app.js»></script>
+    <script src=»/games.js»></script>
+</body>
+</html>

@@ -1,0 +1,145 @@
+:root {
+    --ios-bg: #000000;
+    --ios-card-bg: rgba(28, 28, 30, 0.75);
+    --ios-accent: #0A84FF;
+    --ios-red: #FF453A;
+    --ios-green: #30D158;
+    --ios-text: #FFFFFF;
+    --ios-subtext: #8E8E93;
+    --ios-border: rgba(255, 255, 255, 0.15);
+    --ios-blur: blur(20px);
+}
+
+•	{
+    Box-sizing: border-box;
+    Margin: 0;
+    Padding: 0;
+    Font-family: -apple-system, BlinkMacSystemFont, «SF Pro Text», «SF Pro Display», sans-serif;
+    -webkit-tap-highlight-color: transparent;
+}
+
+Body {
+    Background-color: var(--ios-bg);
+    Color: var(--ios-text);
+    Overflow-x: hidden;
+}
+
+/* Общие контейнеры */
+.app-layout {
+    Display: flex;
+    Min-height: 100vh;
+}
+
+.content-area {
+    Flex: 1;
+    Padding: 20px;
+    Padding-bottom: 90px; /* Отступ под мобильную панель */
+}
+
+/* Иконка 3 Layers */
+.icon-3layers {
+    Width: 28px;
+    Height: 28px;
+    Fill: none;
+    Stroke: var(--ios-accent);
+    Stroke-width: 2;
+    Stroke-linecap: round;
+    Stroke-linejoin: round;
+}
+
+/* Карточки уроков (Отмены и Замены) */
+.lesson-card {
+    Background: var(--ios-card-bg);
+    Backdrop-filter: var(--ios-blur);
+    Border-radius: 16px;
+    Padding: 16px;
+    Margin-bottom: 12px;
+    Border: 1px solid var(--ios-border);
+    Transition: transform 0.2s ease;
+}
+
+/* 1. ОТМЕНА УРОКА — Темно-черная карточка */
+.lesson-card.canceled {
+    Background: #050505 !important;
+    Border: 1px solid #222 !important;
+    Opacity: 0.8;
+}
+
+.badge-canceled {
+    Background: #222;
+    Color: var(--ios-subtext);
+    Font-size: 11px;
+    Font-weight: bold;
+    Padding: 4px 8px;
+    Border-radius: 6px;
+}
+
+/* 2. ЗАМЕНА УРОКА — Красная рамка/акцент */
+.lesson-card.replaced {
+    Border: 2px solid var(--ios-red) !important;
+    Background: rgba(255, 69, 58, 0.1);
+}
+
+.badge-replacement {
+    Background: var(--ios-red);
+    Color: #FFF;
+    Font-size: 11px;
+    Font-weight: bold;
+    Padding: 4px 8px;
+    Border-radius: 6px;
+}
+
+/* Адаптированность (ПК vs Мобильные) */
+.desktop-sidebar {
+    Width: 260px;
+    Background: rgba(20, 20, 22, 0.9);
+    Backdrop-filter: var(--ios-blur);
+    Border-right: 1px solid var(--ios-border);
+    Padding: 24px;
+    Display: flex;
+    Flex-direction: column;
+    Justify-content: space-between;
+}
+
+.mobile-tab-bar {
+    Display: none;
+}
+
+/* Для мобильных экранов */
+@media (max-width: 768px) {
+    .desktop-sidebar {
+        Display: none;
+    }
+    .mobile-tab-bar {
+        Display: flex;
+        Position: fixed;
+        Bottom: 0;
+        Left: 0;
+        Right: 0;
+        Height: 70px;
+        Background: rgba(20, 20, 20, 0.85);
+        Backdrop-filter: var(--ios-blur);
+        Border-top: 1px solid var(--ios-border);
+        Justify-content: space-around;
+        Align-items: center;
+        z-index: 999;
+    }
+    .tab-item {
+        Background: none;
+        Border: none;
+        Color: var(--ios-subtext);
+        Display: flex;
+        Flex-direction: column;
+        Align-items: center;
+        Font-size: 18px;
+    }
+    .tab-item span {
+        Font-size: 10px;
+        Margin-top: 2px;
+    }
+    .tab-item.active {
+        Color: var(--ios-accent);
+    }
+}
+
+.hidden { display: none !important; }
