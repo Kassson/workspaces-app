@@ -1,285 +1,161 @@
-require('dotenv').config();
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const { Pool } = require('pg');
-const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
-const cron = require('node-cron');
-const path = require('path');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
-
-app.use(express.json({ limit: '10mb' }));
-
-// --- РАЗДАЧА СТАТИЧЕСКИХ ФАЙЛОВ (CSS, JS, КАРТИНКИ) ---
-app.use(express.static(path.join(__dirname, 'public')));
-app.use('/teach', express.static(path.join(__dirname, 'public/teach')));
-
-// Главная страница для студентов
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-// Кабинет преподавателя
-app.get('/teach*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public/teach', 'index.html'));
-});
-
-// --- ПОДКЛЮЧЕНИЕ К БАЗЕ ДАННЫХ ---
-const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false }
-});
-
-const JWT_SECRET = process.env.JWT_SECRET || 'secret';
-
-// --- БЕЗОПАСНАЯ ИНИЦИАЛИЗАЦИЯ ROOT TEACHER ИЗ ПЕРЕМЕННЫХ ОКРУЖЕНИЯ ---
-async function initRootTeacher() {
-    const rootUser = process.env.ROOT_TEACHER_USER;
-    const rootPass = process.env.ROOT_TEACHER_PASS;
-
-    if (!rootUser || !rootPass) {
-        console.log('⚠️ ROOT_TEACHER_USER или ROOT_TEACHER_PASS не заданы в Environment Variables на Render!');
-        return;
-    }
-
-    try {
-        const hashedPassword = await bcrypt.hash(rootPass, 10);
-        await pool.query(`
-            INSERT INTO users (username, full_name, email, password_hash, is_teacher, is_teacher_verified)
-            VALUES ($1, 'Главный Администратор', 'root@workspaces.edu', $2, TRUE, TRUE)
-            ON CONFLICT (username) 
-            DO UPDATE SET password_hash = $2, is_teacher = TRUE, is_teacher_verified = TRUE;
-        `, [rootUser, hashedPassword]);
-        console.log(`✅ Root Teacher (${rootUser}) успешно синхронизирован с базой данных!`);
-    } catch (err) {
-        console.error('❌ Ошибка инициализации Root Teacher:', err.message);
-    }
+:root {
+    --bg-main: #F2F2F7;
+    --card-bg: rgba(255, 255, 255, 0.82);
+    --card-border: rgba(255, 255, 255, 0.6);
+    --text-primary: #000000;
+    --text-secondary: #8E8E93;
+    --input-bg: rgba(230, 230, 235, 0.7);
+    --accent-blue: #007AFF;
+    --accent-blue-hover: #0056B3;
+    --glass-shadow: 0 12px 40px rgba(0, 0, 0, 0.08);
 }
 
-initRootTeacher();
-
-const authenticateToken = (req, res, next) => {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
-    if (!token) return res.status(401).json({ error: 'Необходима авторизация' });
-
-    jwt.verify(token, JWT_SECRET, (err, user) => {
-        if (err) return res.status(403).json({ error: 'Сессия истекла' });
-        req.user = user;
-        next();
-    });
-};
-
-// --- SELF-PING (Сервер не засыпает) ---
-app.get('/api/ping', (req, res) => res.json({ status: 'ok', time: new Date() }));
-
-setInterval(() => {
-    const serverUrl = process.env.SERVER_URL || 'http://localhost:3000';
-    http.get(`${serverUrl}/api/ping`, () => {}).on('error', () => {});
-}, 10 * 60 * 1000);
-
-// --- АВТООЧИСТКА ЧАТА (Раз в сутки) ---
-cron.schedule('0 0 * * *', async () => {
-    try {
-        await pool.query("DELETE FROM chat_messages WHERE created_at < NOW() - INTERVAL '30 days'");
-    } catch (err) {
-        console.error('[Cleanup Error]:', err);
-    }
-});
-
-// --- ЦЕНЗУРА И ФИЛЬТР НИКНЕЙМОВ ---
-const FORBIDDEN_NAMES = ['гитлер', 'hitler', 'адольф', 'adolf', 'сталин', 'stalin', 'нацист', 'админ', 'administrator', 'root'];
-function isForbiddenUsername(username) {
-    if (!username) return true;
-    const lower = username.toLowerCase().replace(/[\s_.-]/g, '');
-    for (const forbidden of FORBIDDEN_NAMES) {
-        if (lower.includes(forbidden)) return true;
-    }
-    const profanityRegex = /(хуй|пизд|ебат|бля|сук|мудак|чмо|cock|fuck|bitch|cunt|nigger|nigga)/i;
-    return profanityRegex.test(lower);
+[data-theme=»dark»] {
+    --bg-main: #000000;
+    --card-bg: rgba(28, 28, 30, 0.82);
+    --card-border: rgba(255, 255, 255, 0.15);
+    --text-primary: #FFFFFF;
+    --text-secondary: #98989D;
+    --input-bg: rgba(44, 44, 46, 0.85);
+    --accent-blue: #0A84FF;
+    --accent-blue-hover: #409CFF;
+    --glass-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
 }
 
-// --- API НАСТРОЕК ---
-app.get('/api/settings', async (req, res) => {
-    try {
-        const result = await pool.query('SELECT * FROM system_settings WHERE id = 1');
-        res.json(result.rows[0] || {});
-    } catch (err) {
-        res.status(500).json({ error: 'Ошибка получения настроек' });
-    }
-});
+•	{
+    Box-sizing: border-box;
+    Margin: 0;
+    Padding: 0;
+    Font-family: 'Inter', -apple-system, BlinkMacSystemFont, «SF Pro Text», sans-serif;
+    Transition: background-color 0.25s ease, color 0.25s ease;
+}
 
-app.post('/api/settings/update', authenticateToken, async (req, res) => {
-    try {
-        const userRes = await pool.query('SELECT username FROM users WHERE id = $1', [req.user.userId]);
-        const rootUser = process.env.ROOT_TEACHER_USER || 'root_teacher';
-        
-        if (!userRes.rows.length || userRes.rows[0].username !== rootUser) {
-            return res.status(403).json({ error: 'Только Root Teacher имеет доступ' });
-        }
+Body {
+    Background-color: var(--bg-main);
+    Color: var(--text-primary);
+    Min-height: 100vh;
+    Display: flex;
+    Align-items: center;
+    Justify-content: center;
+}
 
-        const { remote_mode, maintenance_mode, exams_mode, private_chat_mode, global_announcement } = req.body;
-        await pool.query(`
-            UPDATE system_settings 
-            SET remote_mode = $1, maintenance_mode = $2, exams_mode = $3, private_chat_mode = $4, global_announcement = $5
-            WHERE id = 1
-        `, [remote_mode, maintenance_mode, exams_mode, private_chat_mode, global_announcement]);
+.theme-toggle-btn {
+    Position: fixed;
+    Top: 20px;
+    Right: 20px;
+    Background: var(--card-bg);
+    Border: 1px solid var(--card-border);
+    Backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    Width: 44px;
+    Height: 44px;
+    Border-radius: 50%;
+    Cursor: pointer;
+    Display: flex;
+    Align-items: center;
+    Justify-content: center;
+    Box-shadow: var(--glass-shadow);
+    z-index: 1000;
+    color: var(--text-primary);
+    font-size: 1.2rem;
+}
 
-        io.emit('settings_updated', req.body);
-        res.json({ success: true });
-    } catch (err) {
-        res.status(500).json({ error: 'Ошибка обновления' });
-    }
-});
+.theme-toggle-btn:hover {
+    Transform: scale(1.05);
+}
 
-// --- РЕГИСТРАЦИЯ СТУДЕНТОВ ---
-app.post('/api/auth/register-student', async (req, res) => {
-    const { username, fullName, email, password } = req.body;
-    if (isForbiddenUsername(username) || isForbiddenUsername(fullName)) {
-        return res.status(400).json({ error: 'Недопустимое имя или никнейм' });
-    }
-    try {
-        const hashedPassword = await bcrypt.hash(password, 10);
-        const newUser = await pool.query(
-            'INSERT INTO users (username, full_name, email, password_hash) VALUES ($1, $2, $3, $4) RETURNING id, username, full_name, email',
-            [username, fullName, email, hashedPassword]
-        );
-        const token = jwt.sign({ userId: newUser.rows[0].id }, JWT_SECRET, { expiresIn: '30d' });
-        res.json({ token, user: newUser.rows[0] });
-    } catch (err) {
-        res.status(400).json({ error: 'Пользователь уже существует' });
-    }
-});
+.auth-container {
+    Width: 90%;
+    Max-width: 380px;
+    Padding: 40px 28px;
+    Background: var(--card-bg);
+    Backdrop-filter: blur(30px);
+    -webkit-backdrop-filter: blur(30px);
+    Border: 1px solid var(--card-border);
+    Border-radius: 28px;
+    Box-shadow: var(--glass-shadow);
+    Text-align: center;
+    Display: flex;
+    Flex-direction: column;
+    Align-items: center;
+}
 
-// --- РЕГИСТРАЦИЯ ПРЕПОДАВАТЕЛЕЙ ---
-app.post('/api/auth/register-teacher', async (req, res) => {
-    const { username, fullName, email, password } = req.body;
-    if (isForbiddenUsername(username) || isForbiddenUsername(fullName)) {
-        return res.status(400).json({ error: 'Недопустимое имя или никнейм' });
-    }
-    try {
-        const hashedPassword = await bcrypt.hash(password, 10);
-        const code = 'T-' + Math.floor(1000 + Math.random() * 9000);
-        const newUser = await pool.query(
-            `INSERT INTO users (username, full_name, email, password_hash, is_teacher, is_teacher_verified, verification_code)
-             VALUES ($1, $2, $3, $4, TRUE, FALSE, $5) RETURNING id, username, full_name, verification_code`,
-            [username, fullName, email, hashedPassword, code]
-        );
-        const token = jwt.sign({ userId: newUser.rows[0].id }, JWT_SECRET, { expiresIn: '30d' });
-        res.json({ token, user: newUser.rows[0] });
-    } catch (err) {
-        res.status(400).json({ error: 'Ошибка регистрации преподавателя' });
-    }
-});
+.app-logo {
+    Width: 64px;
+    Height: 64px;
+    Background: linear-gradient(135deg, #007AFF 0%, #5856D6 100%);
+    Border-radius: 16px;
+    Display: flex;
+    Align-items: center;
+    Justify-content: center;
+    Margin-bottom: 16px;
+    Box-shadow: 0 4px 18px rgba(0, 122, 255, 0.3);
+}
 
-// --- АВТОРИЗАЦИЯ ---
-app.post('/api/auth/login', async (req, res) => {
-    const { login, password } = req.body;
-    try {
-        const userRes = await pool.query('SELECT * FROM users WHERE email = $1 OR username = $1', [login]);
-        if (!userRes.rows.length) return res.status(400).json({ error: 'Неверный логин или пароль' });
+.app-logo svg {
+    Width: 34px;
+    Height: 34px;
+    Fill: #FFFFFF;
+}
 
-        const user = userRes.rows[0];
-        const validPassword = await bcrypt.compare(password, user.password_hash);
-        if (!validPassword) return res.status(400).json({ error: 'Неверный логин или пароль' });
+.app-title {
+    Font-size: 1.5rem;
+    Font-weight: 700;
+    Letter-spacing: -0.4px;
+    Margin-bottom: 4px;
+}
 
-        const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '30d' });
-        res.json({ 
-            token, 
-            user: { 
-                id: user.id, 
-                username: user.username, 
-                fullName: user.full_name, 
-                isTeacher: user.is_teacher, 
-                isTeacherVerified: user.is_teacher_verified,
-                verificationCode: user.verification_code 
-            } 
-        });
-    } catch (err) {
-        res.status(500).json({ error: 'Ошибка сервера' });
-    }
-});
+.app-subtitle {
+    Font-size: 0.88rem;
+    Color: var(--text-secondary);
+    Margin-bottom: 24px;
+}
 
-// --- ВЕРИФИКАЦИЯ УЧИТЕЛЕЙ ---
-app.get('/api/teach/pending-verifications', authenticateToken, async (req, res) => {
-    try {
-        const list = await pool.query(
-            'SELECT id, username, full_name, email, verification_code, created_at FROM users WHERE is_teacher = TRUE AND is_teacher_verified = FALSE'
-        );
-        res.json(list.rows);
-    } catch (err) {
-        res.status(500).json({ error: 'Ошибка получения списка' });
-    }
-});
+.form-group {
+    Width: 100%;
+    Margin-bottom: 14px;
+}
 
-app.post('/api/teach/verify', authenticateToken, async (req, res) => {
-    const { teacherId } = req.body;
-    try {
-        await pool.query('UPDATE users SET is_teacher_verified = TRUE, verified_by = $1 WHERE id = $2', [req.user.userId, teacherId]);
-        res.json({ success: true });
-    } catch (err) {
-        res.status(500).json({ error: 'Ошибка верификации' });
-    }
-});
+.form-control {
+    Width: 100%;
+    Height: 46px;
+    Background: var(--input-bg);
+    Border: 1px solid transparent;
+    Border-radius: 12px;
+    Padding: 0 16px;
+    Font-size: 0.95rem;
+    Color: var(--text-primary);
+    Outline: none;
+}
 
-// --- SOCKET.IO ЛОББИ И ИГРЫ ---
-const gameRooms = {};
-io.on('connection', (socket) => {
-    socket.on('join_game_lobby', ({ gameId, spaceId, userId, username }) => {
-        const roomId = `${spaceId}_${gameId}`;
-        socket.join(roomId);
-        socket.roomId = roomId;
-        socket.userId = userId;
+.form-control:focus {
+    Border-color: var(--accent-blue);
+}
 
-        if (!gameRooms[roomId]) {
-            gameRooms[roomId] = { gameId, spaceId, status: 'lobby', players: {} };
-        }
+.btn-primary {
+    Width: 100%;
+    Height: 46px;
+    Background: var(--accent-blue);
+    Color: #FFFFFF;
+    Border: none;
+    Border-radius: 12px;
+    Font-size: 0.95rem;
+    Font-weight: 600;
+    Cursor: pointer;
+    Margin-top: 8px;
+}
 
-        gameRooms[roomId].players[userId] = {
-            id: userId, username, ready: false, isGhost: false, x: 100, y: 100
-        };
+.btn-primary:hover {
+    Background: var(--accent-blue-hover);
+}
 
-        io.to(roomId).emit('lobby_state_update', gameRooms[roomId]);
-    });
-
-    socket.on('player_toggle_ready', () => {
-        const room = gameRooms[socket.roomId];
-        if (room && room.players[socket.userId]) {
-            room.players[socket.userId].ready = !room.players[socket.userId].ready;
-            const allPlayers = Object.values(room.players);
-            const allReady = allPlayers.length >= 2 && allPlayers.every(p => p.ready);
-
-            if (allReady && room.status === 'lobby') {
-                room.status = 'playing';
-                io.to(socket.roomId).emit('game_start_countdown', { duration: 3 });
-            } else {
-                io.to(socket.roomId).emit('lobby_state_update', room);
-            }
-        }
-    });
-
-    socket.on('player_died', () => {
-        const room = gameRooms[socket.roomId];
-        if (room && room.players[socket.userId]) {
-            room.players[socket.userId].isGhost = true;
-            io.to(socket.roomId).emit('player_became_ghost', { userId: socket.userId });
-        }
-    });
-
-    socket.on('disconnect', () => {
-        if (socket.roomId && gameRooms[socket.roomId]) {
-            delete gameRooms[socket.roomId].players[socket.userId];
-            io.to(socket.roomId).emit('lobby_state_update', gameRooms[socket.roomId]);
-        }
-    });
-});
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`🚀 Сервер Workspaces запущен на порту ${PORT}`));
-
-
+.teacher-link-btn {
+    Margin-top: 18px;
+    Color: var(--accent-blue);
+    Font-size: 0.88rem;
+    Text-decoration: none;
+    Font-weight: 500;
+}
 
