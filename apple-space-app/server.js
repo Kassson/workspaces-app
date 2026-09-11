@@ -1,23 +1,23 @@
-require('dotenv').config();
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const { Pool } = require('pg');
-const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
-const cron = require('node-cron');
-const path = require('path');
+Require('dotenv').config();
+Const express = require('express');
+Const http = require('http');
+Const { Server } = require('socket.io');
+Const { Pool } = require('pg');
+Const jwt = require('jsonwebtoken');
+Const bcrypt = require('bcryptjs');
+Const cron = require('node-cron');
+Const path = require('path');
 
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
+Const app = express();
+Const server = http.createServer(app);
+Const io = new Server(server, { cors: { origin: «*» } });
 
-app.use(express.json({ limit: '10mb' }));
+App.use(express.json({ limit: '10mb' }));
 
-app.use(express.static(path.join(__dirname, 'public')));
-app.use('/teach', express.static(path.join(__dirname, 'public/teach')));
+App.use(express.static(path.join(__dirname, 'public')));
+App.use('/teach', express.static(path.join(__dirname, 'public/teach')));
 
-const pool = new Pool({
+Const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false }
 });
@@ -56,6 +56,7 @@ Cron.schedule('0 0 * * *', async () => {
 // --- ЦЕНЗУРА И ФИЛЬТР НИКНЕЙМОВ ---
 Const FORBIDDEN_NAMES = ['гитлер', 'hitler', 'адольф', 'adolf', 'сталин', 'stalin', 'нацист', 'админ', 'administrator', 'root'];
 Function isForbiddenUsername(username) {
+    If (!username) return true;
     Const lower = username.toLowerCase().replace(/[\s_.-]/g, '');
     For (const forbidden of FORBIDDEN_NAMES) {
         If (lower.includes(forbidden)) return true;
@@ -68,7 +69,7 @@ Function isForbiddenUsername(username) {
 App.get('/api/settings', async (req, res) => {
     Try {
         Const result = await pool.query('SELECT * FROM system_settings WHERE id = 1');
-        Res.json(result.rows[0]);
+        Res.json(result.rows[0] || {});
     } catch (err) {
         Res.status(500).json({ error: 'Ошибка получения настроек' });
     }
@@ -95,7 +96,7 @@ App.post('/api/settings/update', authenticateToken, async (req, res) => {
     }
 });
 
-// --- РЕГИСТРАЦИЯ СТУДЕНТОВ (Без отчества) ---
+// --- РЕГИСТРАЦИЯ СТУДЕНТОВ ---
 App.post('/api/auth/register-student', async (req, res) => {
     Const { username, fullName, email, password } = req.body;
     If (isForbiddenUsername(username) || isForbiddenUsername(fullName)) {
@@ -114,7 +115,7 @@ App.post('/api/auth/register-student', async (req, res) => {
     }
 });
 
-// --- РЕГИСТРАЦИЯ ПРЕПОДАВАТЕЛЕЙ (ФИО полностью) ---
+// --- РЕГИСТРАЦИЯ ПРЕПОДАВАТЕЛЕЙ ---
 App.post('/api/auth/register-teacher', async (req, res) => {
     Const { username, fullName, email, password } = req.body;
     If (isForbiddenUsername(username) || isForbiddenUsername(fullName)) {
@@ -239,3 +240,6 @@ Io.on('connection', (socket) => {
 
 Const PORT = process.env.PORT || 3000;
 Server.listen(PORT, () => console.log(`🚀 Сервер Workspaces запущен на порту ${PORT}`));
+
+
+
