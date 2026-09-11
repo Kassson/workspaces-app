@@ -14,15 +14,53 @@ const io = new Server(server, { cors: { origin: "*" } });
 
 app.use(express.json({ limit: '10mb' }));
 
+// --- РАЗДАЧА СТАТИЧЕСКИХ ФАЙЛОВ (CSS, JS, КАРТИНКИ) ---
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/teach', express.static(path.join(__dirname, 'public/teach')));
 
+// Главная страница для студентов
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Кабинет преподавателя
+app.get('/teach*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public/teach', 'index.html'));
+});
+
+// --- ПОДКЛЮЧЕНИЕ К БАЗЕ ДАННЫХ ---
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false }
 });
 
 const JWT_SECRET = process.env.JWT_SECRET || 'secret';
+
+// --- БЕЗОПАСНАЯ ИНИЦИАЛИЗАЦИЯ ROOT TEACHER ИЗ ПЕРЕМЕННЫХ ОКРУЖЕНИЯ ---
+async function initRootTeacher() {
+    const rootUser = process.env.ROOT_TEACHER_USER;
+    const rootPass = process.env.ROOT_TEACHER_PASS;
+
+    if (!rootUser || !rootPass) {
+        console.log('⚠️ ROOT_TEACHER_USER или ROOT_TEACHER_PASS не заданы в Environment Variables на Render!');
+        return;
+    }
+
+    try {
+        const hashedPassword = await bcrypt.hash(rootPass, 10);
+        await pool.query(`
+            INSERT INTO users (username, full_name, email, password_hash, is_teacher, is_teacher_verified)
+            VALUES ($1, 'Главный Администратор', 'root@workspaces.edu', $2, TRUE, TRUE)
+            ON CONFLICT (username) 
+            DO UPDATE SET password_hash = $2, is_teacher = TRUE, is_teacher_verified = TRUE;
+        `, [rootUser, hashedPassword]);
+        console.log(`✅ Root Teacher (${rootUser}) успешно синхронизирован с базой данных!`);
+    } catch (err) {
+        console.error('❌ Ошибка инициализации Root Teacher:', err.message);
+    }
+}
+
+initRootTeacher();
 
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
@@ -36,7 +74,7 @@ const authenticateToken = (req, res, next) => {
     });
 };
 
-// --- SELF-PING (Сервер никогда не засыпает) ---
+// --- SELF-PING (Сервер не засыпает) ---
 app.get('/api/ping', (req, res) => res.json({ status: 'ok', time: new Date() }));
 
 setInterval(() => {
@@ -78,7 +116,9 @@ app.get('/api/settings', async (req, res) => {
 app.post('/api/settings/update', authenticateToken, async (req, res) => {
     try {
         const userRes = await pool.query('SELECT username FROM users WHERE id = $1', [req.user.userId]);
-        if (!userRes.rows.length || userRes.rows[0].username !== 'root_teacher') {
+        const rootUser = process.env.ROOT_TEACHER_USER || 'root_teacher';
+        
+        if (!userRes.rows.length || userRes.rows[0].username !== rootUser) {
             return res.status(403).json({ error: 'Только Root Teacher имеет доступ' });
         }
 
