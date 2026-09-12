@@ -20,12 +20,12 @@ function applyGlobalSettings(currentUser) {
     }
     // Технические работы
     const maint = document.getElementById('maintenanceScreen');
-    const isPrivileged = currentUser && currentUser.isTeacher; // преподаватели и root сохраняют доступ
+    const isPrivileged = currentUser && currentUser.isTeacher;
     if (maint) {
         if (systemSettings.maintenance_mode && !isPrivileged) maint.classList.add('show');
         else maint.classList.remove('show');
     }
-    // Экзамены — блокировка отправки для студентов (визуально, сервер тоже проверяет)
+    // Экзамены
     document.querySelectorAll('.chat-input-row').forEach(el => {
         el.classList.toggle('hidden', !!systemSettings.exams_mode && currentUser && !currentUser.isTeacher);
     });
@@ -66,7 +66,15 @@ async function renderScheduleTab(container, spaceId, isAdmin) {
         const todayDow = isoDowFromDate(today);
 
         let html = `<h1 class="page-title">Расписание</h1>`;
-        if (isAdmin) html += `<button class="btn-small" onclick="openAddLessonSheet('${spaceId}')" style="margin-bottom:14px;">➕ Добавить урок</button>`;
+        if (isAdmin) {
+            html += `
+                <div class="schedule-actions">
+                    <button class="btn-small" onclick="openAddLessonSheet('${spaceId}')">➕ Добавить урок</button>
+                    <button class="btn-small" onclick="openScheduleImport()">📥 Импорт расписания</button>
+                    <button class="btn-small" onclick="exportSchedule()">📤 Экспорт TXT</button>
+                    <button class="btn-small" onclick="exportScheduleICS()">📅 Экспорт .ics</button>
+                </div>`;
+        }
         html += `<div class="day-tabs">`;
         for (let d = 1; d <= 7; d++) {
             const cls = d === todayDow ? 'today' : (d < todayDow ? 'past' : '');
@@ -89,7 +97,6 @@ function renderScheduleDay(dow, spaceId) {
     const { lessons, overrides, isAdmin } = window.__scheduleData;
     const today = new Date();
     const todayDow = isoDowFromDate(today);
-    // ближайшая дата для этого дня недели (для поиска override)
     const diff = dow - todayDow;
     const targetDate = new Date(today); targetDate.setDate(today.getDate() + diff);
     const dateStr = ymd(targetDate);
@@ -148,6 +155,7 @@ function homeworkCardHtml(hw, isAdmin, spaceId) {
         </div>
         <div class="hw-title">${escapeHtml(hw.title)}</div>
         <div class="hw-actions">
+            <button class="btn-small hw-stats-btn" onclick="openHomeworkStats('${hw.id}')">📊 Статистика</button>
             ${isAdmin ? `
                 <button class="btn-small" onclick="viewCompletions('${hw.id}')">👥 Кто сдал</button>
                 <button class="btn-small" onclick="deleteHomework('${hw.id}','${spaceId}')">🗑 Удалить</button>
@@ -195,6 +203,94 @@ async function viewCompletions(id) {
     } catch (e) { alert(e.error || 'Ошибка'); }
 }
 function currentHwContainerId() { return document.getElementById('tab-hw') ? 'tab-hw' : 'tab-homework'; }
+
+// ---------- СТАТИСТИКА ДЗ (круговая диаграмма) ----------
+async function openHomeworkStats(homeworkId) {
+    if (!currentSpace) return;
+    const root = document.getElementById('dynamicSheetRoot');
+    root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div><p class="empty-state">Загрузка…</p></div>`;
+    document.getElementById('sheetOverlay').classList.add('show');
+    try {
+        const s = await apiGet(`/api/homework/${homeworkId}/stats`);
+        const size = 140, stroke = 18, r = (size - stroke) / 2, c = 2 * Math.PI * r;
+        const dash = (s.percentage / 100) * c;
+        let html = `
+            <h2 class="app-title" style="font-size:1.3rem;">📊 Статистика ДЗ</h2>
+            <div style="text-align:center; margin:14px 0;">
+                <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="transform:rotate(-90deg);">
+                    <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="var(--card-border)" stroke-width="${stroke}"></circle>
+                    <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="var(--success)" stroke-width="${stroke}"
+                            stroke-dasharray="${dash} ${c}" stroke-linecap="round"></circle>
+                </svg>
+                <div style="margin-top:-95px; margin-bottom:60px; font-size:1.6rem; font-weight:700;">${s.percentage}%</div>
+                <p style="color:var(--text-secondary);">Выполнили: ${s.completed} из ${s.total}</p>
+            </div>
+        `;
+        if (s.canSeeStudents) {
+            if (s.students.length) {
+                html += `<h3>Выполнили:</h3><div class="settings-card">`;
+                html += s.students.map(st => `
+                    <div class="member-row">
+                        <div class="member-avatar">${escapeHtml(st.avatar_emoji || '👤')}</div>
+                        <div class="member-info">
+                            <div class="member-name">${escapeHtml(st.full_name)}</div>
+                            <div class="member-username">@${escapeHtml(st.username)}</div>
+                        </div>
+                        <span style="font-size:0.75rem; color:var(--text-secondary);">${new Date(st.completed_at).toLocaleDateString('ru-RU')}</span>
+                    </div>
+                `).join('');
+                html += `</div>`;
+            } else {
+                html += `<p class="empty-state">Пока никто не выполнил</p>`;
+            }
+        }
+        html += `<button class="btn-secondary" style="margin-top:14px;" onclick="closeDynamicSheet()">Закрыть</button>`;
+        root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div>${html}</div>`;
+    } catch (e) {
+        root.innerHTML = `<div class="sheet show" id="dynamicSheet"><p class="empty-state">Ошибка: ${escapeHtml(e.error || '')}</p><button class="btn-secondary" onclick="closeDynamicSheet()">Закрыть</button></div>`;
+    }
+}
+
+// ---------- ИМПОРТ / ЭКСПОРТ РАСПИСАНИЯ ----------
+function openScheduleImport() {
+    if (!currentSpace) return alert('Выберите группу');
+    showFormSheet('📥 Импорт расписания', `
+        <p style="color:var(--text-secondary); font-size:0.85rem; text-align:left;">
+            Вставьте расписание из Excel/Google Sheets.<br>
+            Формат строки: <code>ДЕНЬ&nbsp;&nbsp;№&nbsp;&nbsp;Предмет&nbsp;&nbsp;Кабинет</code>
+        </p>
+        <div class="form-group">
+            <textarea name="text" class="form-control" rows="12" placeholder="ПОНЕДЕЛЬНИК&#9;1&#9;Биология&#9;8&#10;ПОНЕДЕЛЬНИК&#9;2&#9;Физкультура&#9;с/з&#10;..." required></textarea>
+        </div>
+        <div class="form-group" style="display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" name="replaceAll" id="replaceAllChk" checked>
+            <label for="replaceAllChk" style="margin:0;">Заменить всё расписание</label>
+        </div>
+    `, async (fd) => {
+        const r = await apiPost('/api/schedule/import', {
+            spaceId: currentSpace.id,
+            text: fd.get('text'),
+            replaceAll: fd.get('replaceAll') === 'on'
+        });
+        let msg = `✅ Импортировано уроков: ${r.imported}`;
+        if (r.skipped && r.skipped.length) msg += `\n⏭️ Пропущено пустых строк: ${r.skipped.length}`;
+        if (r.errors && r.errors.length) msg += `\n⚠️ Ошибок: ${r.errors.length}\n${r.errors.slice(0, 5).join('\n')}`;
+        alert(msg);
+        refreshCurrentTab();
+    }, 'Импортировать');
+}
+
+function exportSchedule() {
+    if (!currentSpace) return alert('Выберите группу');
+    const token = localStorage.getItem('token');
+    window.open(`/api/schedule/${currentSpace.id}/export?token=${encodeURIComponent(token)}`, '_blank');
+}
+
+function exportScheduleICS() {
+    if (!currentSpace) return alert('Выберите группу');
+    const token = localStorage.getItem('token');
+    window.open(`/api/schedule/${currentSpace.id}/ics?token=${encodeURIComponent(token)}`, '_blank');
+}
 
 // ---------- ЧАТ ----------
 let chatJoinedSpace = null;
@@ -264,118 +360,7 @@ function sendChatMessage(spaceId) {
 }
 function deleteChatMessage(id) { socket.emit('delete_message', { messageId: id }); }
 
-// ---------- УНИВЕРСАЛЬНАЯ ФОРМА В ШТОРКЕ (для преподавателя) ----------
-function showFormSheet(title, bodyHtml, onSubmit, submitLabel = 'Сохранить') {
-    const root = document.getElementById('dynamicSheetRoot');
-    root.innerHTML = `
-        <div class="sheet show" id="dynamicSheet">
-            <div class="sheet-handle"></div>
-            <h2 class="app-title" style="font-size:1.3rem;">${title}</h2>
-            <form id="dynamicSheetForm">${bodyHtml}
-                <button type="submit" class="btn-primary">${submitLabel}</button>
-                <button type="button" class="btn-secondary" onclick="closeDynamicSheet()">Отмена</button>
-            </form>
-        </div>`;
-    document.getElementById('sheetOverlay').classList.add('show');
-    document.getElementById('dynamicSheetForm').onsubmit = async (e) => {
-        e.preventDefault();
-        try { await onSubmit(new FormData(e.target)); closeDynamicSheet(); }
-        catch (err) { alert(err.error || 'Ошибка сохранения'); }
-    };
-}
-function closeDynamicSheet() {
-    document.getElementById('sheetOverlay').classList.remove('show');
-    document.getElementById('dynamicSheetRoot').innerHTML = '';
-}
-
-function openAddLessonSheet(spaceId) {
-    showFormSheet('Новый урок', `
-        <div class="form-group"><select name="dayOfWeek" class="form-control">
-            ${WEEKDAY_NAMES.slice(1).map((d, i) => `<option value="${i + 1}">${d}</option>`).join('')}
-        </select></div>
-        <div class="form-group"><input name="subjectName" class="form-control" placeholder="Предмет" required></div>
-        <div class="form-group"><input name="classroom" class="form-control" placeholder="Кабинет"></div>
-        <div class="form-group"><input name="teacherName" class="form-control" placeholder="Преподаватель"></div>
-        <div class="form-group" style="display:flex; gap:8px;">
-            <input name="startTime" type="time" class="form-control" required>
-            <input name="endTime" type="time" class="form-control" required>
-        </div>
-    `, async (fd) => {
-        await apiPost('/api/schedule', {
-            spaceId, dayOfWeek: parseInt(fd.get('dayOfWeek')), subjectName: fd.get('subjectName'),
-            classroom: fd.get('classroom'), teacherName: fd.get('teacherName'),
-            startTime: fd.get('startTime'), endTime: fd.get('endTime')
-        });
-        renderScheduleTab(document.getElementById('tab-schedule'), spaceId, true);
-    }, 'Добавить');
-}
-
-function openEditLessonSheet(lesson, dateStr, spaceId) {
-    showFormSheet(`Урок: ${lesson.subject_name}`, `
-        <p class="app-subtitle" style="text-align:left; margin-bottom:10px;">Изменения на ${new Date(dateStr).toLocaleDateString('ru-RU')}</p>
-        <div class="form-group"><label><input type="checkbox" name="isCanceled"> Отменить урок в этот день</label></div>
-        <div class="form-group"><input name="replacementSubject" class="form-control" placeholder="Замена: новый предмет"></div>
-        <div class="form-group"><input name="replacementClassroom" class="form-control" placeholder="Замена: кабинет"></div>
-        <div class="form-group"><input name="replacementTeacher" class="form-control" placeholder="Замена: преподаватель"></div>
-        <hr style="border:0; border-top:1px solid var(--card-border); margin:14px 0;">
-        <button type="button" class="btn-danger" style="width:100%;" onclick="deleteLessonPermanently('${lesson.id}','${spaceId}')">🗑 Удалить урок из расписания навсегда</button>
-    `, async (fd) => {
-        await apiPost('/api/schedule/override', {
-            spaceId, scheduleId: lesson.id, date: dateStr,
-            isCanceled: fd.get('isCanceled') === 'on',
-            replacementSubject: fd.get('replacementSubject') || null,
-            replacementClassroom: fd.get('replacementClassroom') || null,
-            replacementTeacher: fd.get('replacementTeacher') || null
-        });
-        renderScheduleTab(document.getElementById('tab-schedule'), spaceId, true);
-    }, 'Сохранить изменение');
-}
-
-async function deleteLessonPermanently(id, spaceId) {
-    if (!confirm('Удалить урок из расписания насовсем?')) return;
-    try { await apiDelete(`/api/schedule/${id}`); closeDynamicSheet(); renderScheduleTab(document.getElementById('tab-schedule'), spaceId, true); }
-    catch (e) { alert(e.error || 'Ошибка'); }
-}
-
-function openAddHomeworkSheet(spaceId) {
-    showFormSheet('Новое домашнее задание', `
-        <div class="form-group"><input name="subjectName" class="form-control" placeholder="Предмет" required></div>
-        <div class="form-group"><textarea name="title" class="form-control" placeholder="Задание" required rows="3"></textarea></div>
-        <div class="form-group"><input name="dueDate" type="date" class="form-control" required></div>
-    `, async (fd) => {
-        await apiPost('/api/homework', { spaceId, subjectName: fd.get('subjectName'), title: fd.get('title'), dueDate: fd.get('dueDate') });
-        renderHomeworkTab(document.getElementById(currentHwContainerId()), spaceId, true);
-    }, 'Добавить');
-}
-
-function openJoinSpaceForm() {
-    showFormSheet('Присоединиться к группе', `
-        <div class="form-group"><input name="code" class="form-control" placeholder="Код приглашения" required style="text-transform:uppercase;"></div>
-    `, async (fd) => {
-        await apiPost('/api/spaces/join', { code: fd.get('code') });
-        await window.__reloadSpaces?.();
-    }, 'Присоединиться');
-}
-
-function openCreateSpaceForm() {
-    showFormSheet('Новая группа', `
-        <div class="form-group"><input name="name" class="form-control" placeholder="Название группы" required></div>
-    `, async (fd) => {
-        const space = await apiPost('/api/spaces', { name: fd.get('name') });
-        alert(`Группа создана! Код приглашения: ${space.invite_code}`);
-        await window.__reloadSpaces?.();
-    }, 'Создать');
-}
-
-function emptySpaceState() {
-    return `<div class="empty-state">
-        <p>Вы пока не состоите ни в одной группе.</p>
-        <button class="btn-primary" style="max-width:240px;" onclick="openSheet('joinSpaceSheet')">Присоединиться по коду</button>
-    </div>`;
-}
-// ============================================================
-// УЧАСТНИКИ ГРУППЫ
-// ============================================================
+// ---------- УЧАСТНИКИ ГРУППЫ ----------
 const ROLE_LABELS = { admin: '👑 Админ', member: '👤 Участник' };
 
 async function renderMembersTab(container, spaceId, isAdmin) {
@@ -488,9 +473,7 @@ async function kickMember(userId, fullName) {
     } catch (e) { alert(e.error || 'Ошибка'); }
 }
 
-// ============================================================
-// ЧЁРНЫЙ СПИСОК
-// ============================================================
+// ---------- ЧЁРНЫЙ СПИСОК ----------
 async function openBlacklist() {
     if (!currentSpace) return;
     const root = document.getElementById('dynamicSheetRoot');
@@ -549,9 +532,7 @@ async function unmuteMemberFromBlacklist(userId) {
     } catch (e) { alert(e.error || 'Ошибка'); }
 }
 
-// ============================================================
-// СМЕНА КОДА ПРИГЛАШЕНИЯ
-// ============================================================
+// ---------- СМЕНА КОДА ПРИГЛАШЕНИЯ ----------
 async function rotateInviteCode() {
     if (!currentSpace) return;
     if (!confirm('Сменить код приглашения? Старый код перестанет работать.')) return;
@@ -562,106 +543,12 @@ async function rotateInviteCode() {
     } catch (e) { alert(e.error || 'Ошибка'); }
 }
 
-// ============================================================
-// ИМПОРТ / ЭКСПОРТ РАСПИСАНИЯ
-// ============================================================
-function openScheduleImport() {
-    if (!currentSpace) return alert('Выберите группу');
-    showFormSheet('📥 Импорт расписания', `
-        <p style="color:var(--text-secondary); font-size:0.85rem; text-align:left;">
-            Вставьте расписание из Excel/Google Sheets.<br>
-            Формат строки: <code>ДЕНЬ&nbsp;&nbsp;№&nbsp;&nbsp;Предмет&nbsp;&nbsp;Кабинет</code>
-        </p>
-        <div class="form-group">
-            <textarea name="text" class="form-control" rows="12" placeholder="ПОНЕДЕЛЬНИК&#9;1&#9;Биология&#9;8&#10;ПОНЕДЕЛЬНИК&#9;2&#9;Физкультура&#9;с/з&#10;..." required></textarea>
-        </div>
-        <div class="form-group" style="display:flex; align-items:center; gap:8px;">
-            <input type="checkbox" name="replaceAll" id="replaceAllChk" checked>
-            <label for="replaceAllChk" style="margin:0;">Заменить всё расписание</label>
-        </div>
-    `, async (fd) => {
-        const r = await apiPost('/api/schedule/import', {
-            spaceId: currentSpace.id,
-            text: fd.get('text'),
-            replaceAll: fd.get('replaceAll') === 'on'
-        });
-        let msg = `✅ Импортировано уроков: ${r.imported}`;
-        if (r.skipped && r.skipped.length) msg += `\n⏭️ Пропущено пустых строк: ${r.skipped.length}`;
-        if (r.errors && r.errors.length) msg += `\n⚠️ Ошибок: ${r.errors.length}\n${r.errors.join('\n')}`;
-        alert(msg);
-        refreshCurrentTab();
-    }, 'Импортировать');
-}
-
-function exportSchedule() {
-    if (!currentSpace) return alert('Выберите группу');
-    const token = localStorage.getItem('token');
-    window.open(`/api/schedule/${currentSpace.id}/export?token=${encodeURIComponent(token)}`, '_blank');
-}
-
-function exportScheduleICS() {
-    if (!currentSpace) return alert('Выберите группу');
-    const token = localStorage.getItem('token');
-    window.open(`/api/schedule/${currentSpace.id}/ics?token=${encodeURIComponent(token)}`, '_blank');
-}
-
-// ============================================================
-// СТАТИСТИКА ДЗ (КРУГОВАЯ ДИАГРАММА)
-// ============================================================
-async function openHomeworkStats(homeworkId) {
-    if (!currentSpace) return;
-    const root = document.getElementById('dynamicSheetRoot');
-    root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div><p class="empty-state">Загрузка…</p></div>`;
-    document.getElementById('sheetOverlay').classList.add('show');
-    try {
-        const s = await apiGet(`/api/homework/${homeworkId}/stats`);
-        const size = 140, stroke = 18, r = (size - stroke) / 2, c = 2 * Math.PI * r;
-        const dash = (s.percentage / 100) * c;
-        let html = `
-            <h2 class="app-title" style="font-size:1.3rem;">📊 Статистика ДЗ</h2>
-            <div style="text-align:center; margin:14px 0;">
-                <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="transform:rotate(-90deg);">
-                    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--card-border)" stroke-width="${stroke}"></circle>
-                    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--success)" stroke-width="${stroke}"
-                            stroke-dasharray="${dash} ${c}" stroke-linecap="round"></circle>
-                </svg>
-                <div style="margin-top:-95px; margin-bottom:60px; font-size:1.6rem; font-weight:700;">${s.percentage}%</div>
-                <p style="color:var(--text-secondary);">Выполнили: ${s.completed} из ${s.total}</p>
-            </div>
-        `;
-        if (s.canSeeStudents) {
-            if (s.students.length) {
-                html += `<h3>Выполнили:</h3><div class="settings-card">`;
-                html += s.students.map(st => `
-                    <div class="member-row">
-                        <div class="member-avatar">${escapeHtml(st.avatar_emoji || '👤')}</div>
-                        <div class="member-info">
-                            <div class="member-name">${escapeHtml(st.full_name)}</div>
-                            <div class="member-username">@${escapeHtml(st.username)}</div>
-                        </div>
-                        <span style="font-size:0.75rem; color:var(--text-secondary);">${new Date(st.completed_at).toLocaleDateString('ru-RU')}</span>
-                    </div>
-                `).join('');
-                html += `</div>`;
-            } else {
-                html += `<p class="empty-state">Пока никто не выполнил</p>`;
-            }
-        }
-        html += `<button class="btn-secondary" style="margin-top:14px;" onclick="closeDynamicSheet()">Закрыть</button>`;
-        root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div>${html}</div>`;
-    } catch (e) {
-        root.innerHTML = `<div class="sheet show" id="dynamicSheet"><p class="empty-state">Ошибка: ${escapeHtml(e.error || '')}</p><button class="btn-secondary" onclick="closeDynamicSheet()">Закрыть</button></div>`;
-    }
-}
-
-// ============================================================
-// ПРОФИЛЬ: РЕДАКТИРОВАНИЕ
-// ============================================================
+// ---------- ПРОФИЛЬ: РЕДАКТИРОВАНИЕ ----------
 const EMOJI_LIST = [
-    '👤','👨','👩','🧑','👦','👧','👨‍🎓','👩‍🎓','🧑‍🎓','👨‍🏫','👩‍🏫',
-    '😀','😎','🤓','🥳','🤔','😴','🧐','🥸','🤠','😺','🐶','🐱','🦊','🐼','🐨','🦁','🐯','🦉','🐧',
-    '🍕','🍔','🍟','🌮','🍣','🍎','🍓','🍉','☕','🍩','🎂',
-    '⚽','🏀','🎮','🎧','🎸','🎨','🚀','⚡','🔥','⭐','🌈','💎','🎯','🏆','🥇','👑','💡','📚','✏️','🎓'
+    '👤', '👨', '👩', '🧑', '👦', '👧', '👨‍🎓', '👩‍🎓', '🧑‍🎓', '👨‍🏫', '👩‍🏫',
+    '😀', '😎', '🤓', '🥳', '🤔', '😴', '🧐', '🥸', '🤠', '😺', '🐶', '🐱', '🦊', '🐼', '🐨', '🦁', '🐯', '🦉', '🐧',
+    '🍕', '🍔', '🍟', '🌮', '🍣', '🍎', '🍓', '🍉', '☕', '🍩', '🎂',
+    '⚽', '🏀', '🎮', '🎧', '🎸', '🎨', '🚀', '⚡', '🔥', '⭐', '🌈', '💎', '🎯', '🏆', '🥇', '👑', '💡', '📚', '✏️', '🎓'
 ];
 let _selectedEmoji = '👤';
 
@@ -710,10 +597,127 @@ function pickEmoji(e) {
     openEditProfile();
 }
 
-// ============================================================
-// ХЕЛПЕР: ОБНОВИТЬ ТЕКУЩУЮ ВКЛАДКУ
-// ============================================================
+// ---------- УНИВЕРСАЛЬНАЯ ФОРМА В ШТОРКЕ ----------
+function showFormSheet(title, bodyHtml, onSubmit, submitLabel = 'Сохранить') {
+    const root = document.getElementById('dynamicSheetRoot');
+    root.innerHTML = `
+        <div class="sheet show" id="dynamicSheet">
+            <div class="sheet-handle"></div>
+            <h2 class="app-title" style="font-size:1.3rem;">${title}</h2>
+            <form id="dynamicSheetForm">${bodyHtml}
+                <button type="submit" class="btn-primary">${submitLabel}</button>
+                <button type="button" class="btn-secondary" onclick="closeDynamicSheet()">Отмена</button>
+            </form>
+        </div>`;
+    document.getElementById('sheetOverlay').classList.add('show');
+    document.getElementById('dynamicSheetForm').onsubmit = async (e) => {
+        e.preventDefault();
+        try { await onSubmit(new FormData(e.target)); closeDynamicSheet(); }
+        catch (err) { alert(err.error || 'Ошибка сохранения'); }
+    };
+}
+function closeDynamicSheet() {
+    document.getElementById('sheetOverlay').classList.remove('show');
+    document.getElementById('dynamicSheetRoot').innerHTML = '';
+}
+
+function openAddLessonSheet(spaceId) {
+    showFormSheet('Новый урок', `
+        <div class="form-group"><select name="dayOfWeek" class="form-control">
+            ${WEEKDAY_NAMES.slice(1).map((d, i) => `<option value="${i + 1}">${d}</option>`).join('')}
+        </select></div>
+        <div class="form-group"><input name="subjectName" class="form-control" placeholder="Предмет" required></div>
+        <div class="form-group"><input name="classroom" class="form-control" placeholder="Кабинет"></div>
+        <div class="form-group"><input name="teacherName" class="form-control" placeholder="Преподаватель"></div>
+        <div class="form-group" style="display:flex; gap:8px;">
+            <input name="startTime" type="time" class="form-control" required>
+            <input name="endTime" type="time" class="form-control" required>
+        </div>
+    `, async (fd) => {
+        await apiPost('/api/schedule', {
+            spaceId, dayOfWeek: parseInt(fd.get('dayOfWeek')), subjectName: fd.get('subjectName'),
+            classroom: fd.get('classroom'), teacherName: fd.get('teacherName'),
+            startTime: fd.get('startTime'), endTime: fd.get('endTime')
+        });
+        renderScheduleTab(document.getElementById('tab-schedule'), spaceId, true);
+    }, 'Добавить');
+}
+
+function openEditLessonSheet(lesson, dateStr, spaceId) {
+    showFormSheet(`Урок: ${lesson.subject_name}`, `
+        <p class="app-subtitle" style="text-align:left; margin-bottom:10px;">Изменения на ${new Date(dateStr).toLocaleDateString('ru-RU')}</p>
+        <div class="form-group"><label><input type="checkbox" name="isCanceled"> Отменить урок в этот день</label></div>
+        <div class="form-group"><input name="replacementSubject" class="form-control" placeholder="Замена: новый предмет"></div>
+        <div class="form-group"><input name="replacementClassroom" class="form-control" placeholder="Замена: кабинет"></div>
+        <div class="form-group"><input name="replacementTeacher" class="form-control" placeholder="Замена: преподаватель"></div>
+        <hr style="border:0; border-top:1px solid var(--card-border); margin:14px 0;">
+        <button type="button" class="btn-danger" style="width:100%;" onclick="deleteLessonPermanently('${lesson.id}','${spaceId}')">🗑 Удалить урок навсегда</button>
+    `, async (fd) => {
+        await apiPost('/api/schedule/override', {
+            spaceId, scheduleId: lesson.id, date: dateStr,
+            isCanceled: fd.get('isCanceled') === 'on',
+            replacementSubject: fd.get('replacementSubject') || null,
+            replacementClassroom: fd.get('replacementClassroom') || null,
+            replacementTeacher: fd.get('replacementTeacher') || null
+        });
+        renderScheduleTab(document.getElementById('tab-schedule'), spaceId, true);
+    }, 'Сохранить изменение');
+}
+
+async function deleteLessonPermanently(id, spaceId) {
+    if (!confirm('Удалить урок из расписания насовсем?')) return;
+    try { await apiDelete(`/api/schedule/${id}`); closeDynamicSheet(); renderScheduleTab(document.getElementById('tab-schedule'), spaceId, true); }
+    catch (e) { alert(e.error || 'Ошибка'); }
+}
+
+function openAddHomeworkSheet(spaceId) {
+    showFormSheet('Новое домашнее задание', `
+        <div class="form-group"><input name="subjectName" class="form-control" placeholder="Предмет" required></div>
+        <div class="form-group"><textarea name="title" class="form-control" placeholder="Задание" required rows="3"></textarea></div>
+        <div class="form-group"><input name="dueDate" type="date" class="form-control" required></div>
+    `, async (fd) => {
+        await apiPost('/api/homework', { spaceId, subjectName: fd.get('subjectName'), title: fd.get('title'), dueDate: fd.get('dueDate') });
+        renderHomeworkTab(document.getElementById(currentHwContainerId()), spaceId, true);
+    }, 'Добавить');
+}
+
+function openJoinSpaceForm() {
+    showFormSheet('Присоединиться к группе', `
+        <div class="form-group"><input name="code" class="form-control" placeholder="Код приглашения" required style="text-transform:uppercase;"></div>
+    `, async (fd) => {
+        await apiPost('/api/spaces/join', { code: fd.get('code') });
+        await window.__reloadSpaces?.();
+    }, 'Присоединиться');
+}
+
+function openCreateSpaceForm() {
+    showFormSheet('Новая группа', `
+        <div class="form-group"><input name="name" class="form-control" placeholder="Название группы" required></div>
+    `, async (fd) => {
+        const space = await apiPost('/api/spaces', { name: fd.get('name') });
+        alert(`Группа создана! Код приглашения: ${space.invite_code}`);
+        await window.__reloadSpaces?.();
+    }, 'Создать');
+}
+
+function emptySpaceState() {
+    return `<div class="empty-state">
+        <p>Вы пока не состоите ни в одной группе.</p>
+        <button class="btn-primary" style="max-width:240px;" onclick="openJoinSpaceForm()">Присоединиться по коду</button>
+    </div>`;
+}
+
+// ---------- ХЕЛПЕР: ОБНОВИТЬ ТЕКУЩУЮ ВКЛАДКУ ----------
 function refreshCurrentTab() {
     const activeTab = document.querySelector('.tab-section.active');
-    if (activeTab) loadTabContent(activeTab.id);
+    if (activeTab) {
+        // Определяем админский режим по роли пользователя
+        const isAdmin = currentUser?.isTeacher || currentSpace?.is_admin;
+        const spaceId = currentSpace?.id;
+        if (activeTab.id === 'tab-schedule') renderScheduleTab(activeTab, spaceId, !!isAdmin);
+        else if (activeTab.id === 'tab-hw') renderHomeworkTab(activeTab, spaceId, !!isAdmin);
+        else if (activeTab.id === 'tab-members') renderMembersTab(activeTab, spaceId, !!isAdmin);
+        else if (activeTab.id === 'tab-today') renderTodayTab(activeTab, spaceId);
+        else if (activeTab.id === 'tab-chat') renderChatTab(activeTab, spaceId, !!isAdmin, currentUser?.id);
+    }
 }
