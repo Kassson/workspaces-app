@@ -95,7 +95,6 @@ const DEFAULT_SCHEDULE_TEMPLATE = `День\t№ урока\tПредмет\tК�
 ПЯТНИЦА\t7\t\t
 ПЯТНИЦА\t8\t\t`;
 
-// ================= ПОЧТА =================
 const ALLOWED_DOMAINS = ['gmail.com', 'mail.ru', 'yandex.ru', 'rambler.ru', 'bk.ru', 'list.ru', 'inbox.ru', 'ya.ru', 'outlook.com', 'yahoo.com'];
 function isValidEmailDomain(email) {
     if (!email) return false;
@@ -104,7 +103,6 @@ function isValidEmailDomain(email) {
     return ALLOWED_DOMAINS.includes(match[1].toLowerCase());
 }
 
-// ================= ФИЛЬТР ЦЕНЗУРЫ =================
 const BANNED_SUBSTRINGS = [
     'admin', 'administrator', 'root', 'moderator', 'support', 'system', 'null', 'undefined',
     'админ', 'администратор', 'модератор', 'рут', 'систем',
@@ -123,7 +121,6 @@ function violatesProfanityFilter(...fields) { return fields.some(f => containsBa
 function generateCode(len = 4) { let c = ''; for (let i = 0; i < len; i++) c += Math.floor(Math.random() * 10); return c; }
 function generateInviteCode() { return Math.random().toString(36).substring(2, 8).toUpperCase(); }
 
-// ================= JWT =================
 function verifyJWT(req, res, next) {
     const token = req.headers.authorization?.split(' ')[1] || req.query.token;
     if (!token) return res.status(403).json({ error: 'Нет доступа' });
@@ -151,12 +148,8 @@ async function isSpaceBlocked(userId, spaceId) {
 function publicUser(u) {
     if (!u) return null;
     return {
-        id: u.id,
-        username: u.username,
-        fullName: u.full_name,
-        email: u.email,
-        isTeacher: u.is_teacher,
-        isTeacherVerified: u.is_teacher_verified,
+        id: u.id, username: u.username, fullName: u.full_name, email: u.email,
+        isTeacher: u.is_teacher, isTeacherVerified: u.is_teacher_verified,
         verificationCode: u.verification_code,
         avatarEmoji: u.avatar_emoji || '👤',
         isRoot: u.username === 'root_teacher'
@@ -167,14 +160,11 @@ function publicUser(u) {
 app.post('/api/auth/register', async (req, res) => {
     const { firstName, lastName, nickName, email, password } = req.body;
     if (!firstName || !lastName || !nickName || !email || !password) return res.status(400).json({ error: 'Заполните все поля' });
-    if (!isValidEmailDomain(email)) return res.status(400).json({ error: 'Введите реальный адрес почты (gmail.com, mail.ru, yandex.ru и др.)' });
+    if (!isValidEmailDomain(email)) return res.status(400).json({ error: 'Введите реальный адрес почты' });
     if (violatesProfanityFilter(firstName, lastName, nickName)) return res.status(400).json({ error: 'Имя или логин содержит запрещённые слова' });
     try {
         const hash = await bcrypt.hash(password, 10);
-        await pool.query(
-            'INSERT INTO users (username, full_name, email, password_hash, is_teacher, is_teacher_verified) VALUES ($1, $2, $3, $4, false, false)',
-            [nickName, `${firstName} ${lastName}`, email, hash]
-        );
+        await pool.query('INSERT INTO users (username, full_name, email, password_hash, is_teacher, is_teacher_verified) VALUES ($1, $2, $3, $4, false, false)', [nickName, `${firstName} ${lastName}`, email, hash]);
         res.json({ message: 'Успех' });
     } catch (err) { res.status(400).json({ error: 'Почта или логин уже заняты' }); }
 });
@@ -188,10 +178,7 @@ app.post('/api/teach/register', async (req, res) => {
         const hash = await bcrypt.hash(password, 10);
         const code = 'T-' + generateCode(4);
         const username = email.split('@')[0] + '_' + generateCode(3);
-        await pool.query(
-            'INSERT INTO users (username, full_name, email, password_hash, is_teacher, is_teacher_verified, verification_code) VALUES ($1, $2, $3, $4, true, false, $5)',
-            [username, fullName, email, hash, code]
-        );
+        await pool.query('INSERT INTO users (username, full_name, email, password_hash, is_teacher, is_teacher_verified, verification_code) VALUES ($1, $2, $3, $4, true, false, $5)', [username, fullName, email, hash, code]);
         res.json({ code });
     } catch (err) { res.status(400).json({ error: 'Email уже используется' }); }
 });
@@ -217,7 +204,6 @@ app.get('/api/auth/me', verifyJWT, async (req, res) => {
     res.json({ user: publicUser(user) });
 });
 
-// ================= РЕДАКТИРОВАНИЕ ПРОФИЛЯ =================
 app.post('/api/auth/update-profile', verifyJWT, async (req, res) => {
     const { firstName, lastName, nickname, avatarEmoji } = req.body;
     if (!firstName || !lastName) return res.status(400).json({ error: 'Имя и фамилия обязательны' });
@@ -226,10 +212,7 @@ app.post('/api/auth/update-profile', verifyJWT, async (req, res) => {
     if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
     const newNickname = user.is_teacher ? user.username : (nickname || user.username);
     try {
-        await pool.query(
-            'UPDATE users SET full_name = $1, username = $2, avatar_emoji = $3 WHERE id = $4',
-            [`${firstName} ${lastName}`, newNickname, avatarEmoji || '👤', user.id]
-        );
+        await pool.query('UPDATE users SET full_name = $1, username = $2, avatar_emoji = $3 WHERE id = $4', [`${firstName} ${lastName}`, newNickname, avatarEmoji || '👤', user.id]);
         const updated = await getUserById(user.id);
         res.json({ success: true, user: publicUser(updated) });
     } catch (e) {
@@ -239,7 +222,6 @@ app.post('/api/auth/update-profile', verifyJWT, async (req, res) => {
     }
 });
 
-// ================= ВЕРИФИКАЦИЯ ПРЕПОДАВАТЕЛЕЙ =================
 app.post('/api/teach/verify-colleague', verifyJWT, async (req, res) => {
     const verifier = await getUserById(req.userId);
     if (!isSuperAdmin(verifier)) return res.status(403).json({ error: 'Только подтверждённые преподаватели могут верифицировать коллег' });
@@ -252,24 +234,20 @@ app.post('/api/teach/verify-colleague', verifyJWT, async (req, res) => {
     res.json({ message: `Преподаватель ${target.rows[0].full_name} подтверждён!` });
 });
 
-// ================= ГЛОБАЛЬНЫЕ НАСТРОЙКИ =================
 app.get('/api/settings', async (req, res) => {
     const r = await pool.query('SELECT * FROM system_settings WHERE id = 1');
     res.json(r.rows[0] || {});
 });
+
 app.post('/api/settings/update', verifyJWT, async (req, res) => {
     const user = await getUserById(req.userId);
     if (!user || user.username !== 'root_teacher') return res.status(403).json({ error: 'Только Root Teacher может менять глобальные настройки' });
     const { remote_mode, maintenance_mode, exams_mode, private_chat_mode, global_announcement } = req.body;
-    const r = await pool.query(
-        `UPDATE system_settings SET remote_mode=$1, maintenance_mode=$2, exams_mode=$3, private_chat_mode=$4, global_announcement=$5 WHERE id = 1 RETURNING *`,
-        [!!remote_mode, !!maintenance_mode, !!exams_mode, !!private_chat_mode, global_announcement || '']
-    );
+    const r = await pool.query(`UPDATE system_settings SET remote_mode=$1, maintenance_mode=$2, exams_mode=$3, private_chat_mode=$4, global_announcement=$5 WHERE id = 1 RETURNING *`, [!!remote_mode, !!maintenance_mode, !!exams_mode, !!private_chat_mode, global_announcement || '']);
     io.emit('settings_updated', r.rows[0]);
     res.json(r.rows[0]);
 });
 
-// ================= ПРОСТРАНСТВА =================
 app.post('/api/spaces', verifyJWT, async (req, res) => {
     const user = await getUserById(req.userId);
     if (!isSuperAdmin(user)) return res.status(403).json({ error: 'Создавать пространства могут только подтверждённые преподаватели' });
@@ -292,27 +270,15 @@ app.post('/api/spaces/join', verifyJWT, async (req, res) => {
     if (!code) return res.status(400).json({ error: 'Введите код приглашения' });
     const space = await pool.query('SELECT * FROM spaces WHERE invite_code = $1', [code.trim().toUpperCase()]);
     if (!space.rows.length) return res.status(404).json({ error: 'Группа с таким кодом не найдена' });
-
-    if (await isSpaceBlocked(user.id, space.rows[0].id)) {
-        return res.status(403).json({ error: 'Вы заблокированы в этой группе. Обратитесь к администратору.' });
-    }
-
-    // Студент может быть только в одном пространстве
+    if (await isSpaceBlocked(user.id, space.rows[0].id)) return res.status(403).json({ error: 'Вы заблокированы в этой группе.' });
     if (!isSuperAdmin(user)) {
         const existing = await pool.query('SELECT space_id FROM space_members WHERE user_id = $1 LIMIT 1', [user.id]);
-        if (existing.rows.length && existing.rows[0].space_id !== space.rows[0].id) {
-            return res.status(400).json({ error: 'Вы уже состоите в другой группе. Покиньте её сначала.' });
-        }
+        if (existing.rows.length && existing.rows[0].space_id !== space.rows[0].id) return res.status(400).json({ error: 'Вы уже состоите в другой группе. Покиньте её сначала.' });
     }
-
-    await pool.query(
-        `INSERT INTO space_members (space_id, user_id, role) VALUES ($1, $2, 'member') ON CONFLICT (space_id, user_id) DO NOTHING`,
-        [space.rows[0].id, user.id]
-    );
+    await pool.query(`INSERT INTO space_members (space_id, user_id, role) VALUES ($1, $2, 'member') ON CONFLICT (space_id, user_id) DO NOTHING`, [space.rows[0].id, user.id]);
     res.json(space.rows[0]);
 });
 
-// Покинуть пространство (только для студентов)
 app.post('/api/spaces/:spaceId/leave', verifyJWT, async (req, res) => {
     const user = await getUserById(req.userId);
     if (isSuperAdmin(user)) return res.status(400).json({ error: 'Преподаватели не могут покинуть пространство' });
@@ -326,15 +292,10 @@ app.get('/api/spaces/mine', verifyJWT, async (req, res) => {
         const r = await pool.query('SELECT *, true AS is_admin FROM spaces ORDER BY created_at DESC');
         return res.json(r.rows);
     }
-    const r = await pool.query(
-        `SELECT s.*, (sm.role = 'admin' OR sm.role = 'starosta') AS is_admin FROM spaces s
-         JOIN space_members sm ON sm.space_id = s.id WHERE sm.user_id = $1 ORDER BY s.created_at DESC`,
-        [user.id]
-    );
+    const r = await pool.query(`SELECT s.*, (sm.role = 'admin' OR sm.role = 'starosta') AS is_admin FROM spaces s JOIN space_members sm ON sm.space_id = s.id WHERE sm.user_id = $1 ORDER BY s.created_at DESC`, [user.id]);
     res.json(r.rows);
 });
 
-// Смена кода приглашения
 app.post('/api/spaces/:spaceId/rotate-invite-code', verifyJWT, requireSpaceAdmin, async (req, res) => {
     let newCode;
     for (let i = 0; i < 5; i++) {
@@ -346,34 +307,21 @@ app.post('/api/spaces/:spaceId/rotate-invite-code', verifyJWT, requireSpaceAdmin
     res.json({ success: true, inviteCode: newCode });
 });
 
-// ================= УПРАВЛЕНИЕ УЧАСТНИКАМИ =================
 app.get('/api/spaces/:spaceId/members', verifyJWT, requireSpaceAccess, async (req, res) => {
-    const r = await pool.query(
-        `SELECT u.id, u.username, u.full_name, u.is_teacher, u.avatar_emoji, sm.role, sm.joined_at, sm.muted_until
-         FROM space_members sm
-         JOIN users u ON u.id = sm.user_id
-         WHERE sm.space_id = $1
-         ORDER BY CASE sm.role WHEN 'admin' THEN 0 WHEN 'starosta' THEN 1 ELSE 2 END, u.full_name`,
-        [req.params.spaceId]
-    );
+    const r = await pool.query(`SELECT u.id, u.username, u.full_name, u.is_teacher, u.avatar_emoji, sm.role, sm.joined_at, sm.muted_until FROM space_members sm JOIN users u ON u.id = sm.user_id WHERE sm.space_id = $1 ORDER BY CASE sm.role WHEN 'admin' THEN 0 WHEN 'starosta' THEN 1 ELSE 2 END, u.full_name`, [req.params.spaceId]);
     res.json(r.rows);
 });
 
-// Сменить роль
 app.post('/api/spaces/:spaceId/members/:userId/role', verifyJWT, requireSpaceAdmin, async (req, res) => {
     const { role } = req.body;
     if (!['admin', 'member'].includes(role)) return res.status(400).json({ error: 'Роль должна быть admin или member' });
     if (req.params.userId === req.currentUser.id) return res.status(400).json({ error: 'Нельзя изменить свою роль' });
-    const r = await pool.query(
-        'UPDATE space_members SET role = $1 WHERE space_id = $2 AND user_id = $3 RETURNING *',
-        [role, req.params.spaceId, req.params.userId]
-    );
+    const r = await pool.query('UPDATE space_members SET role = $1 WHERE space_id = $2 AND user_id = $3 RETURNING *', [role, req.params.spaceId, req.params.userId]);
     if (!r.rows.length) return res.status(404).json({ error: 'Участник не найден' });
     io.to(`space:${req.params.spaceId}`).emit('members_updated');
     res.json(r.rows[0]);
 });
 
-// Кикнуть
 app.delete('/api/spaces/:spaceId/members/:userId', verifyJWT, requireSpaceAdmin, async (req, res) => {
     if (req.params.userId === req.currentUser.id) return res.status(400).json({ error: 'Нельзя исключить себя' });
     await pool.query('DELETE FROM space_members WHERE space_id = $1 AND user_id = $2', [req.params.spaceId, req.params.userId]);
@@ -381,7 +329,6 @@ app.delete('/api/spaces/:spaceId/members/:userId', verifyJWT, requireSpaceAdmin,
     res.json({ message: 'Участник исключён' });
 });
 
-// Мут
 app.post('/api/spaces/:spaceId/members/:userId/mute', verifyJWT, requireSpaceAdmin, async (req, res) => {
     const { minutes } = req.body;
     if (req.params.userId === req.currentUser.id) return res.status(400).json({ error: 'Нельзя замутить себя' });
@@ -391,59 +338,36 @@ app.post('/api/spaces/:spaceId/members/:userId/mute', verifyJWT, requireSpaceAdm
     res.json({ success: true, mutedUntil: until });
 });
 
-// Размутить
 app.delete('/api/spaces/:spaceId/members/:userId/mute', verifyJWT, requireSpaceAdmin, async (req, res) => {
     await pool.query('UPDATE space_members SET muted_until = NULL WHERE space_id = $1 AND user_id = $2', [req.params.spaceId, req.params.userId]);
     io.to(`space:${req.params.spaceId}`).emit('members_updated');
     res.json({ success: true });
 });
 
-// Забанить
 app.post('/api/spaces/:spaceId/members/:userId/block', verifyJWT, requireSpaceAdmin, async (req, res) => {
     const { reason } = req.body;
     if (req.params.userId === req.currentUser.id) return res.status(400).json({ error: 'Нельзя забанить себя' });
-
     const target = await pool.query('SELECT role FROM space_members WHERE space_id = $1 AND user_id = $2', [req.params.spaceId, req.params.userId]);
     if (!target.rows.length) return res.status(404).json({ error: 'Участник не найден' });
-    if (target.rows[0].role === 'admin' && !req.currentUser.is_teacher) {
-        return res.status(403).json({ error: 'Только преподаватель может забанить админа' });
-    }
-
+    if (target.rows[0].role === 'admin' && !req.currentUser.is_teacher) return res.status(403).json({ error: 'Только преподаватель может забанить админа' });
     await pool.query('DELETE FROM space_members WHERE space_id = $1 AND user_id = $2', [req.params.spaceId, req.params.userId]);
-    await pool.query(
-        'INSERT INTO space_blocked (space_id, user_id, blocked_by, reason) VALUES ($1, $2, $3, $4) ON CONFLICT (space_id, user_id) DO UPDATE SET blocked_by = EXCLUDED.blocked_by, reason = EXCLUDED.reason, blocked_at = NOW()',
-        [req.params.spaceId, req.params.userId, req.currentUser.id, reason || null]
-    );
+    await pool.query('INSERT INTO space_blocked (space_id, user_id, blocked_by, reason) VALUES ($1, $2, $3, $4) ON CONFLICT (space_id, user_id) DO UPDATE SET blocked_by = EXCLUDED.blocked_by, reason = EXCLUDED.reason, blocked_at = NOW()', [req.params.spaceId, req.params.userId, req.currentUser.id, reason || null]);
     io.to(`space:${req.params.spaceId}`).emit('members_updated');
     res.json({ success: true });
 });
 
-// Разбанить
 app.delete('/api/spaces/:spaceId/blocked/:userId', verifyJWT, requireSpaceAdmin, async (req, res) => {
     await pool.query('DELETE FROM space_blocked WHERE space_id = $1 AND user_id = $2', [req.params.spaceId, req.params.userId]);
     io.to(`space:${req.params.spaceId}`).emit('members_updated');
     res.json({ success: true });
 });
 
-// Черный список
 app.get('/api/spaces/:spaceId/blacklist', verifyJWT, requireSpaceAdmin, async (req, res) => {
-    const blocked = await pool.query(
-        `SELECT u.id, u.full_name, u.username, u.avatar_emoji, sb.reason, sb.blocked_at, 'blocked' AS type
-         FROM space_blocked sb JOIN users u ON u.id = sb.user_id
-         WHERE sb.space_id = $1 ORDER BY sb.blocked_at DESC`,
-        [req.params.spaceId]
-    );
-    const muted = await pool.query(
-        `SELECT u.id, u.full_name, u.username, u.avatar_emoji, sm.muted_until, 'muted' AS type
-         FROM space_members sm JOIN users u ON u.id = sm.user_id
-         WHERE sm.space_id = $1 AND sm.muted_until IS NOT NULL AND sm.muted_until > NOW()
-         ORDER BY sm.muted_until DESC`,
-        [req.params.spaceId]
-    );
+    const blocked = await pool.query(`SELECT u.id, u.full_name, u.username, u.avatar_emoji, sb.reason, sb.blocked_at, 'blocked' AS type FROM space_blocked sb JOIN users u ON u.id = sb.user_id WHERE sb.space_id = $1 ORDER BY sb.blocked_at DESC`, [req.params.spaceId]);
+    const muted = await pool.query(`SELECT u.id, u.full_name, u.username, u.avatar_emoji, sm.muted_until, 'muted' AS type FROM space_members sm JOIN users u ON u.id = sm.user_id WHERE sm.space_id = $1 AND sm.muted_until IS NOT NULL AND sm.muted_until > NOW() ORDER BY sm.muted_until DESC`, [req.params.spaceId]);
     res.json({ blocked: blocked.rows, muted: muted.rows });
 });
 
-// ================= ДОСТУП =================
 async function requireSpaceAccess(req, res, next) {
     const user = await getUserById(req.userId);
     req.currentUser = user;
@@ -459,13 +383,9 @@ async function requireSpaceAdmin(req, res, next) {
     next();
 }
 
-// ================= РАСПИСАНИЕ =================
 app.get('/api/schedule/:spaceId', verifyJWT, requireSpaceAccess, async (req, res) => {
     const lessons = await pool.query('SELECT * FROM schedules WHERE space_id = $1 ORDER BY day_of_week, start_time', [req.params.spaceId]);
-    const overrides = await pool.query(
-        `SELECT * FROM schedule_overrides WHERE space_id = $1 AND override_date >= CURRENT_DATE - INTERVAL '1 day' AND override_date <= CURRENT_DATE + INTERVAL '13 days'`,
-        [req.params.spaceId]
-    );
+    const overrides = await pool.query(`SELECT * FROM schedule_overrides WHERE space_id = $1 AND override_date >= CURRENT_DATE - INTERVAL '1 day' AND override_date <= CURRENT_DATE + INTERVAL '13 days'`, [req.params.spaceId]);
     res.json({ lessons: lessons.rows, overrides: overrides.rows });
 });
 
@@ -473,16 +393,10 @@ app.post('/api/schedule', verifyJWT, requireSpaceAdmin, async (req, res) => {
     const { id, spaceId, dayOfWeek, subjectName, classroom, teacherName, startTime, endTime } = req.body;
     if (!spaceId || !dayOfWeek || !subjectName || !startTime || !endTime) return res.status(400).json({ error: 'Заполните обязательные поля' });
     if (id) {
-        const r = await pool.query(
-            `UPDATE schedules SET subject_name=$1, classroom=$2, teacher_name=$3, start_time=$4, end_time=$5, day_of_week=$6 WHERE id = $7 AND space_id = $8 RETURNING *`,
-            [subjectName, classroom, teacherName, startTime, endTime, dayOfWeek, id, spaceId]
-        );
+        const r = await pool.query(`UPDATE schedules SET subject_name=$1, classroom=$2, teacher_name=$3, start_time=$4, end_time=$5, day_of_week=$6 WHERE id = $7 AND space_id = $8 RETURNING *`, [subjectName, classroom, teacherName, startTime, endTime, dayOfWeek, id, spaceId]);
         return res.json(r.rows[0]);
     }
-    const r = await pool.query(
-        `INSERT INTO schedules (space_id, day_of_week, subject_name, classroom, teacher_name, start_time, end_time) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-        [spaceId, dayOfWeek, subjectName, classroom, teacherName, startTime, endTime]
-    );
+    const r = await pool.query(`INSERT INTO schedules (space_id, day_of_week, subject_name, classroom, teacher_name, start_time, end_time) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`, [spaceId, dayOfWeek, subjectName, classroom, teacherName, startTime, endTime]);
     res.json(r.rows[0]);
 });
 
@@ -495,34 +409,29 @@ app.delete('/api/schedule/:id', verifyJWT, async (req, res) => {
     res.json({ message: 'Удалено' });
 });
 
-// ===== ИМПОРТ РАСПИСАНИЯ =====
 app.post('/api/schedule/import', verifyJWT, requireSpaceAdmin, async (req, res) => {
     const { spaceId, text, replaceAll } = req.body;
     if (!spaceId) return res.status(400).json({ error: 'Не указано пространство' });
     if (!text || !text.trim()) return res.status(400).json({ error: 'Вставьте текст расписания' });
-
     const lessons = [];
     const errors = [];
     const skipped = [];
     const lines = text.split('\n');
-
     for (let i = 0; i < lines.length; i++) {
         const raw = lines[i].trim();
         if (!raw) continue;
         if (/^день\s/i.test(raw) || /№\s*урока/i.test(raw)) continue;
         const parts = raw.split(/\t+|\s{2,}/).map(p => p.trim()).filter(Boolean);
-        if (parts.length < 3) { errors.push(`Строка ${i + 1}: не удалось разобрать — «${raw.slice(0, 40)}…»`); continue; }
+        if (parts.length < 3) { errors.push(`Строка ${i + 1}: не удалось разобрать`); continue; }
         const dayOfWeek = DAY_MAP[parts[0].toUpperCase()];
         if (!dayOfWeek) { errors.push(`Строка ${i + 1}: неизвестный день «${parts[0]}»`); continue; }
         const lessonNum = parseInt(parts[1], 10);
-        if (!lessonNum || !LESSON_TIMES[lessonNum]) { errors.push(`Строка ${i + 1}: неверный номер урока «${parts[1]}»`); continue; }
+        if (!lessonNum || !LESSON_TIMES[lessonNum]) { errors.push(`Строка ${i + 1}: неверный номер урока`); continue; }
         const subjectName = parts[2];
-        if (!subjectName) { skipped.push(`Строка ${i + 1}: ${parts[0]}, урок ${lessonNum} — пропущено (пустой предмет)`); continue; }
+        if (!subjectName) { skipped.push(`Строка ${i + 1}: пропущено (пустой предмет)`); continue; }
         lessons.push({ dayOfWeek, subjectName, classroom: parts[3] || null, startTime: LESSON_TIMES[lessonNum].start, endTime: LESSON_TIMES[lessonNum].end });
     }
-
     if (!lessons.length) return res.status(400).json({ error: 'Ни одной строки не удалось разобрать', details: errors.slice(0, 10), skipped: skipped.slice(0, 10) });
-
     try {
         if (replaceAll) await pool.query('DELETE FROM schedules WHERE space_id = $1', [spaceId]);
         const values = [], params = [];
@@ -540,15 +449,12 @@ app.post('/api/schedule/import', verifyJWT, requireSpaceAdmin, async (req, res) 
     }
 });
 
-// ===== ЭКСПОРТ РАСПИСАНИЯ =====
 app.get('/api/schedule/:spaceId/export', verifyJWT, requireSpaceAccess, async (req, res) => {
     const lessons = (await pool.query('SELECT * FROM schedules WHERE space_id = $1 ORDER BY day_of_week, start_time', [req.params.spaceId])).rows;
     const DAY_NAMES = ['', 'ПОНЕДЕЛЬНИК', 'ВТОРНИК', 'СРЕДА', 'ЧЕТВЕРГ', 'ПЯТНИЦА', 'СУББОТА', 'ВОСКРЕСЕНЬЕ'];
-
     let text;
-    if (!lessons.length) {
-        text = DEFAULT_SCHEDULE_TEMPLATE;
-    } else {
+    if (!lessons.length) text = DEFAULT_SCHEDULE_TEMPLATE;
+    else {
         text = 'День\t№ урока\tПредмет\tКабинет\n';
         for (const l of lessons) {
             const num = Object.keys(LESSON_TIMES).find(k => LESSON_TIMES[k].start === l.start_time.slice(0, 5));
@@ -560,21 +466,10 @@ app.get('/api/schedule/:spaceId/export', verifyJWT, requireSpaceAccess, async (r
     res.send(text);
 });
 
-// ===== ЗАМЕНЫ/ОТМЕНЫ =====
 app.post('/api/schedule/override', verifyJWT, requireSpaceAdmin, async (req, res) => {
     const { spaceId, scheduleId, date, isCanceled, replacementSubject, replacementClassroom, replacementTeacher } = req.body;
     if (!scheduleId || !date) return res.status(400).json({ error: 'Не указан урок или дата' });
-    const r = await pool.query(
-        `INSERT INTO schedule_overrides (space_id, schedule_id, override_date, is_canceled, replacement_subject, replacement_classroom, replacement_teacher)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)
-         ON CONFLICT (schedule_id, override_date) DO UPDATE SET
-            is_canceled = EXCLUDED.is_canceled,
-            replacement_subject = EXCLUDED.replacement_subject,
-            replacement_classroom = EXCLUDED.replacement_classroom,
-            replacement_teacher = EXCLUDED.replacement_teacher
-         RETURNING *`,
-        [spaceId, scheduleId, date, !!isCanceled, replacementSubject || null, replacementClassroom || null, replacementTeacher || null]
-    );
+    const r = await pool.query(`INSERT INTO schedule_overrides (space_id, schedule_id, override_date, is_canceled, replacement_subject, replacement_classroom, replacement_teacher) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (schedule_id, override_date) DO UPDATE SET is_canceled = EXCLUDED.is_canceled, replacement_subject = EXCLUDED.replacement_subject, replacement_classroom = EXCLUDED.replacement_classroom, replacement_teacher = EXCLUDED.replacement_teacher RETURNING *`, [spaceId, scheduleId, date, !!isCanceled, replacementSubject || null, replacementClassroom || null, replacementTeacher || null]);
     io.to(`space:${spaceId}`).emit('schedule_updated');
     res.json(r.rows[0]);
 });
@@ -588,15 +483,13 @@ app.delete('/api/schedule/override/:id', verifyJWT, async (req, res) => {
     res.json({ message: 'Удалено' });
 });
 
-// ICS
 app.get('/api/schedule/:spaceId/ics', verifyJWT, requireSpaceAccess, async (req, res) => {
     const lessons = (await pool.query('SELECT * FROM schedules WHERE space_id = $1', [req.params.spaceId])).rows;
     const overrides = (await pool.query(`SELECT * FROM schedule_overrides WHERE space_id = $1 AND override_date >= CURRENT_DATE`, [req.params.spaceId])).rows;
     let ics = 'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Workspaces//RU\r\nCALSCALE:GREGORIAN\r\n';
     const toICSDate = (d, t) => `${d.replace(/-/g, '')}T${t.replace(/:/g, '').slice(0, 6)}`;
     for (let offset = 0; offset < 14; offset++) {
-        const day = new Date();
-        day.setDate(day.getDate() + offset);
+        const day = new Date(); day.setDate(day.getDate() + offset);
         const dow = day.getDay() === 0 ? 7 : day.getDay();
         const dateStr = day.toISOString().slice(0, 10);
         const dayLessons = lessons.filter(l => l.day_of_week === dow);
@@ -621,17 +514,11 @@ app.get('/api/schedule/:spaceId/ics', verifyJWT, requireSpaceAccess, async (req,
 
 // ================= ДОМАШНИЕ ЗАДАНИЯ =================
 app.get('/api/homework/:spaceId', verifyJWT, requireSpaceAccess, async (req, res) => {
-    const hw = await pool.query(
-        `SELECT h.*, hc.attachment_url, hc.completed_at, (hc.id IS NOT NULL) AS is_done
-         FROM homeworks h
-         LEFT JOIN homework_completions hc ON hc.homework_id = h.id AND hc.user_id = $2
-         WHERE h.space_id = $1 ORDER BY h.due_date ASC`,
-        [req.params.spaceId, req.currentUser.id]
-    );
+    const hw = await pool.query(`SELECT h.*, hc.attachment_url, hc.completed_at, (hc.id IS NOT NULL) AS is_done FROM homeworks h LEFT JOIN homework_completions hc ON hc.homework_id = h.id AND hc.user_id = $2 WHERE h.space_id = $1 ORDER BY h.due_date ASC`, [req.params.spaceId, req.currentUser.id]);
     res.json(hw.rows);
 });
 
-// Статистика по ДЗ
+// Статистика по ДЗ (без учителей)
 app.get('/api/homework/:id/stats', verifyJWT, async (req, res) => {
     const user = await getUserById(req.userId);
     const hw = await pool.query('SELECT * FROM homeworks WHERE id = $1', [req.params.id]);
@@ -639,22 +526,19 @@ app.get('/api/homework/:id/stats', verifyJWT, async (req, res) => {
     const spaceId = hw.rows[0].space_id;
     if (!(await isSpaceMember(user, spaceId))) return res.status(403).json({ error: 'Нет доступа' });
 
-    const total = await pool.query('SELECT COUNT(*)::int AS c FROM space_members WHERE space_id = $1', [spaceId]);
-    const completed = await pool.query('SELECT COUNT(*)::int AS c FROM homework_completions WHERE homework_id = $1', [req.params.id]);
-    const percentage = total.rows[0].c > 0 ? Math.round((completed.rows[0].c / total.rows[0].c) * 100) : 0;
+    const total = await pool.query(`SELECT COUNT(*)::int AS c FROM space_members sm JOIN users u ON u.id = sm.user_id WHERE sm.space_id = $1 AND u.is_teacher = FALSE`, [spaceId]);
+    const completed = await pool.query(`SELECT COUNT(*)::int AS c FROM homework_completions hc JOIN users u ON u.id = hc.user_id WHERE hc.homework_id = $1 AND u.is_teacher = FALSE`, [req.params.id]);
+    const totalCount = total.rows[0].c;
+    const completedCount = completed.rows[0].c;
+    const percentage = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
     const isAdmin = await isSpaceAdmin(user, spaceId);
     let students = [];
     if (isAdmin) {
-        const r = await pool.query(
-            `SELECT u.full_name, u.username, u.avatar_emoji, hc.completed_at
-             FROM homework_completions hc JOIN users u ON u.id = hc.user_id
-             WHERE hc.homework_id = $1 ORDER BY hc.completed_at DESC`,
-            [req.params.id]
-        );
+        const r = await pool.query(`SELECT u.id, u.full_name, u.username, u.avatar_emoji, hc.completed_at FROM homework_completions hc JOIN users u ON u.id = hc.user_id WHERE hc.homework_id = $1 AND u.is_teacher = FALSE ORDER BY hc.completed_at DESC`, [req.params.id]);
         students = r.rows;
     }
-    res.json({ percentage, completed: completed.rows[0].c, total: total.rows[0].c, students, canSeeStudents: isAdmin });
+    res.json({ percentage, completed: completedCount, total: totalCount, students, canSeeStudents: isAdmin });
 });
 
 app.post('/api/homework', verifyJWT, requireSpaceAdmin, async (req, res) => {
@@ -676,11 +560,7 @@ app.delete('/api/homework/:id', verifyJWT, async (req, res) => {
 app.post('/api/homework/:id/complete', verifyJWT, async (req, res) => {
     const user = await getUserById(req.userId);
     const { attachment } = req.body;
-    const r = await pool.query(
-        `INSERT INTO homework_completions (homework_id, user_id, attachment_url) VALUES ($1,$2,$3)
-         ON CONFLICT (homework_id, user_id) DO UPDATE SET attachment_url = EXCLUDED.attachment_url, completed_at = NOW() RETURNING *`,
-        [req.params.id, user.id, attachment || null]
-    );
+    const r = await pool.query(`INSERT INTO homework_completions (homework_id, user_id, attachment_url) VALUES ($1,$2,$3) ON CONFLICT (homework_id, user_id) DO UPDATE SET attachment_url = EXCLUDED.attachment_url, completed_at = NOW() RETURNING *`, [req.params.id, user.id, attachment || null]);
     res.json(r.rows[0]);
 });
 
@@ -690,13 +570,18 @@ app.delete('/api/homework/:id/complete', verifyJWT, async (req, res) => {
     res.json({ message: 'Отметка снята' });
 });
 
+// Кто сдал (без учителей, с аватарками)
 app.get('/api/homework/:id/completions', verifyJWT, async (req, res) => {
     const user = await getUserById(req.userId);
     const hw = await pool.query('SELECT * FROM homeworks WHERE id = $1', [req.params.id]);
     if (!hw.rows.length) return res.status(404).json({ error: 'Не найдено' });
     if (!(await isSpaceAdmin(user, hw.rows[0].space_id))) return res.status(403).json({ error: 'Нет прав' });
     const r = await pool.query(
-        `SELECT hc.*, u.full_name, u.username FROM homework_completions hc JOIN users u ON u.id = hc.user_id WHERE hc.homework_id = $1 ORDER BY hc.completed_at DESC`,
+        `SELECT hc.id, hc.user_id, hc.completed_at, hc.attachment_url, u.full_name, u.username, u.avatar_emoji
+         FROM homework_completions hc 
+         JOIN users u ON u.id = hc.user_id 
+         WHERE hc.homework_id = $1 AND u.is_teacher = FALSE
+         ORDER BY hc.completed_at DESC`,
         [req.params.id]
     );
     res.json(r.rows);
@@ -704,11 +589,7 @@ app.get('/api/homework/:id/completions', verifyJWT, async (req, res) => {
 
 // ================= ЧАТ =================
 app.get('/api/chat/:spaceId/messages', verifyJWT, requireSpaceAccess, async (req, res) => {
-    const r = await pool.query(
-        `SELECT cm.*, u.full_name, u.username, u.is_teacher, u.avatar_emoji FROM chat_messages cm
-         JOIN users u ON u.id = cm.user_id WHERE cm.space_id = $1 ORDER BY cm.created_at DESC LIMIT 50`,
-        [req.params.spaceId]
-    );
+    const r = await pool.query(`SELECT cm.*, u.full_name, u.username, u.is_teacher, u.avatar_emoji FROM chat_messages cm JOIN users u ON u.id = cm.user_id WHERE cm.space_id = $1 ORDER BY cm.created_at DESC LIMIT 50`, [req.params.spaceId]);
     res.json(r.rows.reverse());
 });
 
@@ -757,20 +638,14 @@ io.on('connection', (socket) => {
 // ================= ИГРЫ =================
 const VALID_GAMES = ['2048', 'cyber-runner', 'brawl-royale', 'snake-arena', 'battle-tanks', 'cyber-arena'];
 app.get('/api/games/:spaceId/:gameId/leaderboard', verifyJWT, requireSpaceAccess, async (req, res) => {
-    const r = await pool.query(
-        `SELECT gs.score, gs.updated_at, u.full_name, u.username FROM game_scores gs JOIN users u ON u.id = gs.user_id WHERE gs.space_id = $1 AND gs.game_id = $2 ORDER BY gs.score DESC LIMIT 20`,
-        [req.params.spaceId, req.params.gameId]
-    );
+    const r = await pool.query(`SELECT gs.score, gs.updated_at, u.full_name, u.username FROM game_scores gs JOIN users u ON u.id = gs.user_id WHERE gs.space_id = $1 AND gs.game_id = $2 ORDER BY gs.score DESC LIMIT 20`, [req.params.spaceId, req.params.gameId]);
     res.json(r.rows);
 });
 app.post('/api/games/:spaceId/:gameId/score', verifyJWT, requireSpaceAccess, async (req, res) => {
     const { score } = req.body;
     if (!VALID_GAMES.includes(req.params.gameId)) return res.status(400).json({ error: 'Неизвестная игра' });
     if (typeof score !== 'number' || score < 0) return res.status(400).json({ error: 'Некорректный счёт' });
-    await pool.query(
-        `INSERT INTO game_scores (space_id, user_id, game_id, score) VALUES ($1,$2,$3,$4) ON CONFLICT (space_id, user_id, game_id) DO UPDATE SET score = GREATEST(game_scores.score, EXCLUDED.score), updated_at = NOW()`,
-        [req.params.spaceId, req.currentUser.id, req.params.gameId, Math.floor(score)]
-    );
+    await pool.query(`INSERT INTO game_scores (space_id, user_id, game_id, score) VALUES ($1,$2,$3,$4) ON CONFLICT (space_id, user_id, game_id) DO UPDATE SET score = GREATEST(game_scores.score, EXCLUDED.score), updated_at = NOW()`, [req.params.spaceId, req.currentUser.id, req.params.gameId, Math.floor(score)]);
     res.json({ message: 'Сохранено' });
 });
 app.post('/api/games/:spaceId/:gameId/reset', verifyJWT, requireSpaceAdmin, async (req, res) => {
@@ -786,19 +661,12 @@ async function cleanupOldMessages() {
 }
 setInterval(cleanupOldMessages, 24 * 60 * 60 * 1000);
 
-// ================= ИНИЦИАЛИЗАЦИЯ БД =================
 async function ensureSchema() {
-    // Основная схема (создаёт таблицы если их нет)
     const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
     await pool.query(schema);
-
-    // ===== МИГРАЦИИ для существующих БД =====
-    // (нужны, если таблицы уже были созданы до появления новых колонок)
     const migrations = [
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_emoji VARCHAR(50) DEFAULT '👤'`,
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT DEFAULT NULL`,
-        `ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_code VARCHAR(10)`,
-        `ALTER TABLE users ADD COLUMN IF NOT EXISTS verified_by UUID`,
         `ALTER TABLE space_members ADD COLUMN IF NOT EXISTS muted_until TIMESTAMP WITH TIME ZONE`,
         `CREATE TABLE IF NOT EXISTS space_blocked (
             id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -810,15 +678,9 @@ async function ensureSchema() {
             UNIQUE(space_id, user_id)
         )`
     ];
-
     for (const sql of migrations) {
-        try {
-            await pool.query(sql);
-        } catch (e) {
-            console.warn('⚠️ Миграция пропущена:', e.message);
-        }
+        try { await pool.query(sql); } catch (e) { console.warn('⚠️ Миграция пропущена:', e.message); }
     }
-
     console.log('✅ Схема БД инициализирована');
 }
 
@@ -826,10 +688,7 @@ async function ensureRootTeacher() {
     const existing = await pool.query("SELECT * FROM users WHERE username = 'root_teacher'");
     if (existing.rows.length) return;
     const hash = await bcrypt.hash(process.env.ROOT_TEACHER_PASSWORD, 12);
-    await pool.query(
-        `INSERT INTO users (username, full_name, email, password_hash, is_teacher, is_teacher_verified, verification_code) VALUES ('root_teacher', 'Главный Администратор Колледжа', $1, $2, true, true, 'ROOT')`,
-        [process.env.ROOT_TEACHER_EMAIL || 'root@college.local', hash]
-    );
+    await pool.query(`INSERT INTO users (username, full_name, email, password_hash, is_teacher, is_teacher_verified, verification_code) VALUES ('root_teacher', 'Главный Администратор Колледжа', $1, $2, true, true, 'ROOT')`, [process.env.ROOT_TEACHER_EMAIL || 'root@college.local', hash]);
     console.log('👑 Аккаунт root_teacher создан. Логин: root_teacher');
 }
 
