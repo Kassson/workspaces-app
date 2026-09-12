@@ -1,7 +1,7 @@
 /* ===================== ОБЩАЯ ЛОГИКА ПОРТАЛА (студент + преподаватель) ===================== */
 const socket = io();
 let systemSettings = {};
-let currentSpace = null; // { id, name, invite_code, is_admin }
+let currentSpace = null;
 
 // ---------- ГЛОБАЛЬНЫЕ НАСТРОЙКИ ----------
 async function loadAndApplySettings(currentUser) {
@@ -53,7 +53,7 @@ async function renderTodayTab(container, spaceId) {
     } catch (e) { container.innerHTML = `<p class="empty-state">${e.error || 'Ошибка загрузки расписания'}</p>`; }
 }
 
-// ---------- РАСПИСАНИЕ (неделя) ----------
+// ---------- РАСПИСАНИЕ ----------
 async function renderScheduleTab(container, spaceId, isAdmin) {
     if (!spaceId) { container.innerHTML = emptySpaceState(); return; }
     container.innerHTML = '<p class="empty-state">Загрузка…</p>';
@@ -192,16 +192,44 @@ async function deleteHomework(id, spaceId) {
     try { await apiDelete(`/api/homework/${id}`); renderHomeworkTab(document.getElementById(currentHwContainerId()), spaceId, true); }
     catch (e) { alert(e.error || 'Ошибка'); }
 }
-async function viewCompletions(id) {
-    try {
-        const rows = await apiGet(`/api/homework/${id}/completions`);
-        if (!rows.length) return alert('Пока никто не сдал.');
-        alert(rows.map(r => `${r.full_name} (${r.username})${r.attachment_url ? ' — с фото' : ''}`).join('\n'));
-    } catch (e) { alert(e.error || 'Ошибка'); }
-}
 function currentHwContainerId() { return document.getElementById('tab-hw') ? 'tab-hw' : 'tab-homework'; }
 
-// ---------- СТАТИСТИКА ДЗ (круговая диаграмма) ----------
+// ---------- КТО СДАЛ (модалка с профилями) ----------
+async function viewCompletions(homeworkId) {
+    const root = document.getElementById('dynamicSheetRoot');
+    root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div><p class="empty-state">Загрузка…</p></div>`;
+    document.getElementById('sheetOverlay').classList.add('show');
+    try {
+        const rows = await apiGet(`/api/homework/${homeworkId}/completions`);
+        let html = `<h2 class="app-title" style="font-size:1.3rem;">👥 Кто выполнил ДЗ</h2>`;
+        if (!rows.length) {
+            html += `<p class="empty-state">Пока никто не выполнил</p>`;
+        } else {
+            html += `<p style="color:var(--text-secondary); font-size:0.85rem;">Всего: ${rows.length}</p>`;
+            html += `<div class="settings-card" style="padding: 8px 18px;">`;
+            html += rows.map(r => `
+                <div class="member-row" style="cursor: default;">
+                    <div class="member-avatar">${escapeHtml(r.avatar_emoji || '👤')}</div>
+                    <div class="member-info">
+                        <div class="member-name">${escapeHtml(r.full_name)}</div>
+                        <div class="member-username">@${escapeHtml(r.username)}</div>
+                    </div>
+                    <div style="text-align:right; font-size:0.75rem; color:var(--text-secondary);">
+                        ${new Date(r.completed_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                        ${r.attachment_url ? '<br><span style="color:var(--success);">📷 с фото</span>' : ''}
+                    </div>
+                </div>
+            `).join('');
+            html += `</div>`;
+        }
+        html += `<button class="btn-secondary" style="margin-top:14px;" onclick="closeDynamicSheet()">Закрыть</button>`;
+        root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div>${html}</div>`;
+    } catch (e) {
+        root.innerHTML = `<div class="sheet show" id="dynamicSheet"><p class="empty-state">Ошибка: ${escapeHtml(e.error || '')}</p><button class="btn-secondary" onclick="closeDynamicSheet()">Закрыть</button></div>`;
+    }
+}
+
+// ---------- СТАТИСТИКА ДЗ ----------
 async function openHomeworkStats(homeworkId) {
     if (!currentSpace) return;
     const root = document.getElementById('dynamicSheetRoot');
@@ -225,9 +253,9 @@ async function openHomeworkStats(homeworkId) {
         `;
         if (s.canSeeStudents) {
             if (s.students.length) {
-                html += `<h3>Выполнили:</h3><div class="settings-card">`;
+                html += `<h3>Выполнили:</h3><div class="settings-card" style="padding: 8px 18px;">`;
                 html += s.students.map(st => `
-                    <div class="member-row">
+                    <div class="member-row" style="cursor: default;">
                         <div class="member-avatar">${escapeHtml(st.avatar_emoji || '👤')}</div>
                         <div class="member-info">
                             <div class="member-name">${escapeHtml(st.full_name)}</div>
@@ -254,24 +282,20 @@ function openScheduleImport() {
     showFormSheet('📥 Импорт расписания', `
         <p style="color:var(--text-secondary); font-size:0.85rem; text-align:left;">
             Вставьте расписание из Excel/Google Sheets.<br>
-            Формат строки: <code>ДЕНЬ&nbsp;&nbsp;№&nbsp;&nbsp;Предмет&nbsp;&nbsp;Кабинет</code>
+            Формат: <code>ДЕНЬ&nbsp;&nbsp;№&nbsp;&nbsp;Предмет&nbsp;&nbsp;Кабинет</code>
         </p>
         <div class="form-group">
-            <textarea name="text" class="form-control" rows="12" placeholder="ПОНЕДЕЛЬНИК&#9;1&#9;Биология&#9;8&#10;ПОНЕДЕЛЬНИК&#9;2&#9;Физкультура&#9;с/з&#10;..." required></textarea>
+            <textarea name="text" class="form-control" rows="12" placeholder="ПОНЕДЕЛЬНИК&#9;1&#9;Биология&#9;8&#10;..." required></textarea>
         </div>
         <div class="form-group" style="display:flex; align-items:center; gap:8px;">
             <input type="checkbox" name="replaceAll" id="replaceAllChk" checked>
             <label for="replaceAllChk" style="margin:0;">Заменить всё расписание</label>
         </div>
     `, async (fd) => {
-        const r = await apiPost('/api/schedule/import', {
-            spaceId: currentSpace.id,
-            text: fd.get('text'),
-            replaceAll: fd.get('replaceAll') === 'on'
-        });
+        const r = await apiPost('/api/schedule/import', { spaceId: currentSpace.id, text: fd.get('text'), replaceAll: fd.get('replaceAll') === 'on' });
         let msg = `✅ Импортировано уроков: ${r.imported}`;
-        if (r.skipped && r.skipped.length) msg += `\n⏭️ Пропущено пустых строк: ${r.skipped.length}`;
-        if (r.errors && r.errors.length) msg += `\n⚠️ Ошибок: ${r.errors.length}\n${r.errors.slice(0, 5).join('\n')}`;
+        if (r.skipped && r.skipped.length) msg += `\n⏭️ Пропущено: ${r.skipped.length}`;
+        if (r.errors && r.errors.length) msg += `\n⚠️ Ошибок: ${r.errors.length}`;
         alert(msg);
         refreshCurrentTab();
     }, 'Импортировать');
@@ -304,19 +328,13 @@ function renderChatTab(container, spaceId, isAdmin, currentUserId) {
             <div class="chat-blocked-notice hidden">🎓 Отправка сообщений отключена на время экзаменов.</div>
         </div>`;
     applyGlobalSettings(window.__currentUser);
-
     loadChatHistory(spaceId, isAdmin, currentUserId);
-
     if (chatJoinedSpace !== spaceId) {
         socket.emit('join_space', { spaceId, token: localStorage.getItem('token') });
         chatJoinedSpace = spaceId;
     }
-
     const input = document.getElementById('chatInput');
-    input.onkeydown = (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(spaceId); }
-    };
-
+    input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(spaceId); } };
     socket.off('new_message'); socket.off('message_deleted');
     socket.on('new_message', (msg) => { if (msg.space_id === spaceId) appendChatMessage(msg, isAdmin, currentUserId); });
     socket.on('message_deleted', ({ messageId }) => { document.getElementById('msg-' + messageId)?.remove(); });
@@ -330,7 +348,7 @@ async function loadChatHistory(spaceId, isAdmin, currentUserId) {
         box.innerHTML = '';
         rows.forEach(m => appendChatMessage(m, isAdmin, currentUserId));
         box.scrollTop = box.scrollHeight;
-    } catch (e) { /* ignore */ }
+    } catch (e) {}
 }
 
 function appendChatMessage(m, isAdmin, currentUserId) {
@@ -357,7 +375,7 @@ function sendChatMessage(spaceId) {
 }
 function deleteChatMessage(id) { socket.emit('delete_message', { messageId: id }); }
 
-// ---------- УЧАСТНИКИ ГРУППЫ ----------
+// ---------- УЧАСТНИКИ ----------
 const ROLE_LABELS = { admin: '👑 Админ', member: '👤 Участник' };
 
 async function renderMembersTab(container, spaceId, isAdmin) {
@@ -411,12 +429,7 @@ async function openMemberProfile(member) {
     `;
 
     const root = document.getElementById('dynamicSheetRoot');
-    root.innerHTML = `
-        <div class="sheet show" id="dynamicSheet">
-            <div class="sheet-handle"></div>
-            ${body}
-            <button type="button" class="btn-secondary" style="margin-top:14px;" onclick="closeDynamicSheet()">Закрыть</button>
-        </div>`;
+    root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div>${body}<button type="button" class="btn-secondary" style="margin-top:14px;" onclick="closeDynamicSheet()">Закрыть</button></div>`;
     document.getElementById('sheetOverlay').classList.add('show');
 }
 
@@ -449,10 +462,10 @@ async function unmuteMember(userId) {
 }
 
 function blockMember(userId, fullName) {
-    if (!confirm(`Забанить «${fullName}»? Участник будет исключён и не сможет вернуться, пока не разбаните.`)) return;
+    if (!confirm(`Забанить «${fullName}»?`)) return;
     showFormSheet(`Забанить «${fullName}»`, `
         <div class="form-group"><label>Причина (необязательно)</label>
-            <input type="text" name="reason" class="form-control" placeholder="Например: спам в чате">
+            <input type="text" name="reason" class="form-control" placeholder="Например: спам">
         </div>
     `, async (fd) => {
         await apiPost(`/api/spaces/${currentSpace.id}/members/${userId}/block`, { reason: fd.get('reason') || null });
@@ -462,7 +475,7 @@ function blockMember(userId, fullName) {
 }
 
 async function kickMember(userId, fullName) {
-    if (!confirm(`Исключить «${fullName}»? Он сможет вернуться по коду приглашения.`)) return;
+    if (!confirm(`Исключить «${fullName}»?`)) return;
     try {
         await apiDelete(`/api/spaces/${currentSpace.id}/members/${userId}`);
         closeDynamicSheet();
@@ -505,7 +518,7 @@ async function openBlacklist() {
                 </div>
             `).join('');
         }
-        if (!data.blocked.length && !data.muted.length) html += `<p class="empty-state">Список пуст. Все ведут себя хорошо ✨</p>`;
+        if (!data.blocked.length && !data.muted.length) html += `<p class="empty-state">Список пуст ✨</p>`;
         html += `<button class="btn-secondary" style="margin-top:14px;" onclick="closeDynamicSheet()">Закрыть</button>`;
         root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div>${html}</div>`;
     } catch (e) {
@@ -514,46 +527,37 @@ async function openBlacklist() {
 }
 
 async function unblockMember(userId) {
-    try {
-        await apiDelete(`/api/spaces/${currentSpace.id}/blocked/${userId}`);
-        openBlacklist();
-        refreshCurrentTab();
-    } catch (e) { alert(e.error || 'Ошибка'); }
+    try { await apiDelete(`/api/spaces/${currentSpace.id}/blocked/${userId}`); openBlacklist(); refreshCurrentTab(); }
+    catch (e) { alert(e.error || 'Ошибка'); }
 }
 
 async function unmuteMemberFromBlacklist(userId) {
-    try {
-        await apiDelete(`/api/spaces/${currentSpace.id}/members/${userId}/mute`);
-        openBlacklist();
-        refreshCurrentTab();
-    } catch (e) { alert(e.error || 'Ошибка'); }
+    try { await apiDelete(`/api/spaces/${currentSpace.id}/members/${userId}/mute`); openBlacklist(); refreshCurrentTab(); }
+    catch (e) { alert(e.error || 'Ошибка'); }
 }
 
-// ---------- СМЕНА КОДА ПРИГЛАШЕНИЯ ----------
 async function rotateInviteCode() {
     if (!currentSpace) return;
-    if (!confirm('Сменить код приглашения? Старый код перестанет работать.')) return;
+    if (!confirm('Сменить код приглашения?')) return;
     try {
         const r = await apiPost(`/api/spaces/${currentSpace.id}/rotate-invite-code`, {});
-        alert(`✅ Новый код приглашения: ${r.inviteCode}\n\nСтарый код больше не действителен.`);
+        alert(`✅ Новый код: ${r.inviteCode}`);
         await window.__reloadSpaces?.();
     } catch (e) { alert(e.error || 'Ошибка'); }
 }
 
-// ---------- ПРОФИЛЬ: РЕДАКТИРОВАНИЕ ----------
+// ---------- ПРОФИЛЬ ----------
 const EMOJI_LIST = [
     '👤', '👨', '👩', '🧑', '👦', '👧', '👨‍🎓', '👩‍🎓', '🧑‍🎓', '👨‍🏫', '👩‍🏫',
     '😀', '😎', '🤓', '🥳', '🤔', '😴', '🧐', '🥸', '🤠', '😺', '🐶', '🐱', '🦊', '🐼', '🐨', '🦁', '🐯', '🦉', '🐧',
     '🍕', '🍔', '🍟', '🌮', '🍣', '🍎', '🍓', '🍉', '☕', '🍩', '🎂',
     '⚽', '🏀', '🎮', '🎧', '🎸', '🎨', '🚀', '⚡', '🔥', '⭐', '🌈', '💎', '🎯', '🏆', '🥇', '👑', '💡', '📚', '✏️', '🎓'
 ];
-
 let _selectedEmoji = '👤';
 let _editingProfileState = null;
 
 function openEditProfile(keepState) {
     if (!currentUser) return;
-
     if (!keepState) {
         _selectedEmoji = currentUser.avatarEmoji || '👤';
         const parts = (currentUser.fullName || '').split(' ');
@@ -563,9 +567,7 @@ function openEditProfile(keepState) {
             nickname: currentUser.isTeacher ? '' : (currentUser.username || '')
         };
     }
-
     const state = _editingProfileState || { firstName: '', lastName: '', nickname: '' };
-
     showFormSheet('✏️ Редактирование профиля', `
         <div style="text-align:center; margin:12px 0;">
             <div id="editAvatarPreview" style="font-size:4rem; cursor:pointer; user-select:none;" onclick="openEmojiPicker()">${_selectedEmoji}</div>
@@ -580,18 +582,13 @@ function openEditProfile(keepState) {
             lastName: fd.get('lastName') || '',
             nickname: fd.get('nickname') || ''
         };
-
         const r = await apiPost('/api/auth/update-profile', {
             firstName: _editingProfileState.firstName,
             lastName: _editingProfileState.lastName,
             nickname: currentUser.isTeacher ? null : _editingProfileState.nickname,
             avatarEmoji: _selectedEmoji
         });
-
-        if (!r || !r.success) {
-            throw new Error((r && r.error) || 'Не удалось сохранить профиль');
-        }
-
+        if (!r || !r.success) throw new Error((r && r.error) || 'Не удалось сохранить');
         currentUser = r.user;
         localStorage.setItem('user', JSON.stringify(r.user));
         closeDynamicSheet();
@@ -610,7 +607,6 @@ function openEmojiPicker() {
             nickname: fd.get('nickname') || ''
         };
     }
-
     const root = document.getElementById('dynamicSheetRoot');
     root.innerHTML = `
         <div class="sheet show" id="dynamicSheet">
@@ -624,12 +620,9 @@ function openEmojiPicker() {
     document.getElementById('sheetOverlay').classList.add('show');
 }
 
-function pickEmoji(e) {
-    _selectedEmoji = e;
-    openEditProfile(true);
-}
+function pickEmoji(e) { _selectedEmoji = e; openEditProfile(true); }
 
-// ---------- УНИВЕРСАЛЬНАЯ ФОРМА В ШТОРКЕ ----------
+// ---------- УНИВЕРСАЛЬНАЯ ФОРМА ----------
 function showFormSheet(title, bodyHtml, onSubmit, submitLabel = 'Сохранить') {
     const root = document.getElementById('dynamicSheetRoot');
     root.innerHTML = `
@@ -739,7 +732,6 @@ function emptySpaceState() {
     </div>`;
 }
 
-// ---------- ХЕЛПЕР: ОБНОВИТЬ ТЕКУЩУЮ ВКЛАДКУ ----------
 function refreshCurrentTab() {
     const activeTab = document.querySelector('.tab-section.active');
     if (activeTab) {
