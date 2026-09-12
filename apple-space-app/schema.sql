@@ -132,3 +132,27 @@ CREATE TABLE IF NOT EXISTS game_scores (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(space_id, user_id, game_id)
 );
+
+
+-- 11. Push-подписки браузеров
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    endpoint TEXT NOT NULL UNIQUE,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subscriptions(user_id);
+
+-- 12. Муты пушей чата (пользователь-пространство)
+CREATE TABLE IF NOT EXISTS chat_mutes (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    space_id UUID REFERENCES spaces(id) ON DELETE CASCADE,
+    muted_until TIMESTAMP WITH TIME ZONE,
+    muted_forever BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, space_id)
+);
+CREATE INDEX IF NOT EXISTS idx_chat_mutes_user_space ON chat_mutes(user_id, space_id);
