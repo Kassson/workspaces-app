@@ -219,3 +219,25 @@ h1.page-title { font-size: 1.6rem; margin-bottom: 20px; }
 .badge-green { background: rgba(52,199,89,0.12); color: var(--success); }
 .badge-orange { background: rgba(255,149,0,0.15); color: var(--warning); }
 .hidden { display: none !important; }
+
+/* ============ УЧАСТНИКИ ============ */
+.member-row { display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid var(--card-border); cursor:pointer; }
+.member-row:last-child { border-bottom:none; }
+.member-row:hover { background:var(--input-bg); border-radius:8px; }
+.member-avatar { font-size:1.6rem; width:40px; text-align:center; flex-shrink:0; }
+.member-info { flex:1; min-width:0; }
+.member-name { font-weight:500; }
+.member-username { color:var(--text-secondary); font-size:0.85rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* ============ ЭМОДЗИ-ПИКЕР ============ */
+.emoji-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(48px, 1fr)); gap:8px; margin:14px 0; max-height:400px; overflow-y:auto; }
+.emoji-btn { font-size:1.6rem; padding:8px; border:1px solid var(--card-border); border-radius:10px; background:var(--input-bg); cursor:pointer; transition:transform .15s; }
+.emoji-btn:hover { transform:scale(1.15); border-color:var(--accent-blue); }
+
+/* ============ РАСПИСАНИЕ: ДЕЙСТВИЯ ============ */
+.schedule-actions { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+.schedule-actions .btn-small { display:inline-flex; align-items:center; gap:6px; }
+
+/* ============ ДОМАШКА: СТАТИСТИКА ============ */
+.hw-stats-btn { display:inline-flex; align-items:center; gap:6px; }
+.hw-progress-ring { display:inline-block; vertical-align:middle; }
