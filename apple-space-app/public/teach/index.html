@@ -1,102 +1,202 @@
 <!DOCTYPE html>
-<html lang="ru" data-theme="dark">
+<html lang="ru" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Workspaces Faculty</title>
-    <!-- Путь начинается со слэша, чтобы подгрузить файл из корневой папки public -->
     <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-
     <button class="theme-toggle-btn" id="themeToggle">🌙</button>
 
     <div class="login-wrapper" id="loginWrapper">
         <div class="auth-container">
-            <!-- ВАШ НОВЫЙ ЛОГОТИП -->
             <div class="app-logo">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-                    <circle cx="256" cy="256" r="256" fill="#007AFF"/>
-                    <g transform="translate(64, 64) scale(16)" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none">
-                        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-                        <path d="M2 17l10 5 10-5"/>
-                        <path d="M2 12l10 5 10-5"/>
-                    </g>
-                </svg>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><circle cx="256" cy="256" r="256" fill="#007AFF"/><g transform="translate(64, 64) scale(16)" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></g></svg>
             </div>
-            <h1 class="app-title">Workspaces Faculty</h1>
-            <p class="app-subtitle">Вход для преподавателей</p>
+            
+            <div id="viewLogin">
+                <h1 class="app-title">Faculty</h1>
+                <p class="app-subtitle">Вход для преподавателей</p>
+                <form id="formLogin" onsubmit="handleLogin(event)">
+                    <div class="form-group"><input type="text" id="logInput" class="form-control" placeholder="Логин (Почта)" required></div>
+                    <div class="form-group"><input type="password" id="logPass" class="form-control" placeholder="Пароль" required></div>
+                    <button type="submit" class="btn-primary">Авторизоваться</button>
+                </form>
+                <button class="btn-text" onclick="switchView('viewForgot')">Забыли пароль?</button><br>
+                <button class="btn-text" onclick="switchView('viewReg')">Регистрация преподавателя</button>
+            </div>
 
-            <form id="loginForm">
-                <div class="form-group"><input type="text" id="loginInput" class="form-control" placeholder="Логин (например, root_teacher)" required></div>
-                <div class="form-group"><input type="password" id="passwordInput" class="form-control" placeholder="Пароль" required></div>
-                <button type="submit" class="btn-primary">Авторизоваться</button>
-            </form>
-            <p id="errorMsg" style="color: #FF3B30; font-size: 0.85rem; margin-top: 10px; display: none;"></p>
-            <a href="/" class="teacher-link-btn">← Студенческий портал</a>
+            <div id="viewReg" style="display: none;">
+                <h1 class="app-title">Регистрация</h1>
+                <p class="app-subtitle" style="font-size:0.8rem;">Подтверждение по почте не нужно.</p>
+                <form id="formReg" onsubmit="handleReg(event)">
+                    <div class="form-group"><input type="text" id="regFirst" class="form-control" placeholder="ФИО полностью" required></div>
+                    <div class="form-group"><input type="email" id="regEmail" class="form-control" placeholder="Рабочая почта" required></div>
+                    <div class="form-group"><input type="password" id="regPass1" class="form-control" placeholder="Пароль" required></div>
+                    <div class="form-group"><input type="password" id="regPass2" class="form-control" placeholder="Повторите пароль" required></div>
+                    <button type="submit" class="btn-primary">Создать аккаунт</button>
+                </form>
+                <button class="btn-text" onclick="switchView('viewLogin')">Отмена</button>
+            </div>
+
+            <div id="viewRegCode" style="display: none;">
+                <h1 class="app-title">Ваш код доступа</h1>
+                <p class="app-subtitle" style="margin-bottom: 10px;">Сообщите код авторизованному преподавателю:</p>
+                <h2 id="generatedCodeDisplay" style="font-size: 2.5rem; letter-spacing: 5px; color: var(--accent-blue); margin-bottom: 20px;">00000</h2>
+                <button class="btn-primary" onclick="switchView('viewLogin')">Перейти ко входу</button>
+            </div>
+
+            <div id="viewForgot" style="display: none;">
+                <h1 class="app-title">Сброс пароля</h1>
+                <p class="app-subtitle" style="font-size:0.8rem;">Сгенерированный код появится у коллег во вкладке "Авторизации".</p>
+                <div class="form-group" style="display:flex; gap:10px;">
+                    <input type="email" id="forgEmail" class="form-control" placeholder="Ваша почта" required>
+                    <button type="button" class="btn-primary" style="margin-top:0; width:120px; font-size:0.8rem;" onclick="requestResetCode()">Запросить</button>
+                </div>
+                <hr style="border: 0; border-top: 1px solid var(--card-border); margin: 15px 0;">
+                <form id="formForgot" onsubmit="applyReset(event)">
+                    <div class="form-group"><input type="text" id="forgCode" class="form-control" placeholder="Код от коллеги" required></div>
+                    <div class="form-group"><input type="password" id="forgPass1" class="form-control" placeholder="Новый пароль" required></div>
+                    <div class="form-group"><input type="password" id="forgPass2" class="form-control" placeholder="Повторите пароль" required></div>
+                    <button type="submit" class="btn-primary">Сохранить</button>
+                </form>
+                <button class="btn-text" onclick="switchView('viewLogin')">Назад</button>
+            </div>
+            
+            <p id="errorMsg" style="color: var(--danger); font-size: 0.85rem; margin-top: 10px;"></p>
         </div>
+        <a href="/" class="outside-link">← Студенческий портал</a>
     </div>
 
-    <!-- ПАНЕЛЬ УПРАВЛЕНИЯ ПРЕПОДАВАТЕЛЯ -->
+    <!-- ПАНЕЛЬ ПРЕПОДАВАТЕЛЯ -->
     <div class="app-dashboard" id="dashboard">
         <aside class="sidebar">
             <div class="sidebar-logo">Workspaces Faculty</div>
-            <a href="#" class="sidebar-item active">Настройки системы</a>
-            <button onclick="logout()" class="btn-primary" style="margin-top: auto;">Выйти</button>
+            <a onclick="showTab('tab-system')" class="sidebar-item active">Панель управления</a>
+            <a onclick="showTab('tab-spaces')" class="sidebar-item">Пространства (Группы)</a>
+            <a onclick="showTab('tab-hw')" class="sidebar-item">Домашние задания (ДЗ)</a>
+            <a onclick="showTab('tab-auths')" class="sidebar-item">Авторизации 🛡️</a>
+            <a onclick="showTab('tab-settings')" class="sidebar-item" style="margin-top: auto;">Настройки</a>
         </aside>
         <main class="main-content">
-            <h1 style="font-size: 2rem; margin-bottom: 20px;">Панель управления</h1>
-            <p style="color: var(--text-secondary);">Управление колледжем.</p>
+            <div id="tab-system" class="tab-section active">
+                <h1>Системная панель</h1>
+                <div class="settings-card"><p>Система готова к работе.</p></div>
+            </div>
+            <div id="tab-spaces" class="tab-section"><h1>Пространства</h1><div class="settings-card"><p>Управление группами.</p></div></div>
+            <div id="tab-hw" class="tab-section"><h1>Домашние задания</h1><div class="settings-card"><p>Проверка ДЗ.</p></div></div>
+
+            <div id="tab-auths" class="tab-section">
+                <h1>Авторизация коллег 🛡️</h1>
+                <div class="settings-card">
+                    <h3>Подтвердить регистрацию нового коллеги</h3>
+                    <div style="display:flex; gap:10px; max-width: 300px;">
+                        <input type="text" id="colleagueCode" class="form-control" placeholder="Код регистрации">
+                        <button class="btn-primary" style="margin:0; width: 140px;" onclick="verifyColleague()">Подтвердить</button>
+                    </div>
+                </div>
+                <div class="settings-card">
+                    <h3>Запросы на сброс пароля</h3>
+                    <button class="btn-text" style="margin-top:0; margin-bottom: 10px;" onclick="loadAuths()">🔄 Обновить список</button>
+                    <div id="resetRequestsList" style="background: var(--input-bg); padding: 15px; border-radius: 12px; font-size: 0.9rem;">
+                        Нет активных запросов.
+                    </div>
+                </div>
+            </div>
+
+            <div id="tab-settings" class="tab-section">
+                <h1>Настройки</h1>
+                <div class="settings-card">
+                    <button class="btn-danger" onclick="logout()">Выйти из аккаунта</button>
+                </div>
+            </div>
         </main>
     </div>
 
     <script>
         const themeBtn = document.getElementById('themeToggle');
-        const currentTheme = localStorage.getItem('theme') || 'dark';
+        const currentTheme = localStorage.getItem('theme') || 'light';
         document.documentElement.setAttribute('data-theme', currentTheme);
         themeBtn.textContent = currentTheme === 'dark' ? '☀️' : '🌙';
-
         themeBtn.addEventListener('click', () => {
             const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-            document.documentElement.setAttribute('data-theme', theme);
-            localStorage.setItem('theme', theme);
+            document.documentElement.setAttribute('data-theme', theme); localStorage.setItem('theme', theme);
             themeBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
         });
 
-        const loginForm = document.getElementById('loginForm');
         const errorMsg = document.getElementById('errorMsg');
+        function switchView(viewId) {
+            ['viewLogin', 'viewReg', 'viewRegCode', 'viewForgot'].forEach(id => document.getElementById(id).style.display = 'none');
+            document.getElementById(viewId).style.display = 'block'; errorMsg.textContent = '';
+        }
+        function showTab(tabId) {
+            document.querySelectorAll('.tab-section, .sidebar-item').forEach(el => el.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active'); event.currentTarget.classList.add('active');
+            if(tabId === 'tab-auths') loadAuths();
+        }
 
         if (localStorage.getItem('token') && localStorage.getItem('role') === 'teacher') {
             document.getElementById('loginWrapper').style.display = 'none';
             document.getElementById('dashboard').style.display = 'flex';
+            loadAuths();
         }
 
-        loginForm.addEventListener('submit', async (e) => {
+        async function handleReg(e) {
             e.preventDefault();
-            errorMsg.style.display = 'none';
-            
-            const res = await fetch('/api/auth/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    login: document.getElementById('loginInput').value,
-                    password: document.getElementById('passwordInput').value,
-                    isTeacher: true
-                })
+            if(document.getElementById('regPass1').value !== document.getElementById('regPass2').value) return errorMsg.textContent = 'Пароли не совпадают';
+            const res = await fetch('/api/teach/register', { method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ fullName: document.getElementById('regFirst').value, email: document.getElementById('regEmail').value, password: document.getElementById('regPass1').value })
+            });
+            const d = await res.json();
+            if (res.ok) { document.getElementById('generatedCodeDisplay').textContent = d.code; switchView('viewRegCode'); } 
+            else errorMsg.textContent = d.error;
+        }
+
+        async function requestResetCode() {
+            const email = document.getElementById('forgEmail').value;
+            if(!email) return errorMsg.textContent = 'Введите почту';
+            const res = await fetch('/api/teach/request-reset', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({email}) });
+            const d = await res.json(); if(res.ok) alert(d.message); else errorMsg.textContent = d.error;
+        }
+
+        async function applyReset(e) {
+            e.preventDefault();
+            if(document.getElementById('forgPass1').value !== document.getElementById('forgPass2').value) return errorMsg.textContent = 'Пароли не совпадают';
+            const res = await fetch('/api/teach/apply-reset', { method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ email: document.getElementById('forgEmail').value, code: document.getElementById('forgCode').value, password: document.getElementById('forgPass1').value })
+            });
+            const d = await res.json();
+            if (res.ok) { alert('Пароль изменен!'); switchView('viewLogin'); } else errorMsg.textContent = d.error;
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const res = await fetch('/api/auth/login', { method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ login: document.getElementById('logInput').value, password: document.getElementById('logPass').value, isTeacher: true })
             });
             const data = await res.json();
+            if (res.ok) { localStorage.setItem('token', data.token); localStorage.setItem('role', 'teacher'); location.reload(); } 
+            else errorMsg.textContent = data.error;
+        }
 
-            if (res.ok) {
-                localStorage.setItem('token', data.token);
-                localStorage.setItem('fullName', data.user.fullName);
-                localStorage.setItem('role', 'teacher');
-                location.reload();
-            } else {
-                errorMsg.textContent = data.error;
-                errorMsg.style.display = 'block';
-            }
-        });
+        async function loadAuths() {
+            const res = await fetch('/api/teach/pending', { headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` } });
+            if (!res.ok) return; const data = await res.json();
+            const list = document.getElementById('resetRequestsList');
+            if (data.resets.length === 0) { list.innerHTML = 'Нет активных запросов на сброс.'; return; }
+            list.innerHTML = data.resets.map(r => `<div>Почта: <b>${r.email}</b> -> Код для сброса: <span style="color:var(--accent-blue); font-weight:bold;">${r.code}</span></div>`).join('');
+        }
 
+        async function verifyColleague() {
+            const code = document.getElementById('colleagueCode').value; if(!code) return;
+            const res = await fetch('/api/teach/verify-colleague', { 
+                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+                body: JSON.stringify({ code }) 
+            });
+            const d = await res.json();
+            if(res.ok) { alert('Коллега авторизован!'); document.getElementById('colleagueCode').value = ''; } else alert(d.error);
+        }
         function logout() { localStorage.clear(); location.reload(); }
     </script>
 </body>
