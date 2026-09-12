@@ -519,18 +519,54 @@ app.get('/api/homework/:id/stats', verifyJWT, async (req, res) => {
     if (!hw.rows.length) return res.status(404).json({ error: 'Не найдено' });
     const spaceId = hw.rows[0].space_id;
     if (!(await isSpaceMember(user, spaceId))) return res.status(403).json({ error: 'Нет доступа' });
-    const total = await pool.query(`SELECT COUNT(*)::int AS c FROM space_members sm JOIN users u ON u.id = sm.user_id WHERE sm.space_id = $1 AND u.is_teacher = FALSE`, [spaceId]);
-    const completed = await pool.query(`SELECT COUNT(*)::int AS c FROM homework_completions hc JOIN users u ON u.id = hc.user_id WHERE hc.homework_id = $1 AND u.is_teacher = FALSE`, [req.params.id]);
-    const totalCount = total.rows[0].c;
-    const completedCount = completed.rows[0].c;
-    const percentage = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+
+    // СТРОГАЯ ЗАЩИТА: только преподаватель/админ
     const isAdmin = await isSpaceAdmin(user, spaceId);
-    let students = [];
-    if (isAdmin) {
-        const r = await pool.query(`SELECT u.id, u.full_name, u.username, u.avatar_emoji, hc.completed_at FROM homework_completions hc JOIN users u ON u.id = hc.user_id WHERE hc.homework_id = $1 AND u.is_teacher = FALSE ORDER BY hc.completed_at DESC`, [req.params.id]);
-        students = r.rows;
-    }
-    res.json({ percentage, completed: completedCount, total: totalCount, students, canSeeStudents: isAdmin });
+    if (!isAdmin) return res.status(403).json({ error: 'Только преподаватель/админ может видеть статистику' });
+
+    const dueDate = hw.rows[0].due_date;
+    const now = new Date();
+    const dueDateObj = new Date(dueDate);
+    dueDateObj.setHours(23, 59, 59, 999);
+    const isOverdue = dueDateObj < now;
+
+    // Все ученики группы + их статус
+    const r = await pool.query(
+        `SELECT u.id, u.full_name, u.username, u.avatar_emoji,
+                hc.completed_at, hc.attachment_url,
+                (hc.id IS NOT NULL) AS is_done
+         FROM space_members sm
+         JOIN users u ON u.id = sm.user_id
+         LEFT JOIN homework_completions hc ON hc.homework_id = $1 AND hc.user_id = u.id
+         WHERE sm.space_id = $2 AND u.is_teacher = FALSE
+         ORDER BY (hc.id IS NULL) ASC, u.full_name ASC`,
+        [req.params.id, spaceId]
+    );
+
+    const students = r.rows.map(s => ({
+        id: s.id,
+        fullName: s.full_name,
+        username: s.username,
+        avatarEmoji: s.avatar_emoji || '👤',
+        isDone: !!s.is_done,
+        completedAt: s.completed_at,
+        attachmentUrl: s.attachment_url,
+        status: s.is_done ? 'done' : (isOverdue ? 'overdue' : 'pending')
+    }));
+
+    const totalCount = students.length;
+    const completedCount = students.filter(s => s.isDone).length;
+    const percentage = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+
+    res.json({
+        percentage,
+        completed: completedCount,
+        total: totalCount,
+        students,
+        dueDate,
+        isOverdue,
+        canSeeStudents: true
+    });
 });
 
 app.post('/api/homework', verifyJWT, requireSpaceAdmin, async (req, res) => {
