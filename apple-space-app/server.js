@@ -321,8 +321,16 @@ app.post('/api/spaces/:spaceId/rotate-invite-code', verifyJWT, requireSpaceAdmin
     res.json({ success: true, inviteCode: newCode });
 });
 
+// ================= УЧАСТНИКИ =================
 app.get('/api/spaces/:spaceId/members', verifyJWT, requireSpaceAccess, async (req, res) => {
-    const r = await pool.query(`SELECT u.id, u.username, u.full_name, u.is_teacher, u.avatar_emoji, sm.role, sm.joined_at, sm.muted_until FROM space_members sm JOIN users u ON u.id = sm.user_id WHERE sm.space_id = $1 ORDER BY CASE sm.role WHEN 'admin' THEN 0 WHEN 'starosta' THEN 1 ELSE 2 END, u.full_name`, [req.params.spaceId]);
+    const r = await pool.query(
+        `SELECT u.id, u.username, u.full_name, u.is_teacher, u.avatar_emoji, sm.role, sm.custom_status, sm.joined_at, sm.muted_until
+         FROM space_members sm
+         JOIN users u ON u.id = sm.user_id
+         WHERE sm.space_id = $1 AND u.is_teacher = FALSE
+         ORDER BY CASE sm.role WHEN 'admin' THEN 0 WHEN 'starosta' THEN 1 ELSE 2 END, u.full_name`,
+        [req.params.spaceId]
+    );
     res.json(r.rows);
 });
 
@@ -330,14 +338,43 @@ app.post('/api/spaces/:spaceId/members/:userId/role', verifyJWT, requireSpaceAdm
     const { role } = req.body;
     if (!['admin', 'member'].includes(role)) return res.status(400).json({ error: 'Роль: admin или member' });
     if (req.params.userId === req.currentUser.id) return res.status(400).json({ error: 'Нельзя изменить свою роль' });
-    const r = await pool.query('UPDATE space_members SET role = $1 WHERE space_id = $2 AND user_id = $3 RETURNING *', [role, req.params.spaceId, req.params.userId]);
+
+    const target = await pool.query('SELECT is_teacher FROM users WHERE id = $1', [req.params.userId]);
+    if (target.rows[0]?.is_teacher) return res.status(403).json({ error: 'Нельзя менять роль преподавателя' });
+
+    const r = await pool.query(
+        'UPDATE space_members SET role = $1 WHERE space_id = $2 AND user_id = $3 RETURNING *',
+        [role, req.params.spaceId, req.params.userId]
+    );
     if (!r.rows.length) return res.status(404).json({ error: 'Не найден' });
     io.to(`space:${req.params.spaceId}`).emit('members_updated');
     res.json(r.rows[0]);
 });
 
+// ===== КАСТОМНЫЙ СТАТУС =====
+app.post('/api/spaces/:spaceId/members/:userId/custom-status', verifyJWT, requireSpaceAdmin, async (req, res) => {
+    const { customStatus } = req.body;
+    if (typeof customStatus !== 'string') return res.status(400).json({ error: 'Неверный формат' });
+    const trimmed = customStatus.trim().slice(0, 50);
+    if (trimmed && violatesProfanityFilter(trimmed)) return res.status(400).json({ error: 'Запрещённые слова' });
+
+    const target = await pool.query('SELECT is_teacher FROM users WHERE id = $1', [req.params.userId]);
+    if (target.rows[0]?.is_teacher) return res.status(403).json({ error: 'Нельзя менять статус преподавателя' });
+
+    await pool.query(
+        'UPDATE space_members SET custom_status = $1 WHERE space_id = $2 AND user_id = $3',
+        [trimmed || null, req.params.spaceId, req.params.userId]
+    );
+    io.to(`space:${req.params.spaceId}`).emit('members_updated');
+    res.json({ success: true });
+});
+
 app.delete('/api/spaces/:spaceId/members/:userId', verifyJWT, requireSpaceAdmin, async (req, res) => {
     if (req.params.userId === req.currentUser.id) return res.status(400).json({ error: 'Нельзя исключить себя' });
+
+    const target = await pool.query('SELECT is_teacher FROM users WHERE id = $1', [req.params.userId]);
+    if (target.rows[0]?.is_teacher) return res.status(403).json({ error: 'Нельзя исключить преподавателя' });
+
     await pool.query('DELETE FROM space_members WHERE space_id = $1 AND user_id = $2', [req.params.spaceId, req.params.userId]);
     io.to(`space:${req.params.spaceId}`).emit('members_updated');
     res.json({ message: 'Исключён' });
@@ -346,6 +383,10 @@ app.delete('/api/spaces/:spaceId/members/:userId', verifyJWT, requireSpaceAdmin,
 app.post('/api/spaces/:spaceId/members/:userId/mute', verifyJWT, requireSpaceAdmin, async (req, res) => {
     const { minutes } = req.body;
     if (req.params.userId === req.currentUser.id) return res.status(400).json({ error: 'Нельзя замутить себя' });
+
+    const target = await pool.query('SELECT is_teacher FROM users WHERE id = $1', [req.params.userId]);
+    if (target.rows[0]?.is_teacher) return res.status(403).json({ error: 'Нельзя замутить преподавателя' });
+
     const until = minutes > 0 ? new Date(Date.now() + minutes * 60000) : null;
     await pool.query('UPDATE space_members SET muted_until = $1 WHERE space_id = $2 AND user_id = $3', [until, req.params.spaceId, req.params.userId]);
     io.to(`space:${req.params.spaceId}`).emit('members_updated');
@@ -361,9 +402,15 @@ app.delete('/api/spaces/:spaceId/members/:userId/mute', verifyJWT, requireSpaceA
 app.post('/api/spaces/:spaceId/members/:userId/block', verifyJWT, requireSpaceAdmin, async (req, res) => {
     const { reason } = req.body;
     if (req.params.userId === req.currentUser.id) return res.status(400).json({ error: 'Нельзя забанить себя' });
-    const target = await pool.query('SELECT role FROM space_members WHERE space_id = $1 AND user_id = $2', [req.params.spaceId, req.params.userId]);
+
+    const target = await pool.query(
+        'SELECT sm.role, u.is_teacher FROM space_members sm JOIN users u ON u.id = sm.user_id WHERE sm.space_id = $1 AND sm.user_id = $2',
+        [req.params.spaceId, req.params.userId]
+    );
     if (!target.rows.length) return res.status(404).json({ error: 'Не найден' });
+    if (target.rows[0].is_teacher) return res.status(403).json({ error: 'Нельзя забанить преподавателя' });
     if (target.rows[0].role === 'admin' && !req.currentUser.is_teacher) return res.status(403).json({ error: 'Только преподаватель' });
+
     await pool.query('DELETE FROM space_members WHERE space_id = $1 AND user_id = $2', [req.params.spaceId, req.params.userId]);
     await pool.query('INSERT INTO space_blocked (space_id, user_id, blocked_by, reason) VALUES ($1, $2, $3, $4) ON CONFLICT (space_id, user_id) DO UPDATE SET blocked_by = EXCLUDED.blocked_by, reason = EXCLUDED.reason, blocked_at = NOW()', [req.params.spaceId, req.params.userId, req.currentUser.id, reason || null]);
     io.to(`space:${req.params.spaceId}`).emit('members_updated');
@@ -520,9 +567,8 @@ app.get('/api/homework/:id/stats', verifyJWT, async (req, res) => {
     const spaceId = hw.rows[0].space_id;
     if (!(await isSpaceMember(user, spaceId))) return res.status(403).json({ error: 'Нет доступа' });
 
-    // СТРОГАЯ ЗАЩИТА: только преподаватель/админ
     const isAdmin = await isSpaceAdmin(user, spaceId);
-    if (!isAdmin) return res.status(403).json({ error: 'Только преподаватель/админ может видеть статистику' });
+    if (!isAdmin) return res.status(403).json({ error: 'Только преподаватель/админ' });
 
     const dueDate = hw.rows[0].due_date;
     const now = new Date();
@@ -530,7 +576,6 @@ app.get('/api/homework/:id/stats', verifyJWT, async (req, res) => {
     dueDateObj.setHours(23, 59, 59, 999);
     const isOverdue = dueDateObj < now;
 
-    // Все ученики группы + их статус
     const r = await pool.query(
         `SELECT u.id, u.full_name, u.username, u.avatar_emoji,
                 hc.completed_at, hc.attachment_url,
@@ -558,15 +603,7 @@ app.get('/api/homework/:id/stats', verifyJWT, async (req, res) => {
     const completedCount = students.filter(s => s.isDone).length;
     const percentage = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
-    res.json({
-        percentage,
-        completed: completedCount,
-        total: totalCount,
-        students,
-        dueDate,
-        isOverdue,
-        canSeeStudents: true
-    });
+    res.json({ percentage, completed: completedCount, total: totalCount, students, dueDate, isOverdue, canSeeStudents: true });
 });
 
 app.post('/api/homework', verifyJWT, requireSpaceAdmin, async (req, res) => {
@@ -677,15 +714,9 @@ function findOrCreateRoom(gameType) {
     }
     const roomId = 'room_' + (++roomCounter);
     gameRooms[roomId] = {
-        id: roomId,
-        gameType: gameType,
-        status: 'waiting',
-        players: [],
-        minPlayers: ROOM_CONFIG[gameType].min,
-        maxPlayers: ROOM_CONFIG[gameType].max,
-        countdown: 5,
-        state: null,
-        round: 1,
+        id: roomId, gameType: gameType, status: 'waiting', players: [],
+        minPlayers: ROOM_CONFIG[gameType].min, maxPlayers: ROOM_CONFIG[gameType].max,
+        countdown: 5, state: null, round: 1,
         maxRounds: gameType === 'cyber-arena' ? 7 : 1,
         teamScore: { red: 0, blue: 0 }
     };
@@ -697,8 +728,7 @@ function publicRoom(room) {
         id: room.id, gameType: room.gameType, status: room.status,
         countdown: room.countdown, players: room.players,
         minPlayers: room.minPlayers, maxPlayers: room.maxPlayers,
-        round: room.round, maxRounds: room.maxRounds,
-        teamScore: room.teamScore
+        round: room.round, maxRounds: room.maxRounds, teamScore: room.teamScore
     };
 }
 
@@ -718,8 +748,7 @@ function checkRoomStart(room) {
 
 function startRoomGame(room) {
     room.status = 'playing';
-    const W = 800, H = 500;
-    const n = room.players.length;
+    const W = 800, H = 500, n = room.players.length;
     const COLORS = ['#30d158', '#0a84ff', '#ff453a', '#ffd60a', '#bf5af2', '#00e5ff', '#ff9500', '#ff2d55', '#5e5ce6', '#32d74b'];
 
     if (room.gameType === 'battle-tanks') {
@@ -729,15 +758,13 @@ function startRoomGame(room) {
                 id: p.id, fullName: p.fullName, color: COLORS[i],
                 x: positions[i][0], y: positions[i][1],
                 angle: i < 2 ? Math.PI / 2 : -Math.PI / 2,
-                hp: 100, maxHp: 100,
-                input: { dx: 0, dy: 0 }, fire: false, cd: 0, alive: true
+                hp: 100, maxHp: 100, input: { dx: 0, dy: 0 }, fire: false, cd: 0, alive: true
             })),
             bullets: []
         };
     } else if (room.gameType === 'brawl-royale') {
         room.state = {
-            zoneR: 900, zoneMin: 60, zoneShrink: 0.15,
-            pickups: [], pickupsSpawnCd: 60,
+            zoneR: 900, zoneMin: 60, zoneShrink: 0.15, pickups: [], pickupsSpawnCd: 60,
             players: room.players.map((p, i) => {
                 const c = BRAWL_CHARS[i % BRAWL_CHARS.length];
                 const ang = (i / n) * Math.PI * 2;
@@ -745,8 +772,7 @@ function startRoomGame(room) {
                     id: p.id, fullName: p.fullName, charId: c.id, charName: c.name,
                     color: c.color, emoji: c.emoji,
                     x: W / 2 + Math.cos(ang) * 180, y: H / 2 + Math.sin(ang) * 120,
-                    angle: 0, hp: c.hp, maxHp: c.hp,
-                    dmgBonus: 0, speedBonus: 0,
+                    angle: 0, hp: c.hp, maxHp: c.hp, dmgBonus: 0, speedBonus: 0,
                     input: { dx: 0, dy: 0 }, aim: { dx: 0, dy: 0, power: 0 },
                     cd: 0, superCharge: 0, superActive: 0, alive: true
                 };
@@ -758,10 +784,8 @@ function startRoomGame(room) {
         room.state = {
             mapW: W, mapH: H,
             walls: [
-                { x: 200, y: 120, w: 80, h: 30 },
-                { x: 520, y: 120, w: 80, h: 30 },
-                { x: 200, y: 350, w: 80, h: 30 },
-                { x: 520, y: 350, w: 80, h: 30 },
+                { x: 200, y: 120, w: 80, h: 30 }, { x: 520, y: 120, w: 80, h: 30 },
+                { x: 200, y: 350, w: 80, h: 30 }, { x: 520, y: 350, w: 80, h: 30 },
                 { x: 380, y: 220, w: 40, h: 60 }
             ],
             players: room.players.map((p, i) => {
@@ -769,11 +793,9 @@ function startRoomGame(room) {
                 const w = CYBER_WEAPONS[i % CYBER_WEAPONS.length];
                 const idx = isRed ? i : (i - half);
                 return {
-                    id: p.id, fullName: p.fullName,
-                    team: isRed ? 'red' : 'blue',
+                    id: p.id, fullName: p.fullName, team: isRed ? 'red' : 'blue',
                     weaponId: w.id, weaponName: w.name,
-                    x: isRed ? 100 : W - 100,
-                    y: 80 + idx * 80,
+                    x: isRed ? 100 : W - 100, y: 80 + idx * 80,
                     angle: isRed ? 0 : Math.PI,
                     hp: 100, maxHp: 100,
                     input: { dx: 0, dy: 0 }, aim: { dx: 0, dy: 0, power: 0 },
@@ -791,7 +813,6 @@ function tickRoomGame(room) {
     if (room.status !== 'playing') return;
     const W = 800, H = 500;
 
-    // ====== BATTLE TANKS ======
     if (room.gameType === 'battle-tanks') {
         const sp = 3;
         room.state.players.forEach(p => {
@@ -824,8 +845,7 @@ function tickRoomGame(room) {
             for (const p of room.state.players) {
                 if (!p.alive || p.id === b.owner) continue;
                 if (Math.hypot(p.x - b.x, p.y - b.y) < 20) {
-                    p.hp -= b.dmg;
-                    room.state.bullets.splice(i, 1);
+                    p.hp -= b.dmg; room.state.bullets.splice(i, 1);
                     if (p.hp <= 0) { p.hp = 0; p.alive = false; }
                     break;
                 }
@@ -833,10 +853,7 @@ function tickRoomGame(room) {
         }
         const alive = room.state.players.filter(p => p.alive);
         if (alive.length <= 1) { endRoomGame(room, alive[0] ? alive[0].fullName : 'Ничья'); return; }
-    }
-
-    // ====== BRAWL ROYALE ======
-    else if (room.gameType === 'brawl-royale') {
+    } else if (room.gameType === 'brawl-royale') {
         if (room.state.zoneR > room.state.zoneMin) room.state.zoneR -= room.state.zoneShrink;
         room.state.players.forEach(p => {
             if (!p.alive) return;
@@ -874,8 +891,7 @@ function tickRoomGame(room) {
                         room.state.bullets.push({
                             x: p.x + Math.cos(a2) * 20, y: p.y + Math.sin(a2) * 20,
                             vx: Math.cos(a2) * 11, vy: Math.sin(a2) * 11,
-                            owner: p.id, dmg: 20, color: p.color,
-                            range: 400, traveled: 0
+                            owner: p.id, dmg: 20, color: p.color, range: 400, traveled: 0
                         });
                     }
                 }
@@ -884,14 +900,12 @@ function tickRoomGame(room) {
         });
         for (let i = room.state.bullets.length - 1; i >= 0; i--) {
             const b = room.state.bullets[i];
-            b.x += b.vx; b.y += b.vy;
-            b.traveled += Math.hypot(b.vx, b.vy);
+            b.x += b.vx; b.y += b.vy; b.traveled += Math.hypot(b.vx, b.vy);
             if (b.traveled > b.range || b.x < 0 || b.x > W || b.y < 0 || b.y > H) { room.state.bullets.splice(i, 1); continue; }
             for (const p of room.state.players) {
                 if (!p.alive || p.id === b.owner) continue;
                 if (Math.hypot(p.x - b.x, p.y - b.y) < 18) {
-                    p.hp -= b.dmg;
-                    room.state.bullets.splice(i, 1);
+                    p.hp -= b.dmg; room.state.bullets.splice(i, 1);
                     if (p.hp <= 0) {
                         p.alive = false; p.hp = 0;
                         const killer = room.state.players.find(x => x.id === b.owner);
@@ -906,14 +920,12 @@ function tickRoomGame(room) {
             room.state.pickupsSpawnCd = 120 + Math.random() * 120;
             const types = ['hp', 'dmg', 'spd'];
             room.state.pickups.push({
-                x: 60 + Math.random() * (W - 120),
-                y: 60 + Math.random() * (H - 120),
+                x: 60 + Math.random() * (W - 120), y: 60 + Math.random() * (H - 120),
                 r: 14, type: types[Math.floor(Math.random() * 3)], life: 600
             });
         }
         for (let i = room.state.pickups.length - 1; i >= 0; i--) {
-            const pu = room.state.pickups[i];
-            pu.life--;
+            const pu = room.state.pickups[i]; pu.life--;
             if (pu.life <= 0) { room.state.pickups.splice(i, 1); continue; }
             for (const p of room.state.players) {
                 if (!p.alive) continue;
@@ -928,10 +940,7 @@ function tickRoomGame(room) {
         }
         const alive = room.state.players.filter(p => p.alive);
         if (alive.length <= 1) { endRoomGame(room, alive[0] ? alive[0].fullName : 'Ничья'); return; }
-    }
-
-    // ====== CYBER ARENA ======
-    else if (room.gameType === 'cyber-arena') {
+    } else if (room.gameType === 'cyber-arena') {
         const sp = 3.2;
         room.state.players.forEach(p => {
             if (!p.alive) return;
@@ -976,8 +985,7 @@ function tickRoomGame(room) {
             for (const p of room.state.players) {
                 if (!p.alive || p.id === b.owner || p.team === b.team) continue;
                 if (Math.hypot(p.x - b.x, p.y - b.y) < 16) {
-                    p.hp -= b.dmg;
-                    room.state.bullets.splice(i, 1);
+                    p.hp -= b.dmg; room.state.bullets.splice(i, 1);
                     if (p.hp <= 0) { p.hp = 0; p.alive = false; }
                     break;
                 }
@@ -1011,7 +1019,6 @@ function endRound(room, winner) {
     } else {
         setTimeout(() => {
             room.round++;
-            // сохраняем команды, сбрасываем HP
             room.state.players.forEach(p => { p.hp = p.maxHp; p.alive = true; });
             const W = 800;
             room.state.players.forEach((p, i) => {
@@ -1043,7 +1050,6 @@ function endRoomGame(room, winner) {
 
 // ================= SOCKET.IO =================
 io.on('connection', async (socket) => {
-    // Определяем пользователя
     try {
         const token = socket.handshake.query && socket.handshake.query.token;
         if (token && token !== 'null' && token !== '') {
@@ -1093,7 +1099,6 @@ io.on('connection', async (socket) => {
         io.to(`space:${socket.spaceId}`).emit('user_muted', { userId, until });
     });
 
-    // ====== ИГРЫ ======
     socket.on('game:join_room', async ({ gameType }) => {
         if (!socket.gameUser) { socket.emit('game:error', { error: 'Не авторизован' }); return; }
         if (!ROOM_CONFIG[gameType]) { socket.emit('game:error', { error: 'Игра не найдена' }); return; }
@@ -1106,10 +1111,8 @@ io.on('connection', async (socket) => {
         }
         if (room.players.length >= room.maxPlayers) { socket.emit('game:error', { error: 'Комната заполнена' }); return; }
         room.players.push({
-            id: socket.gameUser.id,
-            fullName: socket.gameUser.full_name,
-            avatarEmoji: socket.gameUser.avatar_emoji || '👤',
-            ready: false
+            id: socket.gameUser.id, fullName: socket.gameUser.full_name,
+            avatarEmoji: socket.gameUser.avatar_emoji || '👤', ready: false
         });
         socket.join('game:' + room.id);
         socket.gameRoomId = room.id;
@@ -1132,7 +1135,7 @@ io.on('connection', async (socket) => {
         room.players = room.players.filter(p => p.id !== socket.gameUser.id);
         socket.leave('game:' + room.id);
         socket.gameRoomId = null;
-        if (room.players.length === 0) { delete gameRooms[room.id]; }
+        if (room.players.length === 0) delete gameRooms[room.id];
         else io.to('game:' + room.id).emit('game:room_update', publicRoom(room));
     });
 
@@ -1187,6 +1190,7 @@ async function ensureSchema() {
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_emoji VARCHAR(50) DEFAULT '👤'`,
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT DEFAULT NULL`,
         `ALTER TABLE space_members ADD COLUMN IF NOT EXISTS muted_until TIMESTAMP WITH TIME ZONE`,
+        `ALTER TABLE space_members ADD COLUMN IF NOT EXISTS custom_status VARCHAR(50) DEFAULT NULL`,
         `CREATE TABLE IF NOT EXISTS space_blocked (
             id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
             space_id UUID REFERENCES spaces(id) ON DELETE CASCADE,
