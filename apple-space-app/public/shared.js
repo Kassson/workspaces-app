@@ -155,7 +155,19 @@ async function disablePush() {
     }
 }
 
-// --- Муты чата ---
+// --- Глобальные муты пушей (для всего пользователя) ---
+async function getPushMute() {
+    try { return await apiGet('/api/push/mute'); }
+    catch (e) { return { muted_until: null, muted_forever: false }; }
+}
+async function setPushMute(duration) {
+    return apiPost('/api/push/mute', { duration });
+}
+async function clearPushMute() {
+    return apiDelete('/api/push/mute');
+}
+
+// --- Муты чата (для конкретного пространства) ---
 async function getChatMute(spaceId) {
     try { return await apiGet(`/api/spaces/${spaceId}/chat-mute`); }
     catch (e) { return { muted_until: null, muted_forever: false }; }
