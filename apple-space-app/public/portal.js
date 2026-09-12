@@ -12,20 +12,17 @@ socket.on('settings_updated', (s) => { systemSettings = s; applyGlobalSettings(w
 
 function applyGlobalSettings(currentUser) {
     window.__currentUser = currentUser;
-    // Баннер объявления
     const banner = document.getElementById('announcementBanner');
     if (banner) {
         if (systemSettings.global_announcement) { banner.textContent = '📢 ' + systemSettings.global_announcement; banner.classList.add('show'); }
         else banner.classList.remove('show');
     }
-    // Технические работы
     const maint = document.getElementById('maintenanceScreen');
     const isPrivileged = currentUser && currentUser.isTeacher;
     if (maint) {
         if (systemSettings.maintenance_mode && !isPrivileged) maint.classList.add('show');
         else maint.classList.remove('show');
     }
-    // Экзамены
     document.querySelectorAll('.chat-input-row').forEach(el => {
         el.classList.toggle('hidden', !!systemSettings.exams_mode && currentUser && !currentUser.isTeacher);
     });
@@ -550,35 +547,70 @@ const EMOJI_LIST = [
     '🍕', '🍔', '🍟', '🌮', '🍣', '🍎', '🍓', '🍉', '☕', '🍩', '🎂',
     '⚽', '🏀', '🎮', '🎧', '🎸', '🎨', '🚀', '⚡', '🔥', '⭐', '🌈', '💎', '🎯', '🏆', '🥇', '👑', '💡', '📚', '✏️', '🎓'
 ];
-let _selectedEmoji = '👤';
 
-function openEditProfile() {
+let _selectedEmoji = '👤';
+let _editingProfileState = null;
+
+function openEditProfile(keepState) {
     if (!currentUser) return;
-    const parts = (currentUser.fullName || '').split(' ');
-    _selectedEmoji = currentUser.avatarEmoji || '👤';
+
+    if (!keepState) {
+        _selectedEmoji = currentUser.avatarEmoji || '👤';
+        const parts = (currentUser.fullName || '').split(' ');
+        _editingProfileState = {
+            firstName: parts[0] || '',
+            lastName: parts.slice(1).join(' ') || '',
+            nickname: currentUser.isTeacher ? '' : (currentUser.username || '')
+        };
+    }
+
+    const state = _editingProfileState || { firstName: '', lastName: '', nickname: '' };
+
     showFormSheet('✏️ Редактирование профиля', `
         <div style="text-align:center; margin:12px 0;">
-            <div id="editAvatarPreview" style="font-size:4rem; cursor:pointer;" onclick="openEmojiPicker()">${_selectedEmoji}</div>
+            <div id="editAvatarPreview" style="font-size:4rem; cursor:pointer; user-select:none;" onclick="openEmojiPicker()">${_selectedEmoji}</div>
             <p style="color:var(--text-secondary); font-size:0.85rem; margin:4px 0 0;">Нажмите, чтобы сменить аватар</p>
         </div>
-        <div class="form-group"><input name="firstName" class="form-control" placeholder="Имя" value="${escapeHtml(parts[0] || '')}" required></div>
-        <div class="form-group"><input name="lastName" class="form-control" placeholder="Фамилия" value="${escapeHtml(parts.slice(1).join(' ') || '')}" required></div>
-        ${currentUser.isTeacher ? '' : `<div class="form-group"><input name="nickname" class="form-control" placeholder="Ник (логин)" value="${escapeHtml(currentUser.username || '')}"></div>`}
+        <div class="form-group"><input name="firstName" class="form-control" placeholder="Имя" value="${escapeHtml(state.firstName)}" required></div>
+        <div class="form-group"><input name="lastName" class="form-control" placeholder="Фамилия" value="${escapeHtml(state.lastName)}" required></div>
+        ${currentUser.isTeacher ? '' : `<div class="form-group"><input name="nickname" class="form-control" placeholder="Ник (логин)" value="${escapeHtml(state.nickname)}"></div>`}
     `, async (fd) => {
+        _editingProfileState = {
+            firstName: fd.get('firstName') || '',
+            lastName: fd.get('lastName') || '',
+            nickname: fd.get('nickname') || ''
+        };
+
         const r = await apiPost('/api/auth/update-profile', {
-            firstName: fd.get('firstName'),
-            lastName: fd.get('lastName'),
-            nickname: currentUser.isTeacher ? null : fd.get('nickname'),
+            firstName: _editingProfileState.firstName,
+            lastName: _editingProfileState.lastName,
+            nickname: currentUser.isTeacher ? null : _editingProfileState.nickname,
             avatarEmoji: _selectedEmoji
         });
+
+        if (!r || !r.success) {
+            throw new Error((r && r.error) || 'Не удалось сохранить профиль');
+        }
+
         currentUser = r.user;
         localStorage.setItem('user', JSON.stringify(r.user));
+        closeDynamicSheet();
         alert('✅ Профиль сохранён');
         location.reload();
     }, 'Сохранить');
 }
 
 function openEmojiPicker() {
+    const form = document.getElementById('dynamicSheetForm');
+    if (form) {
+        const fd = new FormData(form);
+        _editingProfileState = {
+            firstName: fd.get('firstName') || '',
+            lastName: fd.get('lastName') || '',
+            nickname: fd.get('nickname') || ''
+        };
+    }
+
     const root = document.getElementById('dynamicSheetRoot');
     root.innerHTML = `
         <div class="sheet show" id="dynamicSheet">
@@ -587,14 +619,14 @@ function openEmojiPicker() {
             <div class="emoji-grid">
                 ${EMOJI_LIST.map(e => `<button type="button" class="emoji-btn" onclick="pickEmoji('${e}')">${e}</button>`).join('')}
             </div>
-            <button type="button" class="btn-secondary" style="margin-top:14px;" onclick="openEditProfile()">Назад</button>
+            <button type="button" class="btn-secondary" style="margin-top:14px;" onclick="openEditProfile(true)">Назад</button>
         </div>`;
     document.getElementById('sheetOverlay').classList.add('show');
 }
 
 function pickEmoji(e) {
     _selectedEmoji = e;
-    openEditProfile();
+    openEditProfile(true);
 }
 
 // ---------- УНИВЕРСАЛЬНАЯ ФОРМА В ШТОРКЕ ----------
@@ -613,7 +645,7 @@ function showFormSheet(title, bodyHtml, onSubmit, submitLabel = 'Сохрани�
     document.getElementById('dynamicSheetForm').onsubmit = async (e) => {
         e.preventDefault();
         try { await onSubmit(new FormData(e.target)); closeDynamicSheet(); }
-        catch (err) { alert(err.error || 'Ошибка сохранения'); }
+        catch (err) { alert(err.error || err.message || 'Ошибка сохранения'); }
     };
 }
 function closeDynamicSheet() {
@@ -711,7 +743,6 @@ function emptySpaceState() {
 function refreshCurrentTab() {
     const activeTab = document.querySelector('.tab-section.active');
     if (activeTab) {
-        // Определяем админский режим по роли пользователя
         const isAdmin = currentUser?.isTeacher || currentSpace?.is_admin;
         const spaceId = currentSpace?.id;
         if (activeTab.id === 'tab-schedule') renderScheduleTab(activeTab, spaceId, !!isAdmin);
