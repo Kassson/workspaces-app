@@ -1,5 +1,4 @@
 /* ===================== ОБЩАЯ ЛОГИКА ПОРТАЛА (студент + преподаватель) ===================== */
-const socket = io();
 let systemSettings = {};
 let currentSpace = null;
 
