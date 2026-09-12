@@ -184,7 +184,7 @@
             if (tabId === 'tab-hw') renderHomeworkTab(document.getElementById('tab-hw'), spaceId, isAdmin);
             if (tabId === 'tab-members') renderMembersTab(document.getElementById('tab-members'), spaceId, isAdmin);
             if (tabId === 'tab-chat') renderChatTab(document.getElementById('tab-chat'), spaceId, isAdmin, currentUser?.id);
-            if (tabId === 'tab-games') { if (!activeGame) renderGamesMenu(document.getElementById('tab-games')); }
+            if (tabId === 'tab-games') { if (!window.activeGame) renderGamesMenu(document.getElementById('tab-games')); }
             if (tabId === 'tab-settings') renderSpaceActions();
         }
 
