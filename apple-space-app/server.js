@@ -6,7 +6,6 @@ const { Pool } = require('pg');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const path = require('path');
-const nodemailer = require('nodemailer');
 
 const app = express();
 const server = http.createServer(app);
@@ -23,59 +22,82 @@ const pool = new Pool({
 });
 const JWT_SECRET = process.env.JWT_SECRET || 'workspaces_secret_key';
 
-// Почта для студентов
-const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }
-});
-
-const otpStore = new Map(); // Студенты (код по почте)
 const teacherRegCodes = new Map(); // Регистрация учителей (код -> email)
 const teacherResetCodes = new Map(); // Сброс пароля учителей (email -> код)
 
-function generateOTP() { return Math.floor(100000 + Math.random() * 900000).toString(); }
 function generateTeacherCode() { return Math.floor(10000 + Math.random() * 90000).toString(); }
 
-// ================= СТУДЕНТЫ =================
-app.post('/api/auth/send-code', async (req, res) => {
-    const { email } = req.body;
-    const otp = generateOTP();
-    otpStore.set(email, { code: otp, expires: Date.now() + 10 * 60000 });
-    try {
-        await transporter.sendMail({ from: process.env.EMAIL_USER, to: email, subject: 'Код Workspaces', text: `Ваш код: ${otp}` });
-        res.json({ message: 'Код отправлен на почту' });
-    } catch (err) {
-        console.error("Ошибка почты, код для логов:", otp);
-        res.json({ message: 'Код сгенерирован (см. логи)' });
-    }
-});
+// Список разрешенных почтовых доменов
+const ALLOWED_DOMAINS = [
+    'gmail.com',
+    'mail.ru',
+    'yandex.ru',
+    'rambler.ru',
+    'bk.ru',
+    'list.ru',
+    'inbox.ru',
+    'ya.ru',
+    'outlook.com',
+    'yahoo.com'
+];
 
+function isValidEmailDomain(email) {
+    if (!email) return false;
+    const match = email.match(/@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/);
+    if (!match) return false;
+    const domain = match[1].toLowerCase();
+    return ALLOWED_DOMAINS.includes(domain);
+}
+
+// ================= СТУДЕНТЫ =================
 app.post('/api/auth/register', async (req, res) => {
-    const { firstName, lastName, nickName, email, password, code } = req.body;
-    const record = otpStore.get(email);
-    if (!record || record.code !== code || record.expires < Date.now()) return res.status(400).json({ error: 'Неверный код' });
+    const { firstName, lastName, nickName, email, password } = req.body;
+
+    if (!isValidEmailDomain(email)) {
+        return res.status(400).json({ error: 'Введите реальный адрес почты (gmail.com, mail.ru, yandex.ru и др.)' });
+    }
 
     try {
         const hash = await bcrypt.hash(password, 10);
-        await pool.query('INSERT INTO users (username, full_name, email, password_hash, is_teacher, is_teacher_verified) VALUES ($1, $2, $3, $4, false, false)', [nickName, `${firstName} ${lastName}`, email, hash]);
-        otpStore.delete(email);
+        await pool.query(
+            'INSERT INTO users (username, full_name, email, password_hash, is_teacher, is_teacher_verified) VALUES ($1, $2, $3, $4, false, false)', 
+            [nickName, `${firstName} ${lastName}`, email, hash]
+        );
         res.json({ message: 'Успех' });
-    } catch (err) { res.status(400).json({ error: 'Почта или логин уже заняты' }); }
+    } catch (err) { 
+        res.status(400).json({ error: 'Почта или логин уже заняты' }); 
+    }
 });
 
 app.post('/api/auth/reset-password', async (req, res) => {
-    const { email, password, code } = req.body;
-    const record = otpStore.get(email);
-    if (!record || record.code !== code) return res.status(400).json({ error: 'Неверный код' });
-    const hash = await bcrypt.hash(password, 10);
-    await pool.query('UPDATE users SET password_hash = $1 WHERE email = $2 AND is_teacher = false', [hash, email]);
-    otpStore.delete(email);
-    res.json({ message: 'Пароль изменен' });
+    const { email, password } = req.body;
+    
+    if (!isValidEmailDomain(email)) {
+        return res.status(400).json({ error: 'Введите корректный адрес почты' });
+    }
+
+    try {
+        const hash = await bcrypt.hash(password, 10);
+        const result = await pool.query('UPDATE users SET password_hash = $1 WHERE email = $2 AND is_teacher = false', [hash, email]);
+        
+        if (result.rowCount === 0) {
+            return res.status(400).json({ error: 'Пользователь с такой почтой не найден' });
+        }
+        
+        res.json({ message: 'Пароль изменен' });
+    } catch (err) { 
+        res.status(500).json({ error: 'Ошибка сервера' }); 
+    }
 });
 
 // ================= ПРЕПОДАВАТЕЛИ =================
 app.post('/api/teach/register', async (req, res) => {
     const { fullName, email, password } = req.body;
+
+    if (!isValidEmailDomain(email)) {
+        return res.status(400).json({ error: 'Введите реальный адрес почты (gmail.com, mail.ru, yandex.ru и др.)' });
+    }
+
     try {
         const hash = await bcrypt.hash(password, 10);
         await pool.query('INSERT INTO users (username, full_name, email, password_hash, is_teacher, is_teacher_verified) VALUES ($1, $2, $3, $4, true, false)', [email.split('@')[0], fullName, email, hash]);
