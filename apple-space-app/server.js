@@ -7,6 +7,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const path = require('path');
 const fs = require('fs');
+const push = require('./push'); // === PUSH ===
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
     console.error('❌ JWT_SECRET не задан или короче 32 символов');
@@ -31,6 +32,11 @@ const pool = new Pool({
     ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false }
 });
 const JWT_SECRET = process.env.JWT_SECRET;
+
+// === PUSH: инициализация Web Push + планировщик напоминаний ===
+push.initWebPush();
+setInterval(() => push.checkLessonReminders(pool), 60 * 1000);
+// === /PUSH ===
 
 // ================= РАСПИСАНИЕ ЗВОНКОВ =================
 const LESSON_TIMES = {
@@ -252,14 +258,28 @@ app.get('/api/settings', async (req, res) => {
     const r = await pool.query('SELECT * FROM system_settings WHERE id = 1');
     res.json(r.rows[0] || {});
 });
+
+// === PUSH: обновлённый /api/settings/update с отправкой пуша при новом объявлении ===
 app.post('/api/settings/update', verifyJWT, async (req, res) => {
     const user = await getUserById(req.userId);
     if (!user || user.username !== 'root_teacher') return res.status(403).json({ error: 'Только Root' });
     const { remote_mode, maintenance_mode, exams_mode, private_chat_mode, global_announcement } = req.body;
+
+    const prevQ = await pool.query('SELECT global_announcement FROM system_settings WHERE id = 1');
+    const prevAnnouncement = (prevQ.rows[0] && prevQ.rows[0].global_announcement) || '';
+
     const r = await pool.query(`UPDATE system_settings SET remote_mode=$1, maintenance_mode=$2, exams_mode=$3, private_chat_mode=$4, global_announcement=$5 WHERE id = 1 RETURNING *`, [!!remote_mode, !!maintenance_mode, !!exams_mode, !!private_chat_mode, global_announcement || '']);
     io.emit('settings_updated', r.rows[0]);
+
+    const newAnnouncement = (global_announcement || '').trim();
+    if (newAnnouncement && newAnnouncement !== prevAnnouncement) {
+        push.notifyCollegeAnnouncement(pool, newAnnouncement)
+            .catch(e => console.error('push announcement:', e.message));
+    }
+
     res.json(r.rows[0]);
 });
+// === /PUSH ===
 
 // ================= ПРОСТРАНСТВА =================
 app.post('/api/spaces', verifyJWT, async (req, res) => {
@@ -508,13 +528,33 @@ app.get('/api/schedule/:spaceId/export', verifyJWT, requireSpaceAccess, async (r
     res.send(text);
 });
 
+// === PUSH: обновлённый /api/schedule/override — пуш при замене/отмене ===
 app.post('/api/schedule/override', verifyJWT, requireSpaceAdmin, async (req, res) => {
     const { spaceId, scheduleId, date, isCanceled, replacementSubject, replacementClassroom, replacementTeacher } = req.body;
     if (!scheduleId || !date) return res.status(400).json({ error: 'Не указан урок' });
     const r = await pool.query(`INSERT INTO schedule_overrides (space_id, schedule_id, override_date, is_canceled, replacement_subject, replacement_classroom, replacement_teacher) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (schedule_id, override_date) DO UPDATE SET is_canceled = EXCLUDED.is_canceled, replacement_subject = EXCLUDED.replacement_subject, replacement_classroom = EXCLUDED.replacement_classroom, replacement_teacher = EXCLUDED.replacement_teacher RETURNING *`, [spaceId, scheduleId, date, !!isCanceled, replacementSubject || null, replacementClassroom || null, replacementTeacher || null]);
+
+    try {
+        const lessonQ = await pool.query('SELECT subject_name, classroom FROM schedules WHERE id = $1', [scheduleId]);
+        const lesson = lessonQ.rows[0] || {};
+        let body;
+        if (isCanceled) {
+            body = `${date}: ${lesson.subject_name || 'пара'} — отменено`;
+        } else if (replacementSubject) {
+            body = `${date}: замена на «${replacementSubject}» вместо «${lesson.subject_name || ''}»${replacementClassroom ? ' (каб. ' + replacementClassroom + ')' : ''}`;
+        } else {
+            body = `${date}: изменение в расписании — ${lesson.subject_name || ''}`;
+        }
+        push.notifyScheduleChange(pool, spaceId, body)
+            .catch(e => console.error('push schedule:', e.message));
+    } catch (e) {
+        console.error('push schedule hook:', e.message);
+    }
+
     io.to(`space:${spaceId}`).emit('schedule_updated');
     res.json(r.rows[0]);
 });
+// === /PUSH ===
 
 app.delete('/api/schedule/override/:id', verifyJWT, async (req, res) => {
     const user = await getUserById(req.userId);
@@ -606,12 +646,18 @@ app.get('/api/homework/:id/stats', verifyJWT, async (req, res) => {
     res.json({ percentage, completed: completedCount, total: totalCount, students, dueDate, isOverdue, canSeeStudents: true });
 });
 
+// === PUSH: обновлённый /api/homework — пуш при создании ДЗ ===
 app.post('/api/homework', verifyJWT, requireSpaceAdmin, async (req, res) => {
     const { spaceId, subjectName, title, dueDate } = req.body;
     if (!subjectName || !title || !dueDate) return res.status(400).json({ error: 'Заполните поля' });
     const r = await pool.query('INSERT INTO homeworks (space_id, subject_name, title, due_date) VALUES ($1,$2,$3,$4) RETURNING *', [spaceId, subjectName, title, dueDate]);
+
+    push.notifyNewHomework(pool, spaceId, subjectName, title, dueDate)
+        .catch(e => console.error('push hw:', e.message));
+
     res.json(r.rows[0]);
 });
+// === /PUSH ===
 
 app.delete('/api/homework/:id', verifyJWT, async (req, res) => {
     const user = await getUserById(req.userId);
@@ -683,6 +729,10 @@ app.post('/api/games/:spaceId/:gameId/reset', verifyJWT, requireSpaceAdmin, asyn
     await pool.query('DELETE FROM game_scores WHERE space_id = $1 AND game_id = $2', [req.params.spaceId, req.params.gameId]);
     res.json({ message: 'Рекорды сброшены' });
 });
+
+// === PUSH: регистрация роутов пушей и мутов ===
+push.registerPushRoutes(app, pool, verifyJWT, requireSpaceAccess);
+// === /PUSH ===
 
 // ================= МУЛЬТИПЛЕЕР: КОМНАТЫ =================
 const gameRooms = {};
@@ -1070,6 +1120,7 @@ io.on('connection', async (socket) => {
         } catch (e) {}
     });
 
+    // === PUSH: обновлённый send_message — пуш о новом сообщении ===
     socket.on('send_message', async ({ message }) => {
         if (!socket.userId || !socket.spaceId || !message || !message.trim()) return;
         const user = await getUserById(socket.userId);
@@ -1080,7 +1131,11 @@ io.on('connection', async (socket) => {
         const text = String(message).slice(0, 2000);
         const r = await pool.query('INSERT INTO chat_messages (space_id, user_id, message) VALUES ($1,$2,$3) RETURNING *', [socket.spaceId, user.id, text]);
         io.to(`space:${socket.spaceId}`).emit('new_message', { ...r.rows[0], full_name: user.full_name, username: user.username, is_teacher: user.is_teacher, avatar_emoji: user.avatar_emoji });
+
+        push.notifyChatMessage(pool, socket.spaceId, user, text)
+            .catch(e => console.error('push chat:', e.message));
     });
+    // === /PUSH ===
 
     socket.on('delete_message', async ({ messageId }) => {
         if (!socket.userId || !socket.spaceId) return;
