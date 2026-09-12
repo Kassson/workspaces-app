@@ -1,5 +1,5 @@
 // ============================================================================
-//  push.js — Web Push (VAPID) + напоминания о парах + API мутов чата
+//  push.js — Web Push (VAPID) + напоминания о парах + муты чата и пушей
 // ============================================================================
 const webpush = require('web-push');
 
@@ -17,13 +17,32 @@ function initWebPush() {
     return true;
 }
 
-async function sendPushToUsers(pool, userIds, payload) {
+// --- Отправка пуша списку userId ---
+// opts.skipMuteFilter = true  → игнорировать глобальный мут (для критичных объявлений)
+async function sendPushToUsers(pool, userIds, payload, opts = {}) {
     if (!userIds || !userIds.length) return;
     if (!process.env.VAPID_PUBLIC_KEY) return;
     try {
+        let ids = userIds;
+
+        // Фильтруем заглушённых
+        if (!opts.skipMuteFilter) {
+            const { rows: muted } = await pool.query(
+                `SELECT user_id FROM push_mutes
+                 WHERE user_id = ANY($1::uuid[])
+                   AND (muted_forever = TRUE OR (muted_until IS NOT NULL AND muted_until > NOW()))`,
+                [userIds]
+            );
+            if (muted.length) {
+                const mutedSet = new Set(muted.map(r => r.user_id));
+                ids = userIds.filter(id => !mutedSet.has(id));
+            }
+        }
+        if (!ids.length) return;
+
         const { rows } = await pool.query(
             `SELECT id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ANY($1::uuid[])`,
-            [userIds]
+            [ids]
         );
         await Promise.all(rows.map(async (sub) => {
             try {
@@ -44,6 +63,40 @@ async function sendPushToUsers(pool, userIds, payload) {
     }
 }
 
+// --- Глобальные муты пушей ---
+async function getPushMute(pool, userId) {
+    const { rows } = await pool.query(
+        'SELECT muted_until, muted_forever FROM push_mutes WHERE user_id = $1',
+        [userId]
+    );
+    return rows[0] || { muted_until: null, muted_forever: false };
+}
+
+async function setPushMute(pool, userId, duration) {
+    let until = null, forever = false;
+    if (duration === 'forever') forever = true;
+    else if (duration === '1h')  until = new Date(Date.now() + 1  * 3600 * 1000);
+    else if (duration === '8h')  until = new Date(Date.now() + 8  * 3600 * 1000);
+    else if (duration === '24h') until = new Date(Date.now() + 24 * 3600 * 1000);
+    else throw new Error('Неверная длительность');
+
+    await pool.query(
+        `INSERT INTO push_mutes (user_id, muted_until, muted_forever, updated_at)
+         VALUES ($1, $2, $3, NOW())
+         ON CONFLICT (user_id) DO UPDATE
+         SET muted_until = EXCLUDED.muted_until,
+             muted_forever = EXCLUDED.muted_forever,
+             updated_at = NOW()`,
+        [userId, until, forever]
+    );
+    return { muted_until: until, muted_forever: forever };
+}
+
+async function clearPushMute(pool, userId) {
+    await pool.query('DELETE FROM push_mutes WHERE user_id = $1', [userId]);
+}
+
+// --- Получатели ---
 async function getSpaceStudentIds(pool, spaceId) {
     const { rows } = await pool.query(
         `SELECT u.id
@@ -80,6 +133,7 @@ async function getAllUserIds(pool) {
     return rows.map(r => r.id);
 }
 
+// --- События ---
 async function notifyScheduleChange(pool, spaceId, body) {
     const ids = await getSpaceStudentIds(pool, spaceId);
     await sendPushToUsers(pool, ids, {
@@ -111,6 +165,7 @@ async function notifyChatMessage(pool, spaceId, sender, text) {
     });
 }
 
+// Объявления колледжа идут ВСЕМ и ИГНОРИРУЮТ мут — они критичны.
 async function notifyCollegeAnnouncement(pool, text) {
     const ids = await getAllUserIds(pool);
     await sendPushToUsers(pool, ids, {
@@ -118,7 +173,7 @@ async function notifyCollegeAnnouncement(pool, text) {
         body: String(text).slice(0, 150),
         url: '/',
         tag: `announcement-${Date.now()}`
-    });
+    }, { skipMuteFilter: true });
 }
 
 // --- Напоминания за 10 минут до пары ---
@@ -189,6 +244,7 @@ async function checkLessonReminders(pool) {
     }
 }
 
+// --- REST-роуты ---
 function registerPushRoutes(app, pool, verifyJWT, requireSpaceAccess) {
     app.get('/api/push/public-key', (req, res) => {
         res.json({ key: process.env.VAPID_PUBLIC_KEY || '' });
@@ -226,6 +282,27 @@ function registerPushRoutes(app, pool, verifyJWT, requireSpaceAccess) {
         res.json({ ok: true });
     });
 
+    // --- Глобальные муты пушей ---
+    app.get('/api/push/mute', verifyJWT, async (req, res) => {
+        res.json(await getPushMute(pool, req.userId));
+    });
+
+    app.post('/api/push/mute', verifyJWT, async (req, res) => {
+        try {
+            const { duration } = req.body || {};
+            const result = await setPushMute(pool, req.userId, duration);
+            res.json({ ok: true, ...result });
+        } catch (e) {
+            res.status(400).json({ error: e.message });
+        }
+    });
+
+    app.delete('/api/push/mute', verifyJWT, async (req, res) => {
+        await clearPushMute(pool, req.userId);
+        res.json({ ok: true });
+    });
+
+    // --- Муты чата (per-space) ---
     app.get('/api/spaces/:spaceId/chat-mute', verifyJWT, requireSpaceAccess, async (req, res) => {
         const r = await pool.query(
             'SELECT muted_until, muted_forever FROM chat_mutes WHERE user_id = $1 AND space_id = $2',
@@ -262,7 +339,7 @@ function registerPushRoutes(app, pool, verifyJWT, requireSpaceAccess) {
         res.json({ ok: true });
     });
 
-    // Внешний триггер для напоминаний (на случай сна Render)
+    // --- Cron-триггер для напоминаний ---
     app.get('/api/cron/lesson-reminders', async (req, res) => {
         await checkLessonReminders(pool);
         res.json({ ok: true });
