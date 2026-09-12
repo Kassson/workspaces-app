@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Workspaces</title>
+    <meta name="theme-color" content="#f5f7fa">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/icon.svg">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <button class="theme-toggle-btn" id="themeToggle">🌙</button>
+
+    <div class="maintenance-screen" id="maintenanceScreen">
+        <div class="icon">🛠</div>
+        <h1>Ведутся технические работы</h1>
+        <p style="color:var(--text-secondary);">Скоро всё заработает. Попробуйте зайти чуть позже.</p>
+    </div>
+
+    <div class="login-wrapper" id="loginWrapper">
+        <div class="auth-container">
+            <div class="app-logo">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><circle cx="256" cy="256" r="256" fill="#007AFF"/><g transform="translate(64, 64) scale(16)" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></g></svg>
+            </div>
+
+            <div id="viewLogin">
+                <h1 class="app-title">Workspaces</h1>
+                <p class="app-subtitle">Войдите для доступа к пространствам</p>
+                <form onsubmit="handleLogin(event)">
+                    <div class="form-group"><input type="text" id="logInput" class="form-control" placeholder="Логин или Почта" required></div>
+                    <div class="form-group"><input type="password" id="logPass" class="form-control" placeholder="Пароль" required></div>
+                    <button type="submit" class="btn-primary">Войти</button>
+                </form>
+                <button class="btn-text" onclick="switchView('viewReg')">Создать аккаунт студента</button>
+            </div>
+
+            <div id="viewReg" style="display: none;">
+                <h1 class="app-title">Регистрация</h1>
+                <form onsubmit="handleReg(event)">
+                    <div class="form-group"><input type="text" id="regFirst" class="form-control" placeholder="Имя" required></div>
+                    <div class="form-group"><input type="text" id="regLast" class="form-control" placeholder="Фамилия" required></div>
+                    <div class="form-group"><input type="text" id="regNick" class="form-control" placeholder="Логин (Ник)" required></div>
+                    <div class="form-group">
+                        <input type="email" id="regEmail" class="form-control" placeholder="Почта (gmail.com, mail.ru и др.)" required>
+                    </div>
+                    <div class="form-group"><input type="password" id="regPass" class="form-control" placeholder="Пароль" required></div>
+                    <button type="submit" class="btn-primary">Зарегистрироваться</button>
+                </form>
+                <button class="btn-text" onclick="switchView('viewLogin')">Отмена</button>
+            </div>
+            <p id="errorMsg" style="color: var(--danger); font-size: 0.85rem; margin-top: 10px;"></p>
+        </div>
+        <a href="/teach" class="outside-link">Вы преподаватель? →</a>
+    </div>
+
+    <!-- ================= ПАНЕЛЬ СТУДЕНТА ================= -->
+    <div class="app-dashboard" id="dashboard">
+        <aside class="sidebar">
+            <div class="sidebar-logo">🧭 Workspaces</div>
+            <select id="spaceSelect" class="form-control" style="margin-bottom:16px;" onchange="onSpaceSwitch(this.value)"></select>
+            <a onclick="showTab('tab-today', this)" class="sidebar-item active" data-tab="tab-today">📅 Сегодня</a>
+            <a onclick="showTab('tab-schedule', this)" class="sidebar-item" data-tab="tab-schedule">🗓️ Расписание</a>
+            <a onclick="showTab('tab-hw', this)" class="sidebar-item" data-tab="tab-hw">📝 Домашние задания</a>
+            <a onclick="showTab('tab-chat', this)" class="sidebar-item" data-tab="tab-chat">💬 Чат</a>
+            <a onclick="showTab('tab-games', this)" class="sidebar-item" data-tab="tab-games">🎮 Игровой центр</a>
+            <a onclick="showTab('tab-settings', this)" class="sidebar-item" data-tab="tab-settings" style="margin-top:auto;">⚙️ Настройки</a>
+        </aside>
+        <main class="main-content">
+            <div class="announcement-banner" id="announcementBanner"></div>
+
+            <div id="tab-today" class="tab-section active"></div>
+            <div id="tab-schedule" class="tab-section"></div>
+            <div id="tab-hw" class="tab-section"></div>
+            <div id="tab-chat" class="tab-section"></div>
+            <div id="tab-games" class="tab-section"></div>
+
+            <div id="tab-settings" class="tab-section">
+                <h1 class="page-title">Настройки</h1>
+                <div class="settings-card">
+                    <h3>Мои группы</h3>
+                    <div id="mySpacesList"></div>
+                    <button class="btn-secondary" onclick="openJoinSpaceForm()">➕ Присоединиться по коду</button>
+                </div>
+                <div class="settings-card">
+                    <h3>Профиль</h3>
+                    <p id="profileInfo" style="color:var(--text-secondary);"></p>
+                </div>
+                <div class="settings-card">
+                    <button class="btn-danger" onclick="logout()">Выйти</button>
+                </div>
+            </div>
+        </main>
+
+        <nav class="bottom-tabbar">
+            <button class="tab-btn active" data-tab="tab-today" onclick="showTab('tab-today', this)"><span class="ic">📅</span>Сегодня</button>
+            <button class="tab-btn" data-tab="tab-schedule" onclick="showTab('tab-schedule', this)"><span class="ic">🗓️</span>Пары</button>
+            <button class="tab-btn" data-tab="tab-hw" onclick="showTab('tab-hw', this)"><span class="ic">📝</span>ДЗ</button>
+            <button class="tab-btn" data-tab="tab-chat" onclick="showTab('tab-chat', this)"><span class="ic">💬</span>Чат</button>
+            <button class="tab-btn" data-tab="tab-games" onclick="showTab('tab-games', this)"><span class="ic">🎮</span>Игры</button>
+            <button class="tab-btn" data-tab="tab-settings" onclick="showTab('tab-settings', this)"><span class="ic">⚙️</span>Ещё</button>
+        </nav>
+    </div>
+
+    <!-- Шторки (sheet modals) -->
+    <div class="sheet-overlay" id="sheetOverlay" onclick="closeDynamicSheet()"></div>
+    <div id="dynamicSheetRoot"></div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="shared.js"></script>
+    <script src="portal.js"></script>
+    <script src="games.js"></script>
+    <script>
+        const errorMsg = document.getElementById('errorMsg');
+        function switchView(viewId) {
+            ['viewLogin', 'viewReg'].forEach(id => document.getElementById(id).style.display = 'none');
+            document.getElementById(viewId).style.display = 'block'; errorMsg.textContent = '';
+        }
+
+        let mySpaces = [];
+        let currentUser = null;
+
+        function isValidEmailDomain(email) {
+            const allowedDomains = ['gmail.com', 'mail.ru', 'yandex.ru', 'rambler.ru', 'bk.ru', 'list.ru', 'inbox.ru', 'ya.ru', 'outlook.com', 'yahoo.com'];
+            const domain = email.split('@')[1]?.toLowerCase();
+            return allowedDomains.includes(domain);
+        }
+
+        async function handleReg(e) {
+            e.preventDefault();
+            errorMsg.textContent = '';
+            const email = document.getElementById('regEmail').value.trim();
+            if (!isValidEmailDomain(email)) { errorMsg.textContent = 'Введите реальный адрес почты (gmail.com, mail.ru, yandex.ru и др.)'; return; }
+            try {
+                await apiPost('/api/auth/register', {
+                    firstName: document.getElementById('regFirst').value,
+                    lastName: document.getElementById('regLast').value,
+                    nickName: document.getElementById('regNick').value,
+                    email, password: document.getElementById('regPass').value
+                });
+                alert('Регистрация успешно завершена!');
+                switchView('viewLogin');
+            } catch (d) { errorMsg.textContent = d.error || 'Ошибка регистрации'; }
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            try {
+                const data = await apiPost('/api/auth/login', {
+                    login: document.getElementById('logInput').value,
+                    password: document.getElementById('logPass').value,
+                    isTeacher: false
+                });
+                localStorage.setItem('token', data.token);
+                localStorage.setItem('role', 'student');
+                localStorage.setItem('user', JSON.stringify(data.user));
+                location.reload();
+            } catch (d) { errorMsg.textContent = d.error || 'Ошибка входа'; }
+        }
+        function logout() { localStorage.clear(); location.reload(); }
+
+        function showTab(tabId, el) {
+            document.querySelectorAll('.tab-section').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.sidebar-item, .bottom-tabbar .tab-btn').forEach(s => s.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+            document.querySelectorAll(`[data-tab="${tabId}"]`).forEach(s => s.classList.add('active'));
+            loadTabContent(tabId);
+        }
+
+        function loadTabContent(tabId) {
+            const spaceId = currentSpace?.id;
+            if (tabId === 'tab-today') renderTodayTab(document.getElementById('tab-today'), spaceId);
+            if (tabId === 'tab-schedule') renderScheduleTab(document.getElementById('tab-schedule'), spaceId, false);
+            if (tabId === 'tab-hw') renderHomeworkTab(document.getElementById('tab-hw'), spaceId, false);
+            if (tabId === 'tab-chat') renderChatTab(document.getElementById('tab-chat'), spaceId, false, currentUser?.id);
+            if (tabId === 'tab-games') { if (!activeGame) renderGamesMenu(document.getElementById('tab-games')); }
+        }
+
+        async function reloadSpaces() {
+            mySpaces = await apiGet('/api/spaces/mine');
+            const sel = document.getElementById('spaceSelect');
+            if (!mySpaces.length) {
+                sel.innerHTML = '<option>Нет групп</option>';
+                currentSpace = null;
+            } else {
+                sel.innerHTML = mySpaces.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+                const savedId = localStorage.getItem('activeSpaceId');
+                const found = mySpaces.find(s => s.id === savedId) || mySpaces[0];
+                sel.value = found.id;
+                currentSpace = found;
+            }
+            renderMySpacesSettings();
+            const activeTab = document.querySelector('.tab-section.active')?.id || 'tab-today';
+            loadTabContent(activeTab);
+        }
+        window.__reloadSpaces = reloadSpaces;
+
+        function onSpaceSwitch(spaceId) {
+            currentSpace = mySpaces.find(s => s.id === spaceId);
+            localStorage.setItem('activeSpaceId', spaceId);
+            const activeTab = document.querySelector('.tab-section.active')?.id || 'tab-today';
+            loadTabContent(activeTab);
+        }
+
+        function renderMySpacesSettings() {
+            const box = document.getElementById('mySpacesList');
+            if (!mySpaces.length) { box.innerHTML = '<p class="empty-state">Вы не состоите ни в одной группе.</p>'; return; }
+            box.innerHTML = mySpaces.map(s => `
+                <div class="space-card">
+                    <span>${escapeHtml(s.name)}</span>
+                    <span class="code-pill">${s.invite_code}</span>
+                </div>`).join('');
+        }
+
+        async function boot() {
+            await loadAndApplySettings(null); // показываем «тех. работы»/баннер ещё до входа
+            if (!(localStorage.getItem('token') && localStorage.getItem('role') === 'student')) return;
+            try {
+                const { user } = await apiGet('/api/auth/me');
+                currentUser = user;
+                localStorage.setItem('user', JSON.stringify(user));
+            } catch (e) { logout(); return; }
+
+            document.getElementById('loginWrapper').style.display = 'none';
+            document.getElementById('dashboard').style.display = 'flex';
+            document.getElementById('profileInfo').textContent = `${currentUser.fullName} · @${currentUser.username}`;
+
+            await loadAndApplySettings(currentUser);
+            await reloadSpaces();
+            startSelfPing();
+        }
+        boot();
+    </script>
+</body>
+</html>
