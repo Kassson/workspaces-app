@@ -20,11 +20,6 @@ const socket = io({ query: { token: localStorage.getItem('token') || '' } });
     });
 })();
 
-// ---- Регистрация Service Worker (установка PWA в 1 клик) ----
-if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
-}
-
 // ---- API helpers ----
 function authHeaders() {
     const token = localStorage.getItem('token');
@@ -50,14 +45,14 @@ async function apiDelete(url) {
     return res.json();
 }
 
-// ---- Self-ping каждые 10 минут, чтобы бесплатный сервер Render не засыпал ----
+// ---- Self-ping каждые 10 минут ----
 function startSelfPing() {
     const ping = () => fetch('/api/ping').catch(() => {});
     ping();
     setInterval(ping, 10 * 60 * 1000);
 }
 
-// ---- Sheet modal (шторка снизу на моб., окно по центру на ПК) ----
+// ---- Sheet modal ----
 function openSheet(id) {
     document.getElementById('sheetOverlay')?.classList.add('show');
     document.getElementById(id)?.classList.add('show');
@@ -67,7 +62,7 @@ function closeSheet(id) {
     document.getElementById(id)?.classList.remove('show');
 }
 
-// ---- Сжатие фото на клиенте перед отправкой (Base64/JPEG) ----
+// ---- Сжатие фото ----
 function compressImageFile(file, maxSize = 1000, quality = 0.7) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
