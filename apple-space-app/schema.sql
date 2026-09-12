@@ -156,3 +156,11 @@ CREATE TABLE IF NOT EXISTS chat_mutes (
     UNIQUE(user_id, space_id)
 );
 CREATE INDEX IF NOT EXISTS idx_chat_mutes_user_space ON chat_mutes(user_id, space_id);
+
+-- 13. Глобальные муты пуш-уведомлений пользователя
+CREATE TABLE IF NOT EXISTS push_mutes (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    muted_until TIMESTAMP WITH TIME ZONE,
+    muted_forever BOOLEAN DEFAULT FALSE,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
