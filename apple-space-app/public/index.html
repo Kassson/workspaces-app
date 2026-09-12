@@ -11,6 +11,7 @@
 
     <div class="login-wrapper" id="loginWrapper">
         <div class="auth-container">
+            <!-- Логотип как у преподавателей -->
             <div class="app-logo">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><circle cx="256" cy="256" r="256" fill="#007AFF"/><path d="M150 256l60 60 150-150" stroke="white" stroke-width="40" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
             </div>
@@ -33,11 +34,9 @@
                     <div class="form-group"><input type="text" id="regFirst" class="form-control" placeholder="Имя" required></div>
                     <div class="form-group"><input type="text" id="regLast" class="form-control" placeholder="Фамилия" required></div>
                     <div class="form-group"><input type="text" id="regNick" class="form-control" placeholder="Логин (Ник)" required></div>
-                    <div class="form-group" style="display:flex; gap:10px;">
-                        <input type="email" id="regEmail" class="form-control" placeholder="Почта" required>
-                        <button type="button" class="btn-primary" style="margin-top:0; width:100px; padding:0;" onclick="sendCode('regEmail')">Код</button>
+                    <div class="form-group">
+                        <input type="email" id="regEmail" class="form-control" placeholder="Почта (gmail.com, mail.ru и др.)" required>
                     </div>
-                    <div class="form-group"><input type="text" id="regCode" class="form-control" placeholder="Код из письма" required></div>
                     <div class="form-group"><input type="password" id="regPass" class="form-control" placeholder="Пароль" required></div>
                     <button type="submit" class="btn-primary">Зарегистрироваться</button>
                 </form>
@@ -47,11 +46,9 @@
             <div id="viewForgot" style="display: none;">
                 <h1 class="app-title">Сброс пароля</h1>
                 <form onsubmit="handleReset(event)">
-                    <div class="form-group" style="display:flex; gap:10px;">
+                    <div class="form-group">
                         <input type="email" id="forgEmail" class="form-control" placeholder="Почта" required>
-                        <button type="button" class="btn-primary" style="margin-top:0; width:100px; padding:0;" onclick="sendCode('forgEmail')">Код</button>
                     </div>
-                    <div class="form-group"><input type="text" id="forgCode" class="form-control" placeholder="Код из письма" required></div>
                     <div class="form-group"><input type="password" id="forgPass" class="form-control" placeholder="Новый пароль" required></div>
                     <button type="submit" class="btn-primary">Сохранить пароль</button>
                 </form>
@@ -107,27 +104,64 @@
             document.getElementById('dashboard').style.display = 'flex';
         }
 
-        async function sendCode(inputId) {
-            const email = document.getElementById(inputId).value;
-            if(!email) return errorMsg.textContent = 'Введите почту';
-            const res = await fetch('/api/auth/send-code', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({email}) });
-            const d = await res.json(); alert(d.message);
+        function isValidEmailDomain(email) {
+            const allowedDomains = ['gmail.com', 'mail.ru', 'yandex.ru', 'rambler.ru', 'bk.ru', 'list.ru', 'inbox.ru', 'ya.ru', 'outlook.com', 'yahoo.com'];
+            const domain = email.split('@')[1]?.toLowerCase();
+            return allowedDomains.includes(domain);
         }
 
         async function handleReg(e) {
             e.preventDefault();
-            const res = await fetch('/api/auth/register', { method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ firstName: document.getElementById('regFirst').value, lastName: document.getElementById('regLast').value, nickName: document.getElementById('regNick').value, email: document.getElementById('regEmail').value, password: document.getElementById('regPass').value, code: document.getElementById('regCode').value })
+            errorMsg.textContent = '';
+            
+            const email = document.getElementById('regEmail').value.trim();
+            if (!isValidEmailDomain(email)) {
+                errorMsg.textContent = 'Введите реальный адрес почты (gmail.com, mail.ru, yandex.ru и др.)';
+                return;
+            }
+
+            const res = await fetch('/api/auth/register', { 
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ 
+                    firstName: document.getElementById('regFirst').value, 
+                    lastName: document.getElementById('regLast').value, 
+                    nickName: document.getElementById('regNick').value, 
+                    email: email, 
+                    password: document.getElementById('regPass').value 
+                })
             });
-            const d = await res.json(); if(res.ok) { alert('Успешно'); switchView('viewLogin'); } else errorMsg.textContent = d.error;
+            const d = await res.json(); 
+            if(res.ok) { 
+                alert('Регистрация успешно завершена!'); 
+                switchView('viewLogin'); 
+            } else {
+                errorMsg.textContent = d.error;
+            }
         }
 
         async function handleReset(e) {
             e.preventDefault();
-            const res = await fetch('/api/auth/reset-password', { method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ email: document.getElementById('forgEmail').value, password: document.getElementById('forgPass').value, code: document.getElementById('forgCode').value })
+            errorMsg.textContent = '';
+
+            const email = document.getElementById('forgEmail').value.trim();
+            if (!isValidEmailDomain(email)) {
+                errorMsg.textContent = 'Введите реальный адрес почты';
+                return;
+            }
+
+            const res = await fetch('/api/auth/reset-password', { 
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ email: email, password: document.getElementById('forgPass').value })
             });
-            const d = await res.json(); if(res.ok) { alert('Пароль изменен'); switchView('viewLogin'); } else errorMsg.textContent = d.error;
+            const d = await res.json(); 
+            if(res.ok) { 
+                alert('Пароль изменен'); 
+                switchView('viewLogin'); 
+            } else {
+                errorMsg.textContent = d.error;
+            }
         }
 
         async function handleLogin(e) {
