@@ -243,3 +243,11 @@ h1.page-title { font-size: 1.6rem; margin-bottom: 20px; }
 .badge-green { background: rgba(52,199,89,0.12); color: var(--success); }
 .badge-orange { background: rgba(255,149,0,0.15); color: var(--warning); }
 .hidden { display: none !important; }
+
+/* ============ ЛОГОТИП В SIDEBAR ============ */
+.sidebar-logo svg {
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+    border-radius: 50%;
+}
