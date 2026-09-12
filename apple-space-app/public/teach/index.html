@@ -50,7 +50,7 @@
 
             <div id="viewRegCode" style="display: none;">
                 <h1 class="app-title">Ваш код профиля</h1>
-                <p class="app-subtitle" style="margin-bottom: 10px;">Сообщите код любому подтверждённому преподавателю или Root-администратору, чтобы он подтвердил вас.</p>
+                <p class="app-subtitle" style="margin-bottom: 10px;">Сообщите код любому подтверждённому преподавателю.</p>
                 <h2 id="generatedCodeDisplay" style="font-size: 2.5rem; letter-spacing: 5px; color: var(--accent-blue); margin-bottom: 20px;">T-0000</h2>
                 <button class="btn-primary" onclick="switchView('viewLogin')">Перейти ко входу</button>
             </div>
@@ -72,14 +72,16 @@
 
     <div class="app-dashboard" id="dashboard">
         <aside class="sidebar">
-            <div class="sidebar-logo">🧭 Workspaces</div>
-            <select id="spaceSelect" class="form-control" style="margin-bottom:16px;" onchange="onSpaceSwitch(this.value)"></select>
+            <div class="sidebar-logo">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="28" height="28"><circle cx="256" cy="256" r="256" fill="#007AFF"/><g transform="translate(64, 64) scale(16)" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></g></svg>
+                Workspaces
+            </div>
+            <div id="currentSpaceLabel" style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:16px; padding-left:4px;">— выберите группу —</div>
             <a onclick="showTab('tab-system', this)" class="sidebar-item active" data-tab="tab-system">🏛 Панель управления</a>
             <a onclick="showTab('tab-spaces', this)" class="sidebar-item" data-tab="tab-spaces">🗂 Пространства</a>
             <a onclick="showTab('tab-schedule', this)" class="sidebar-item" data-tab="tab-schedule">🗓️ Расписание</a>
             <a onclick="showTab('tab-hw', this)" class="sidebar-item" data-tab="tab-hw">📝 Домашние задания</a>
             <a onclick="showTab('tab-members', this)" class="sidebar-item" data-tab="tab-members">👥 Участники</a>
-            <a onclick="showTab('tab-chat', this)" class="sidebar-item hidden" data-tab="tab-chat" id="navChat">💬 Чат</a>
             <a onclick="showTab('tab-auths', this)" class="sidebar-item" data-tab="tab-auths">🛡️ Верификация</a>
             <a onclick="showTab('tab-settings', this)" class="sidebar-item" data-tab="tab-settings" style="margin-top:auto;">⚙️ Настройки</a>
         </aside>
@@ -104,10 +106,6 @@
                         <div><div class="switch-label">🎓 Экзамены</div><div class="switch-desc">Отключает чат студентам.</div></div>
                         <label class="switch"><input type="checkbox" id="sw-exams"><span class="slider"></span></label>
                     </div>
-                    <div class="switch-row">
-                        <div><div class="switch-label">🔒 Закрытый чат</div><div class="switch-desc">Скрывает чат от обычных учителей.</div></div>
-                        <label class="switch"><input type="checkbox" id="sw-private"><span class="slider"></span></label>
-                    </div>
                     <div class="form-group" style="margin-top:16px;">
                         <label class="switch-label">📢 Объявление колледжа</label>
                         <textarea id="announcementText" class="form-control" rows="2" placeholder="Текст баннера"></textarea>
@@ -117,15 +115,15 @@
             </div>
 
             <div id="tab-spaces" class="tab-section">
-                <h1 class="page-title">Пространства (группы)</h1>
+                <h1 class="page-title">Все пространства</h1>
                 <button class="btn-small" onclick="openCreateSpaceForm()" style="margin-bottom:14px;">➕ Создать группу</button>
+                <p style="color:var(--text-secondary); font-size:0.85rem;">Нажмите на группу, чтобы переключиться в неё</p>
                 <div id="allSpacesList"></div>
             </div>
 
             <div id="tab-schedule" class="tab-section"></div>
             <div id="tab-hw" class="tab-section"></div>
             <div id="tab-members" class="tab-section"></div>
-            <div id="tab-chat" class="tab-section"></div>
 
             <div id="tab-auths" class="tab-section">
                 <h1 class="page-title">Верификация коллег 🛡️</h1>
@@ -153,7 +151,7 @@
                 </div>
                 <div class="settings-card">
                     <h3>Настройки пространства</h3>
-                    <p style="color:var(--text-secondary); font-size:0.85rem;">Только для выбранного пространства</p>
+                    <p style="color:var(--text-secondary); font-size:0.85rem;">Для выбранного пространства</p>
                     <button class="btn-secondary" style="margin-bottom:8px;" onclick="rotateInviteCode()">🔄 Сменить код приглашения</button>
                     <button class="btn-secondary" onclick="openBlacklist()">🚫 Чёрный список</button>
                 </div>
@@ -239,22 +237,23 @@
 
         function loadTabContent(tabId) {
             const spaceId = currentSpace?.id;
+            // Преподаватель всегда админ своего пространства
             if (tabId === 'tab-schedule') renderScheduleTab(document.getElementById('tab-schedule'), spaceId, true);
             if (tabId === 'tab-hw') renderHomeworkTab(document.getElementById('tab-hw'), spaceId, true);
             if (tabId === 'tab-members') renderMembersTab(document.getElementById('tab-members'), spaceId, true);
-            if (tabId === 'tab-chat') renderChatTab(document.getElementById('tab-chat'), spaceId, true, currentUser?.id);
         }
 
         async function reloadSpaces() {
             mySpaces = await apiGet('/api/spaces/mine');
-            const sel = document.getElementById('spaceSelect');
-            if (!mySpaces.length) { sel.innerHTML = '<option>Нет групп</option>'; currentSpace = null; }
-            else {
-                sel.innerHTML = mySpaces.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+            const label = document.getElementById('currentSpaceLabel');
+            if (!mySpaces.length) {
+                currentSpace = null;
+                if (label) label.textContent = '— нет групп —';
+            } else {
                 const savedId = localStorage.getItem('activeSpaceId');
                 const found = mySpaces.find(s => s.id === savedId) || mySpaces[0];
-                sel.value = found.id;
                 currentSpace = found;
+                if (label) label.textContent = found.name;
             }
             renderAllSpacesList();
             const activeTab = document.querySelector('.tab-section.active')?.id || 'tab-system';
@@ -262,19 +261,24 @@
         }
         window.__reloadSpaces = reloadSpaces;
 
-        function onSpaceSwitch(spaceId) {
-            currentSpace = mySpaces.find(s => s.id === spaceId);
+        function switchSpace(spaceId) {
+            const found = mySpaces.find(s => s.id === spaceId);
+            if (!found) return;
+            currentSpace = found;
             localStorage.setItem('activeSpaceId', spaceId);
+            document.getElementById('currentSpaceLabel').textContent = found.name;
+            renderAllSpacesList();
             const activeTab = document.querySelector('.tab-section.active')?.id || 'tab-system';
             loadTabContent(activeTab);
+            showTab('tab-system', document.querySelector('.sidebar-item[data-tab="tab-system"]'));
         }
 
         function renderAllSpacesList() {
             const box = document.getElementById('allSpacesList');
             if (!mySpaces.length) { box.innerHTML = '<p class="empty-state">Пока нет ни одной группы.</p>'; return; }
             box.innerHTML = mySpaces.map(s => `
-                <div class="space-card">
-                    <span>${escapeHtml(s.name)}</span>
+                <div class="space-card" style="${currentSpace?.id === s.id ? 'border-color:var(--accent-blue); border-width:2px;' : ''}" onclick="switchSpace('${s.id}')">
+                    <span>${currentSpace?.id === s.id ? '✅ ' : ''}${escapeHtml(s.name)}</span>
                     <span class="code-pill">${s.invite_code}</span>
                 </div>`).join('');
         }
@@ -285,14 +289,12 @@
             document.getElementById('sw-remote').checked = !!s.remote_mode;
             document.getElementById('sw-maintenance').checked = !!s.maintenance_mode;
             document.getElementById('sw-exams').checked = !!s.exams_mode;
-            document.getElementById('sw-private').checked = !!s.private_chat_mode;
             document.getElementById('announcementText').value = s.global_announcement || '';
             const isRoot = currentUser?.isRoot;
             document.getElementById('rootOnlyNotice').style.display = isRoot ? 'none' : 'block';
             document.getElementById('saveSettingsBtn').style.display = isRoot ? 'block' : 'none';
-            ['sw-remote', 'sw-maintenance', 'sw-exams', 'sw-private'].forEach(id => document.getElementById(id).disabled = !isRoot);
+            ['sw-remote', 'sw-maintenance', 'sw-exams'].forEach(id => document.getElementById(id).disabled = !isRoot);
             document.getElementById('announcementText').disabled = !isRoot;
-            document.getElementById('navChat').classList.toggle('hidden', !(isRoot || !s.private_chat_mode));
         }
 
         async function saveGlobalSettings() {
@@ -301,7 +303,7 @@
                     remote_mode: document.getElementById('sw-remote').checked,
                     maintenance_mode: document.getElementById('sw-maintenance').checked,
                     exams_mode: document.getElementById('sw-exams').checked,
-                    private_chat_mode: document.getElementById('sw-private').checked,
+                    private_chat_mode: false,
                     global_announcement: document.getElementById('announcementText').value
                 });
                 alert('Настройки сохранены!');
