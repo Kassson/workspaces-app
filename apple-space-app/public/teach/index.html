@@ -172,6 +172,7 @@
                     <button class="btn-secondary" style="margin-bottom:8px;" onclick="rotateInviteCode()">🔄 Сменить код приглашения</button>
                     <button class="btn-secondary" onclick="openBlacklist()">🚫 Чёрный список</button>
                 </div>
+                <div class="settings-card" id="pushSettingsContainer"></div>
                 <div class="settings-card">
                     <button class="btn-danger" onclick="logout()">Выйти из аккаунта</button>
                 </div>
@@ -265,6 +266,7 @@
             if (tabId === 'tab-schedule') renderScheduleTab(document.getElementById('tab-schedule'), spaceId, true);
             if (tabId === 'tab-hw') renderHomeworkTab(document.getElementById('tab-hw'), spaceId, true);
             if (tabId === 'tab-members') renderMembersTab(document.getElementById('tab-members'), spaceId, true);
+            if (tabId === 'tab-settings') renderPushSettingsCard();
         }
 
         async function reloadSpaces() {
