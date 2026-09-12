@@ -10,6 +10,23 @@
     <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+    <!-- ==== ЭКРАН ЗАГРУЗКИ ==== -->
+    <div class="loading-screen show" id="loadingScreen">
+        <div class="loading-content">
+            <div class="loading-logo">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+                    <circle cx="256" cy="256" r="256" fill="#007AFF"/>
+                    <g transform="translate(64, 64) scale(16)" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                        <path d="M2 17l10 5 10-5"/>
+                        <path d="M2 12l10 5 10-5"/>
+                    </g>
+                </svg>
+            </div>
+            <div class="loading-ring"></div>
+        </div>
+    </div>
+
     <button class="theme-toggle-btn" id="themeToggle">🌙</button>
 
     <div class="maintenance-screen" id="maintenanceScreen">
@@ -216,10 +233,18 @@
                 localStorage.setItem('token', data.token);
                 localStorage.setItem('role', 'teacher');
                 localStorage.setItem('user', JSON.stringify(data.user));
+                showLoadingScreen();
                 location.reload();
             } catch (d) { errorMsg.textContent = d.error || 'Ошибка входа'; }
         }
-        function logout() { localStorage.clear(); location.reload(); }
+
+        function logout() {
+            showLoadingScreen();
+            setTimeout(() => {
+                localStorage.clear();
+                location.reload();
+            }, 150);
+        }
 
         async function verifyColleague() {
             const code = document.getElementById('colleagueCode').value.trim(); if (!code) return;
@@ -237,7 +262,6 @@
 
         function loadTabContent(tabId) {
             const spaceId = currentSpace?.id;
-            // Преподаватель всегда админ своего пространства
             if (tabId === 'tab-schedule') renderScheduleTab(document.getElementById('tab-schedule'), spaceId, true);
             if (tabId === 'tab-hw') renderHomeworkTab(document.getElementById('tab-hw'), spaceId, true);
             if (tabId === 'tab-members') renderMembersTab(document.getElementById('tab-members'), spaceId, true);
@@ -324,7 +348,10 @@
         }
 
         async function boot() {
-            if (!(localStorage.getItem('token') && localStorage.getItem('role') === 'teacher')) return;
+            if (!(localStorage.getItem('token') && localStorage.getItem('role') === 'teacher')) {
+                hideLoadingScreen();
+                return;
+            }
             let user;
             try { ({ user } = await apiGet('/api/auth/me')); }
             catch (e) { logout(); return; }
@@ -335,6 +362,7 @@
                 document.getElementById('loginWrapper').style.display = 'none';
                 document.getElementById('pendingWrapper').style.display = 'flex';
                 document.getElementById('pendingCode').textContent = user.verificationCode || 'T-????';
+                hideLoadingScreen();
                 return;
             }
 
@@ -346,6 +374,8 @@
             await loadRootSettings();
             await reloadSpaces();
             startSelfPing();
+
+            hideLoadingScreen();
         }
         boot();
     </script>
