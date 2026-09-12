@@ -729,7 +729,8 @@ function openEditProfile(keepState) {
         localStorage.setItem('user', JSON.stringify(r.user));
         closeDynamicSheet();
         alert('✅ Профиль сохранён');
-        location.reload();
+        showLoadingScreen();
+        setTimeout(() => { location.reload(); }, 150);
     }, 'Сохранить');
 }
 
