@@ -1,5 +1,8 @@
 /* ===================== ОБЩИЕ УТИЛИТЫ (студент + преподаватель) ===================== */
 
+// ---- Socket.io с токеном (для мультиплеера и чата) ----
+const socket = io({ query: { token: localStorage.getItem('token') || '' } });
+
 // ---- Тема (по умолчанию светлая) ----
 (function initTheme() {
     const saved = localStorage.getItem('theme') || 'light';
