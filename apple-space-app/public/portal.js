@@ -397,10 +397,15 @@ function exportScheduleICS() {
 
 // ---------- ЧАТ ----------
 let chatJoinedSpace = null;
+
+// === PUSH: renderChatTab теперь с кнопкой мутов уведомлений ===
 function renderChatTab(container, spaceId, isAdmin, currentUserId) {
     if (!spaceId) { container.innerHTML = emptySpaceState(); return; }
     container.innerHTML = `
-        <h1 class="page-title">Чат группы</h1>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:6px;">
+            <h1 class="page-title" style="margin:0;">Чат группы</h1>
+            <button class="btn-small" id="chatMuteBtn" title="Настройки уведомлений чата">🔔 Вкл.</button>
+        </div>
         <div class="chat-wrap">
             <div class="chat-messages" id="chatMessages"></div>
             <div class="chat-input-row">
@@ -417,10 +422,22 @@ function renderChatTab(container, spaceId, isAdmin, currentUserId) {
     }
     const input = document.getElementById('chatInput');
     input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(spaceId); } };
+
+    // Кнопка мутов
+    const muteBtn = document.getElementById('chatMuteBtn');
+    if (muteBtn) {
+        refreshChatMuteBtn(spaceId);
+        muteBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openChatMutePanel(spaceId);
+        });
+    }
+
     socket.off('new_message'); socket.off('message_deleted');
     socket.on('new_message', (msg) => { if (msg.space_id === spaceId) appendChatMessage(msg, isAdmin, currentUserId); });
     socket.on('message_deleted', ({ messageId }) => { document.getElementById('msg-' + messageId)?.remove(); });
 }
+// === /PUSH ===
 
 async function loadChatHistory(spaceId, isAdmin, currentUserId) {
     try {
@@ -880,4 +897,190 @@ function refreshCurrentTab() {
         else if (activeTab.id === 'tab-today') renderTodayTab(activeTab, spaceId);
         else if (activeTab.id === 'tab-chat') renderChatTab(activeTab, spaceId, !!isAdmin, currentUser?.id);
     }
+}
+
+/* ===================== PUSH: UI КАРТОЧКИ И МУТОВ ===================== */
+
+// ---------- Кнопка мутов в чате ----------
+function formatMuteLabel(m) {
+    if (!m) return '🔔 Вкл.';
+    if (m.muted_forever) return '🔕 Выкл.';
+    if (m.muted_until && new Date(m.muted_until) > new Date()) {
+        const d = new Date(m.muted_until);
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mm = String(d.getMinutes()).padStart(2, '0');
+        return `🔕 до ${hh}:${mm}`;
+    }
+    return '🔔 Вкл.';
+}
+
+async function refreshChatMuteBtn(spaceId) {
+    const btn = document.getElementById('chatMuteBtn');
+    if (!btn) return;
+    try {
+        const m = await getChatMute(spaceId);
+        btn.textContent = formatMuteLabel(m);
+        btn.dataset.muted = (m.muted_forever || (m.muted_until && new Date(m.muted_until) > new Date())) ? '1' : '0';
+    } catch (e) { /* тихо */ }
+}
+
+let _chatMutePanel = null;
+function closeChatMutePanel() {
+    if (_chatMutePanel) { _chatMutePanel.remove(); _chatMutePanel = null; }
+}
+
+function openChatMutePanel(spaceId) {
+    if (_chatMutePanel) { closeChatMutePanel(); return; }
+    const btn = document.getElementById('chatMuteBtn');
+    if (!btn) return;
+
+    _chatMutePanel = document.createElement('div');
+    _chatMutePanel.style.cssText =
+        'position:absolute; top:56px; right:16px; z-index:200;' +
+        'background:var(--bg-card,#fff); border:1px solid var(--card-border,#ddd);' +
+        'border-radius:12px; padding:10px; min-width:200px; display:flex; flex-direction:column; gap:6px;' +
+        'box-shadow:0 8px 24px rgba(0,0,0,0.18);';
+    _chatMutePanel.innerHTML =
+        '<div style="font-weight:600; font-size:0.9rem; padding:2px 4px 6px;">🔕 Заглушить чат</div>' +
+        '<button class="btn-small" data-dur="1h">На 1 час</button>' +
+        '<button class="btn-small" data-dur="8h">На 8 часов</button>' +
+        '<button class="btn-small" data-dur="24h">На 24 часа</button>' +
+        '<button class="btn-small" data-dur="forever">Навсегда</button>' +
+        '<button class="btn-small" data-dur="off" style="background:var(--accent-blue); color:#fff;">🔔 Включить обратно</button>';
+
+    // Родитель должен быть relative
+    const chatTab = document.getElementById('tab-chat');
+    if (chatTab && getComputedStyle(chatTab).position === 'static') chatTab.style.position = 'relative';
+    (chatTab || document.body).appendChild(_chatMutePanel);
+
+    _chatMutePanel.addEventListener('click', async (e) => {
+        const target = e.target.closest('button[data-dur]');
+        if (!target) return;
+        const dur = target.dataset.dur;
+        try {
+            if (dur === 'off') await clearChatMute(spaceId);
+            else await setChatMute(spaceId, dur);
+            await refreshChatMuteBtn(spaceId);
+        } catch (err) {
+            alert(err.error || 'Ошибка');
+        }
+        closeChatMutePanel();
+    });
+
+    setTimeout(() => {
+        const handler = (ev) => {
+            if (!_chatMutePanel) { document.removeEventListener('click', handler); return; }
+            if (_chatMutePanel.contains(ev.target) || ev.target === btn) return;
+            closeChatMutePanel();
+            document.removeEventListener('click', handler);
+        };
+        document.addEventListener('click', handler);
+    }, 0);
+}
+
+// ---------- Карточка «Уведомления» в настройках ----------
+async function renderPushSettingsCard() {
+    const box = document.getElementById('pushSettingsContainer');
+    if (!box) return;
+
+    if (typeof pushSupported !== 'function' || !pushSupported()) {
+        box.innerHTML = '<h3>Уведомления</h3><p style="color:var(--text-secondary); margin:0;">Этот браузер не поддерживает пуши.</p>';
+        return;
+    }
+
+    let enabled = false;
+    let mute = { muted_until: null, muted_forever: false };
+    try { enabled = await isPushEnabled(); } catch (e) {}
+    try { mute = await getPushMute(); } catch (e) {}
+
+    let statusEmoji, statusText;
+    if (!enabled) {
+        statusEmoji = '🔕'; statusText = 'Уведомления выключены в браузере';
+    } else if (mute.muted_forever) {
+        statusEmoji = '🔕'; statusText = 'Заглушены навсегда';
+    } else if (mute.muted_until && new Date(mute.muted_until) > new Date()) {
+        const d = new Date(mute.muted_until);
+        statusEmoji = '🔕';
+        statusText = `Заглушены до ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    } else {
+        statusEmoji = '🔔'; statusText = 'Уведомления включены';
+    }
+
+    box.innerHTML = `
+        <h3>Уведомления</h3>
+        <p style="color:var(--text-secondary); font-size:0.9rem; margin-top:0;">
+            ${statusEmoji} ${statusText}.<br>
+            Замены, новые ДЗ, напоминания о парах. Объявления колледжа приходят всегда.
+        </p>
+        <button class="btn-primary" id="pushSettingsBtn" style="margin:0;">⚙️ Настроить уведомления</button>
+    `;
+
+    box.querySelector('#pushSettingsBtn').addEventListener('click', openPushSettingsModal);
+}
+
+async function openPushSettingsModal() {
+    const root = document.getElementById('dynamicSheetRoot');
+    const enabled = await isPushEnabled();
+    const mute = await getPushMute();
+
+    let statusText;
+    if (mute.muted_forever) statusText = '🔕 Заглушены навсегда';
+    else if (mute.muted_until && new Date(mute.muted_until) > new Date()) {
+        const d = new Date(mute.muted_until);
+        statusText = `🔕 Заглушены до ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    } else if (!enabled) statusText = '🔕 Уведомления выключены';
+    else statusText = '🔔 Уведомления включены';
+
+    root.innerHTML = `
+        <div class="sheet show" id="dynamicSheet">
+            <div class="sheet-handle"></div>
+            <h2 class="app-title" style="font-size:1.3rem;">⚙️ Настройки уведомлений</h2>
+            <p style="color:var(--text-secondary); font-size:0.9rem; text-align:center; margin:6px 0 16px 0;">
+                Текущее состояние: <b>${statusText}</b>
+            </p>
+
+            <p style="font-weight:600; margin:0 0 8px 0; font-size:0.9rem;">🌐 Система (браузер):</p>
+            <button class="btn-small" id="pushToggleBtn" style="width:100%; margin-bottom:16px; ${enabled ? '' : 'background:var(--success); color:#fff;'}">
+                ${enabled ? '🔕 Выключить уведомления полностью' : '🔔 Включить уведомления в браузере'}
+            </button>
+
+            <p style="font-weight:600; margin:0 0 8px 0; font-size:0.9rem;">🔕 Заглушить на время:</p>
+            <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
+                <button class="btn-small" data-dur="1h">Заглушить на 1 час</button>
+                <button class="btn-small" data-dur="8h">Заглушить на 8 часов</button>
+                <button class="btn-small" data-dur="24h">Заглушить на 24 часа</button>
+                <button class="btn-small" data-dur="forever" style="background:var(--danger); color:#fff;">Заглушить навсегда</button>
+            </div>
+
+            <button class="btn-primary" id="pushUnmuteBtn" style="width:100%;">🔔 Включить обратно</button>
+            <button class="btn-secondary" style="margin-top:8px;" onclick="closeDynamicSheet()">Закрыть</button>
+        </div>`;
+    document.getElementById('sheetOverlay').classList.add('show');
+
+    root.querySelector('#pushToggleBtn').addEventListener('click', async () => {
+        try {
+            if (await isPushEnabled()) await disablePush();
+            else await enablePush();
+            closeDynamicSheet();
+            renderPushSettingsCard();
+        } catch (e) { alert(e.message || 'Ошибка'); }
+    });
+
+    root.querySelector('#pushUnmuteBtn').addEventListener('click', async () => {
+        try {
+            await clearPushMute();
+            closeDynamicSheet();
+            renderPushSettingsCard();
+        } catch (e) { alert(e.error || 'Ошибка'); }
+    });
+
+    root.querySelectorAll('button[data-dur]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            try {
+                await setPushMute(btn.dataset.dur);
+                closeDynamicSheet();
+                renderPushSettingsCard();
+            } catch (e) { alert(e.error || 'Ошибка'); }
+        });
+    });
 }
