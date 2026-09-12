@@ -1,124 +1,60 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-
-:root {
-    --bg-main: #F2F2F7;
-    --card-bg: rgba(255, 255, 255, 0.75);
-    --card-border: rgba(255, 255, 255, 0.6);
-    --text-primary: #000000;
-    --text-secondary: #8E8E93;
-    --input-bg: rgba(230, 230, 235, 0.7);
-    --accent-blue: #007AFF;
-    --accent-blue-hover: #0056B3;
-    --glass-shadow: 0 10px 40px rgba(0, 0, 0, 0.08);
-}
-
-[data-theme=»dark»] {
-    --bg-main: #000000;
-    --card-bg: rgba(28, 28, 30, 0.75);
-    --card-border: rgba(255, 255, 255, 0.15);
-    --text-primary: #FFFFFF;
-    --text-secondary: #98989D;
-    --input-bg: rgba(44, 44, 46, 0.85);
-    --accent-blue: #0A84FF;
-    --accent-blue-hover: #409CFF;
-    --glass-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-}
-
-•	{ box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', -apple-system, sans-serif; transition: background-color 0.3s, color 0.3s; }
-
-Body { background-color: var(--bg-main); color: var(--text-primary); min-height: 100vh; overflow-x: hidden; }
-
-/* КНОПКА ТЕМЫ */
-.theme-toggle-btn { position: fixed; top: 20px; right: 20px; background: var(--card-bg); border: 1px solid var(--card-border); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); width: 44px; height: 44px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: var(--glass-shadow); z-index: 1000; color: var(--text-primary); font-size: 1.2rem; }
-
-/* ЦЕНТРОВКА ОКНА ВХОДА */
-.login-wrapper { display: flex; align-items: center; justify-content: center; min-height: 100vh; width: 100vw; }
-.auth-container { width: 90%; max-width: 380px; padding: 40px 30px; background: var(--card-bg); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px); border: 1px solid var(--card-border); border-radius: 24px; box-shadow: var(--glass-shadow); text-align: center; }
-
-.app-logo { width: 64px; height: 64px; background: linear-gradient(135deg, #007AFF, #5856D6); border-radius: 18px; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; box-shadow: 0 4px 18px rgba(0, 122, 255, 0.3); }
-.app-logo svg { width: 34px; height: 34px; fill: #FFFFFF; }
-
-.app-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 4px; }
-.app-subtitle { font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 24px; }
-
-.form-group { margin-bottom: 14px; }
-.form-control { width: 100%; height: 46px; background: var(--input-bg); border: 1px solid transparent; border-radius: 12px; padding: 0 16px; font-size: 0.95rem; color: var(--text-primary); outline: none; }
-.form-control:focus { border-color: var(--accent-blue); background: var(--card-bg); }
-
-.btn-primary { width: 100%; height: 46px; background: var(--accent-blue); color: #FFF; border: none; border-radius: 12px; font-size: 1rem; font-weight: 600; cursor: pointer; margin-top: 10px; }
-.btn-primary:hover { background: var(--accent-blue-hover); }
-
-.teacher-link-btn { display: inline-block; margin-top: 20px; color: var(--accent-blue); font-size: 0.9rem; text-decoration: none; font-weight: 500; }
-
-/* ПАНЕЛЬ УПРАВЛЕНИЯ (DASHBOARD) – СТРОГО В СТОЛБИК */
-.app-dashboard { display: none; width: 100vw; height: 100vh; flex-direction: row; }
-.sidebar { width: 260px; background: var(--card-bg); backdrop-filter: blur(25px); border-right: 1px solid var(--card-border); padding: 24px 16px; display: flex; flex-direction: column; gap: 8px; }
-.sidebar-logo { font-size: 1.2rem; font-weight: 700; margin-bottom: 20px; padding: 0 12px; }
-.sidebar-item { padding: 12px 16px; border-radius: 12px; color: var(--text-primary); text-decoration: none; font-weight: 500; display: flex; align-items: center; gap: 12px; cursor: pointer; }
-.sidebar-item:hover, .sidebar-item.active { background: var(--accent-blue); color: #FFF; }
-.main-content { flex: 1; padding: 32px; overflow-y: auto; }
-
-/* АДАПТАЦИЯ ДЛЯ ТЕЛЕФОНОВ */
-@media (max-width: 768px) {
-    .app-dashboard { flex-direction: column; }
-    .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--card-border); padding: 16px; flex-direction: row; flex-wrap: wrap; justify-content: center; }
-}
-
-```
-### Файл 3: public/index.html (Студенческий портал)
-*(Замените всё в apple-space-app/public/index.html. Здесь встроена логика входа, которая прячет меню авторизации и показывает Dashboard!)*
-```html
 <!DOCTYPE html>
-<html lang=»ru» data-theme=»dark»>
+<html lang="ru" data-theme="dark">
 <head>
-    <meta charset=»UTF-8»>
-    <meta name=»viewport» content=»width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no»>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Workspaces — Студенты</title>
-    <link rel=»stylesheet» href=»/style.css»>
+    <!-- Путь начинается со слэша, это важно! -->
+    <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 
-    <button class=»theme-toggle-btn» id=»themeToggle»>🌙</button>
+    <button class="theme-toggle-btn" id="themeToggle">🌙</button>
 
-    <!—ОКНО ВХОДА 
-    <div class=»login-wrapper» id=»loginWrapper»>
-        <div class=»auth-container»>
-            <div class=»app-logo»>
-                <svg viewBox=»0 0 24 24»><path d=»M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5»/></svg>
+    <div class="login-wrapper" id="loginWrapper">
+        <div class="auth-container">
+            <!-- ВАШ НОВЫЙ ЛОГОТИП -->
+            <div class="app-logo">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+                    <circle cx="256" cy="256" r="256" fill="#007AFF"/>
+                    <g transform="translate(64, 64) scale(16)" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                        <path d="M2 17l10 5 10-5"/>
+                        <path d="M2 12l10 5 10-5"/>
+                    </g>
+                </svg>
             </div>
-            <h1 class=»app-title»>Workspaces</h1>
-            <p class=»app-subtitle»>Единый портал студентов</p>
+            <h1 class="app-title">Workspaces</h1>
+            <p class="app-subtitle">Единый портал колледжа</p>
 
-            <form id=»loginForm»>
-                <div class=»form-group»><input type=»text» id=»loginInput» class=»form-control» placeholder=»Логин или Email» required></div>
-                <div class=»form-group»><input type=»password» id=»passwordInput» class=»form-control» placeholder=»Пароль» required></div>
-                <button type=»submit» class=»btn-primary»>Войти</button>
+            <form id="loginForm">
+                <div class="form-group"><input type="text" id="loginInput" class="form-control" placeholder="Логин или Email" required></div>
+                <div class="form-group"><input type="password" id="passwordInput" class="form-control" placeholder="Пароль" required></div>
+                <button type="submit" class="btn-primary">Войти</button>
             </form>
-            <p id=»errorMsg» style=»color: #FF3B30; font-size: 0.85rem; margin-top: 10px; display: none;»></p>
-            <a href=»/teach» class=»teacher-link-btn»>Портал для преподавателей →</a>
+            <p id="errorMsg" style="color: #FF3B30; font-size: 0.85rem; margin-top: 10px; display: none;"></p>
+            <a href="/teach" class="teacher-link-btn">Вход для преподавателей →</a>
         </div>
     </div>
 
-    <!—ПАНЕЛЬ УПРАВЛЕНИЯ (Скрыта до входа) 
-    <div class=»app-dashboard» id=»dashboard»>
-        <aside class=»sidebar»>
-            <div class=»sidebar-logo»>Workspaces 🎓</div>
-            <a href=»#» class=»sidebar-item active»>Мой профиль</a>
-            <a href=»#» class=»sidebar-item»>Расписание</a>
-            <a href=»#» class=»sidebar-item»>Arcade Hub</a>
-            <button onclick=»logout()» class=»btn-primary» style=»margin-top: auto;»>Выйти</button>
+    <!-- ПАНЕЛЬ УПРАВЛЕНИЯ -->
+    <div class="app-dashboard" id="dashboard">
+        <aside class="sidebar">
+            <div class="sidebar-logo">Workspaces 🎓</div>
+            <a href="#" class="sidebar-item active">Мой профиль</a>
+            <a href="#" class="sidebar-item">Расписание</a>
+            <button onclick="logout()" class="btn-primary" style="margin-top: auto;">Выйти</button>
         </aside>
-        <main class=»main-content»>
-            <h1 style=»font-size: 2rem; margin-bottom: 20px;»>Добро пожаловать, <span id=»userName»>Студент</span>!</h1>
-            <p style=»color: var(--text-secondary);»>Здесь будет отображаться ваше расписание и задания.</p>
+        <main class="main-content">
+            <h1 style="font-size: 2rem; margin-bottom: 20px;">Добро пожаловать, <span id="userName">Студент</span>!</h1>
+            <p style="color: var(--text-secondary);">Здесь будет отображаться ваше расписание.</p>
         </main>
     </div>
 
     <script>
-        // ТЕМА
-        Const themeBtn = document.getElementById('themeToggle');
-        Const currentTheme = localStorage.getItem('theme') || 'dark';
-        Document.documentElement.setAttribute('data-theme', currentTheme);
+        const themeBtn = document.getElementById('themeToggle');
+        const currentTheme = localStorage.getItem('theme') || 'dark';
+        document.documentElement.setAttribute('data-theme', currentTheme);
         themeBtn.textContent = currentTheme === 'dark' ? '☀️' : '🌙';
 
         themeBtn.addEventListener('click', () => {
@@ -128,18 +64,16 @@ Body { background-color: var(--bg-main); color: var(--text-primary); min-height:
             themeBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
         });
 
-        // АВТОРИЗАЦИЯ
-        Const loginForm = document.getElementById('loginForm');
-        Const errorMsg = document.getElementById('errorMsg');
+        const loginForm = document.getElementById('loginForm');
+        const errorMsg = document.getElementById('errorMsg');
 
-        // Проверка сохраненной сессии
-        If (localStorage.getItem('token') && localStorage.getItem('role') === 'student') {
-            Document.getElementById('loginWrapper').style.display = 'none';
-            Document.getElementById('dashboard').style.display = 'flex';
-            Document.getElementById('userName').textContent = localStorage.getItem('fullName') || 'Студент';
+        if (localStorage.getItem('token') && localStorage.getItem('role') === 'student') {
+            document.getElementById('loginWrapper').style.display = 'none';
+            document.getElementById('dashboard').style.display = 'flex';
+            document.getElementById('userName').textContent = localStorage.getItem('fullName') || 'Студент';
         }
 
-        loginForm.addEventListener('submit', async € => {
+        loginForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             errorMsg.style.display = 'none';
             
@@ -152,26 +86,20 @@ Body { background-color: var(--bg-main); color: var(--text-primary); min-height:
                     isTeacher: false
                 })
             });
-            Const data = await res.json();
+            const data = await res.json();
 
-            If (res.ok) {
+            if (res.ok) {
                 localStorage.setItem('token', data.token);
                 localStorage.setItem('fullName', data.user.fullName);
                 localStorage.setItem('role', 'student');
-                
-                document.getElementById('loginWrapper').style.display = 'none';
-                document.getElementById('dashboard').style.display = 'flex';
-                document.getElementById('userName').textContent = data.user.fullName;
+                location.reload();
             } else {
                 errorMsg.textContent = data.error;
                 errorMsg.style.display = 'block';
             }
         });
 
-        Function logout() {
-            localStorage.clear();
-            location.reload();
-        }
+        function logout() { localStorage.clear(); location.reload(); }
     </script>
 </body>
 </html>
