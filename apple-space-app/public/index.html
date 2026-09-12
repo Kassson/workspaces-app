@@ -11,6 +11,23 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <!-- ==== ЭКРАН ЗАГРУЗКИ ==== -->
+    <div class="loading-screen show" id="loadingScreen">
+        <div class="loading-content">
+            <div class="loading-logo">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+                    <circle cx="256" cy="256" r="256" fill="#007AFF"/>
+                    <g transform="translate(64, 64) scale(16)" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                        <path d="M2 17l10 5 10-5"/>
+                        <path d="M2 12l10 5 10-5"/>
+                    </g>
+                </svg>
+            </div>
+            <div class="loading-ring"></div>
+        </div>
+    </div>
+
     <button class="theme-toggle-btn" id="themeToggle">🌙</button>
 
     <div class="maintenance-screen" id="maintenanceScreen">
@@ -162,10 +179,18 @@
                 localStorage.setItem('token', data.token);
                 localStorage.setItem('role', 'student');
                 localStorage.setItem('user', JSON.stringify(data.user));
+                showLoadingScreen();
                 location.reload();
             } catch (d) { errorMsg.textContent = d.error || 'Ошибка входа'; }
         }
-        function logout() { localStorage.clear(); location.reload(); }
+
+        function logout() {
+            showLoadingScreen();
+            setTimeout(() => {
+                localStorage.clear();
+                location.reload();
+            }, 150);
+        }
 
         function showTab(tabId, el) {
             document.querySelectorAll('.tab-section').forEach(s => s.classList.remove('active'));
@@ -177,7 +202,6 @@
 
         function loadTabContent(tabId) {
             const spaceId = currentSpace?.id;
-            // ВАЖНО: используем currentSpace.is_admin вместо жёсткого false
             const isAdmin = !!currentSpace?.is_admin;
             if (tabId === 'tab-today') renderTodayTab(document.getElementById('tab-today'), spaceId);
             if (tabId === 'tab-schedule') renderScheduleTab(document.getElementById('tab-schedule'), spaceId, isAdmin);
@@ -218,7 +242,7 @@
                 box.innerHTML = `
                     <p style="margin-top:0;"><b>${escapeHtml(currentSpace.name)}</b></p>
                     <p style="color:var(--text-secondary); font-size:0.85rem;">Код приглашения: <span class="code-pill">${currentSpace.invite_code}</span></p>
-                    ${currentSpace.is_admin ? '<span class="badge badge-blue">👑 Вы админ этой группы</span>' : ''}
+                    ${currentSpace.is_admin ? '<span class="badge badge-blue">🤵 Вы админ этой группы</span>' : ''}
                     <div style="margin-top:14px;">
                         <button class="btn-danger" onclick="leaveCurrentSpace()">🚪 Покинуть пространство</button>
                     </div>
@@ -232,8 +256,8 @@
             try {
                 await apiPost(`/api/spaces/${currentSpace.id}/leave`, {});
                 localStorage.removeItem('activeSpaceId');
-                alert('Вы покинули пространство');
-                location.reload();
+                showLoadingScreen();
+                setTimeout(() => { location.reload(); }, 150);
             } catch (e) { alert(e.error || 'Ошибка'); }
         }
 
@@ -246,7 +270,11 @@
 
         async function boot() {
             await loadAndApplySettings(null);
-            if (!(localStorage.getItem('token') && localStorage.getItem('role') === 'student')) return;
+
+            if (!(localStorage.getItem('token') && localStorage.getItem('role') === 'student')) {
+                hideLoadingScreen();
+                return;
+            }
             try {
                 const { user } = await apiGet('/api/auth/me');
                 currentUser = user;
@@ -260,6 +288,8 @@
             await loadAndApplySettings(currentUser);
             await reloadSpaces();
             startSelfPing();
+
+            hideLoadingScreen();
         }
         boot();
 
