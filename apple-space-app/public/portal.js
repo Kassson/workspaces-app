@@ -2,9 +2,10 @@
 
 let systemSettings = {};
 let currentSpace = null;
-// ВАЖНО: currentUser объявлен в inline-скрипте index.html / teach/index.html
+// currentUser объявлен в inline-скрипте index.html / teach/index.html
 window._hwStudents = [];
 window._currentHwStatsId = null;
+let _memberForStatusEdit = null;
 
 // ---------- ГЛОБАЛЬНЫЕ НАСТРОЙКИ ----------
 async function loadAndApplySettings(user) {
@@ -447,7 +448,11 @@ function sendChatMessage(spaceId) {
 function deleteChatMessage(id) { socket.emit('delete_message', { messageId: id }); }
 
 // ---------- УЧАСТНИКИ ----------
-const ROLE_LABELS = { admin: '👑 Админ', member: '👤 Участник' };
+const ROLE_LABELS = { admin: '🤵 Админ', member: '👤 Участник' };
+
+function getMemberDisplayStatus(m) {
+    return m.custom_status || ROLE_LABELS[m.role] || m.role;
+}
 
 async function renderMembersTab(container, spaceId, isAdmin) {
     if (!spaceId) { container.innerHTML = emptySpaceState(); return; }
@@ -463,7 +468,7 @@ async function renderMembersTab(container, spaceId, isAdmin) {
                     <div class="member-name">${escapeHtml(m.full_name)}</div>
                     <div class="member-username">@${escapeHtml(m.username)}${m.is_teacher ? ' · 🎓' : ''}</div>
                 </div>
-                <span class="code-pill">${ROLE_LABELS[m.role] || m.role}</span>
+                <span class="code-pill">${escapeHtml(getMemberDisplayStatus(m))}</span>
             </div>
         `).join('');
         html += '</div>';
@@ -479,22 +484,33 @@ async function openMemberProfile(member) {
         return alert('Только преподаватель или админ может просматривать профили участников');
     }
 
+    // Сохраняем для дальнейшего редактирования статуса
+    _memberForStatusEdit = member;
+
     const muted = member.muted_until && new Date(member.muted_until) > new Date();
     const manageable = isAdminViewer && !isSelf;
+    const displayStatus = getMemberDisplayStatus(member);
+
+    // Бейдж статуса: кликабельный для админов (чтобы можно было изменить)
+    const statusBadge = manageable
+        ? `<span class="code-pill" style="cursor:pointer;" onclick="openStatusEditor()" title="Нажмите, чтобы изменить статус">${escapeHtml(displayStatus)} ✏️</span>`
+        : `<span class="code-pill">${escapeHtml(displayStatus)}</span>`;
 
     const body = `
         <div style="text-align:center; margin-bottom:16px;">
             <div style="font-size:4rem;">${escapeHtml(member.avatar_emoji || '👤')}</div>
             <h2 style="margin:8px 0 4px;">${escapeHtml(member.full_name)}</h2>
             <p style="color:var(--text-secondary); margin:0;">@${escapeHtml(member.username)}</p>
-            <p style="margin:8px 0 0;"><span class="code-pill">${ROLE_LABELS[member.role] || member.role}</span>
+            <p style="margin:8px 0 0;">
+                ${statusBadge}
                 ${muted ? '<span class="code-pill" style="background:var(--warning); color:#fff;">🔇 Мут</span>' : ''}
                 ${isSelf ? '<span class="code-pill" style="background:var(--accent-blue); color:#fff;">Вы</span>' : ''}
             </p>
+            ${manageable ? '<p style="color:var(--text-secondary); font-size:0.75rem; margin-top:6px;">Нажмите на статус, чтобы изменить</p>' : ''}
         </div>
         ${manageable ? `
             <div style="display:flex; flex-direction:column; gap:8px; margin-top:16px;">
-                ${member.role !== 'admin' ? `<button class="btn-small" onclick="changeMemberRole('${member.id}', 'admin')">👑 Сделать админом</button>` : `<button class="btn-small" onclick="changeMemberRole('${member.id}', 'member')">⬇️ Снять админа</button>`}
+                ${member.role !== 'admin' ? `<button class="btn-small" onclick="changeMemberRole('${member.id}', 'admin')">🤵 Сделать админом</button>` : `<button class="btn-small" onclick="changeMemberRole('${member.id}', 'member')">⬇️ Снять админа</button>`}
                 ${muted
                     ? `<button class="btn-small" onclick="unmuteMember('${member.id}')">🔊 Снять мут</button>`
                     : `<button class="btn-small" onclick="muteMember('${member.id}')">🔇 Замутить</button>`}
@@ -507,6 +523,40 @@ async function openMemberProfile(member) {
     const root = document.getElementById('dynamicSheetRoot');
     root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div>${body}<button type="button" class="btn-secondary" style="margin-top:14px;" onclick="closeDynamicSheet()">Закрыть</button></div>`;
     document.getElementById('sheetOverlay').classList.add('show');
+}
+
+// ---------- РЕДАКТОР КАСТОМНОГО СТАТУСА ----------
+function openStatusEditor() {
+    const member = _memberForStatusEdit;
+    if (!member) return;
+
+    const isAdminViewer = currentUser?.isTeacher || currentSpace?.is_admin;
+    if (!isAdminViewer) return alert('Только преподаватель или админ может менять статус');
+
+    const currentStatus = member.custom_status || '';
+    const roleLabel = ROLE_LABELS[member.role] || member.role;
+
+    showFormSheet('✏️ Изменить статус участника', `
+        <div class="form-group">
+            <label>Статус участника</label>
+            <input name="customStatus" class="form-control"
+                   value="${escapeHtml(currentStatus)}"
+                   placeholder="Например: Староста, Зам. старосты" maxlength="50">
+        </div>
+        <p style="color:var(--text-secondary); font-size:0.8rem; margin:0 0 12px 0;">
+            Оставьте пустым, чтобы вернуть стандартную роль (<b>${escapeHtml(roleLabel)}</b>).
+            Максимум 50 символов.
+        </p>
+    `, async (fd) => {
+        const status = (fd.get('customStatus') || '').trim();
+        try {
+            await apiPost(`/api/spaces/${currentSpace.id}/members/${member.id}/custom-status`, { customStatus: status });
+            closeDynamicSheet();
+            refreshCurrentTab();
+        } catch (e) {
+            alert(e.error || 'Ошибка сохранения');
+        }
+    }, 'Сохранить');
 }
 
 async function changeMemberRole(userId, role) {
@@ -660,163 +710,4 @@ function openEditProfile(keepState) {
         };
         const r = await apiPost('/api/auth/update-profile', {
             firstName: _editingProfileState.firstName,
-            lastName: _editingProfileState.lastName,
-            nickname: currentUser.isTeacher ? null : _editingProfileState.nickname,
-            avatarEmoji: _selectedEmoji
-        });
-        if (!r || !r.success) throw new Error((r && r.error) || 'Не удалось сохранить');
-        currentUser = r.user;
-        localStorage.setItem('user', JSON.stringify(r.user));
-        closeDynamicSheet();
-        alert('✅ Профиль сохранён');
-        location.reload();
-    }, 'Сохранить');
-}
-
-function openEmojiPicker() {
-    const form = document.getElementById('dynamicSheetForm');
-    if (form) {
-        const fd = new FormData(form);
-        _editingProfileState = {
-            firstName: fd.get('firstName') || '',
-            lastName: fd.get('lastName') || '',
-            nickname: fd.get('nickname') || ''
-        };
-    }
-    const root = document.getElementById('dynamicSheetRoot');
-    root.innerHTML = `
-        <div class="sheet show" id="dynamicSheet">
-            <div class="sheet-handle"></div>
-            <h2 class="app-title" style="font-size:1.2rem;">Выберите аватар</h2>
-            <div class="emoji-grid">
-                ${EMOJI_LIST.map(e => `<button type="button" class="emoji-btn" onclick="pickEmoji('${e}')">${e}</button>`).join('')}
-            </div>
-            <button type="button" class="btn-secondary" style="margin-top:14px;" onclick="openEditProfile(true)">Назад</button>
-        </div>`;
-    document.getElementById('sheetOverlay').classList.add('show');
-}
-
-function pickEmoji(e) { _selectedEmoji = e; openEditProfile(true); }
-
-// ---------- УНИВЕРСАЛЬНАЯ ФОРМА ----------
-function showFormSheet(title, bodyHtml, onSubmit, submitLabel = 'Сохранить') {
-    const root = document.getElementById('dynamicSheetRoot');
-    root.innerHTML = `
-        <div class="sheet show" id="dynamicSheet">
-            <div class="sheet-handle"></div>
-            <h2 class="app-title" style="font-size:1.3rem;">${title}</h2>
-            <form id="dynamicSheetForm">${bodyHtml}
-                <button type="submit" class="btn-primary">${submitLabel}</button>
-                <button type="button" class="btn-secondary" onclick="closeDynamicSheet()">Отмена</button>
-            </form>
-        </div>`;
-    document.getElementById('sheetOverlay').classList.add('show');
-    document.getElementById('dynamicSheetForm').onsubmit = async (e) => {
-        e.preventDefault();
-        try { await onSubmit(new FormData(e.target)); closeDynamicSheet(); }
-        catch (err) { alert(err.error || err.message || 'Ошибка'); }
-    };
-}
-function closeDynamicSheet() {
-    document.getElementById('sheetOverlay').classList.remove('show');
-    document.getElementById('dynamicSheetRoot').innerHTML = '';
-}
-
-function openAddLessonSheet(spaceId) {
-    showFormSheet('Новый урок', `
-        <div class="form-group"><select name="dayOfWeek" class="form-control">
-            ${WEEKDAY_NAMES.slice(1).map((d, i) => `<option value="${i + 1}">${d}</option>`).join('')}
-        </select></div>
-        <div class="form-group"><input name="subjectName" class="form-control" placeholder="Предмет" required></div>
-        <div class="form-group"><input name="classroom" class="form-control" placeholder="Кабинет"></div>
-        <div class="form-group"><input name="teacherName" class="form-control" placeholder="Преподаватель"></div>
-        <div class="form-group" style="display:flex; gap:8px;">
-            <input name="startTime" type="time" class="form-control" required>
-            <input name="endTime" type="time" class="form-control" required>
-        </div>
-    `, async (fd) => {
-        await apiPost('/api/schedule', {
-            spaceId, dayOfWeek: parseInt(fd.get('dayOfWeek')), subjectName: fd.get('subjectName'),
-            classroom: fd.get('classroom'), teacherName: fd.get('teacherName'),
-            startTime: fd.get('startTime'), endTime: fd.get('endTime')
-        });
-        renderScheduleTab(document.getElementById('tab-schedule'), spaceId, true);
-    }, 'Добавить');
-}
-
-function openEditLessonSheet(lesson, dateStr, spaceId) {
-    showFormSheet(`Урок: ${lesson.subject_name}`, `
-        <p class="app-subtitle" style="text-align:left; margin-bottom:10px;">Изменения на ${new Date(dateStr).toLocaleDateString('ru-RU')}</p>
-        <div class="form-group"><label><input type="checkbox" name="isCanceled"> Отменить урок в этот день</label></div>
-        <div class="form-group"><input name="replacementSubject" class="form-control" placeholder="Замена: предмет"></div>
-        <div class="form-group"><input name="replacementClassroom" class="form-control" placeholder="Замена: кабинет"></div>
-        <div class="form-group"><input name="replacementTeacher" class="form-control" placeholder="Замена: преподаватель"></div>
-        <hr style="border:0; border-top:1px solid var(--card-border); margin:14px 0;">
-        <button type="button" class="btn-danger" style="width:100%;" onclick="deleteLessonPermanently('${lesson.id}','${spaceId}')">🗑 Удалить урок навсегда</button>
-    `, async (fd) => {
-        await apiPost('/api/schedule/override', {
-            spaceId, scheduleId: lesson.id, date: dateStr,
-            isCanceled: fd.get('isCanceled') === 'on',
-            replacementSubject: fd.get('replacementSubject') || null,
-            replacementClassroom: fd.get('replacementClassroom') || null,
-            replacementTeacher: fd.get('replacementTeacher') || null
-        });
-        renderScheduleTab(document.getElementById('tab-schedule'), spaceId, true);
-    }, 'Сохранить изменение');
-}
-
-async function deleteLessonPermanently(id, spaceId) {
-    if (!confirm('Удалить урок из расписания насовсем?')) return;
-    try { await apiDelete(`/api/schedule/${id}`); closeDynamicSheet(); renderScheduleTab(document.getElementById('tab-schedule'), spaceId, true); }
-    catch (e) { alert(e.error || 'Ошибка'); }
-}
-
-function openAddHomeworkSheet(spaceId) {
-    showFormSheet('Новое домашнее задание', `
-        <div class="form-group"><input name="subjectName" class="form-control" placeholder="Предмет" required></div>
-        <div class="form-group"><textarea name="title" class="form-control" placeholder="Задание" required rows="3"></textarea></div>
-        <div class="form-group"><input name="dueDate" type="date" class="form-control" required></div>
-    `, async (fd) => {
-        await apiPost('/api/homework', { spaceId, subjectName: fd.get('subjectName'), title: fd.get('title'), dueDate: fd.get('dueDate') });
-        renderHomeworkTab(document.getElementById(currentHwContainerId()), spaceId, true);
-    }, 'Добавить');
-}
-
-function openJoinSpaceForm() {
-    showFormSheet('Присоединиться к группе', `
-        <div class="form-group"><input name="code" class="form-control" placeholder="Код приглашения" required style="text-transform:uppercase;"></div>
-    `, async (fd) => {
-        await apiPost('/api/spaces/join', { code: fd.get('code') });
-        await window.__reloadSpaces?.();
-    }, 'Присоединиться');
-}
-
-function openCreateSpaceForm() {
-    showFormSheet('Новая группа', `
-        <div class="form-group"><input name="name" class="form-control" placeholder="Название группы" required></div>
-    `, async (fd) => {
-        const space = await apiPost('/api/spaces', { name: fd.get('name') });
-        alert(`Группа создана! Код приглашения: ${space.invite_code}`);
-        await window.__reloadSpaces?.();
-    }, 'Создать');
-}
-
-function emptySpaceState() {
-    return `<div class="empty-state">
-        <p>Вы пока не состоите ни в одной группе.</p>
-        <button class="btn-primary" style="max-width:240px;" onclick="openJoinSpaceForm()">Присоединиться по коду</button>
-    </div>`;
-}
-
-function refreshCurrentTab() {
-    const activeTab = document.querySelector('.tab-section.active');
-    if (activeTab) {
-        const isAdmin = currentUser?.isTeacher || currentSpace?.is_admin;
-        const spaceId = currentSpace?.id;
-        if (activeTab.id === 'tab-schedule') renderScheduleTab(activeTab, spaceId, !!isAdmin);
-        else if (activeTab.id === 'tab-hw') renderHomeworkTab(activeTab, spaceId, !!isAdmin);
-        else if (activeTab.id === 'tab-members') renderMembersTab(activeTab, spaceId, !!isAdmin);
-        else if (activeTab.id === 'tab-today') renderTodayTab(activeTab, spaceId);
-        else if (activeTab.id === 'tab-chat') renderChatTab(activeTab, spaceId, !!isAdmin, currentUser?.id);
-    }
-}
+            lastName: _editing
