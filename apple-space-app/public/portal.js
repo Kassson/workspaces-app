@@ -2,7 +2,7 @@
 
 let systemSettings = {};
 let currentSpace = null;
-let currentUser = null;
+// ВАЖНО: currentUser объявлен в inline-скрипте index.html / teach/index.html
 window._hwStudents = [];
 window._currentHwStatsId = null;
 
@@ -149,7 +149,6 @@ function homeworkCardHtml(hw, isAdmin, spaceId) {
     const due = new Date(hw.due_date).toLocaleDateString('ru-RU');
     const remote = systemSettings.remote_mode;
 
-    // Для преподавателя/админа: только Статистика и Удалить
     if (isAdmin) {
         return `<div class="hw-card ${hw.is_done ? 'done' : ''}">
             <div class="hw-top">
@@ -164,7 +163,6 @@ function homeworkCardHtml(hw, isAdmin, spaceId) {
         </div>`;
     }
 
-    // Для ученика
     return `<div class="hw-card ${hw.is_done ? 'done' : ''}">
         <div class="hw-top">
             <span class="hw-subject">${escapeHtml(hw.subject_name)}</span>
@@ -210,10 +208,9 @@ async function deleteHomework(id, spaceId) {
 }
 function currentHwContainerId() { return document.getElementById('tab-hw') ? 'tab-hw' : 'tab-homework'; }
 
-// ---------- СТАТИСТИКА ДЗ (с обводками) ----------
+// ---------- СТАТИСТИКА ДЗ ----------
 async function openHomeworkStats(homeworkId) {
     if (!currentSpace) return;
-    // ДОП. ЗАЩИТА на клиенте — только админ/преподаватель
     const isAdminViewer = currentUser?.isTeacher || currentSpace?.is_admin;
     if (!isAdminViewer) return alert('Только преподаватель или админ может видеть статистику');
 
@@ -295,9 +292,8 @@ async function openHomeworkStats(homeworkId) {
     }
 }
 
-// ---------- ПРОСМОТР ФОТО УЧЕНИКА ----------
+// ---------- ПРОСМОТР РАБОТЫ УЧЕНИКА ----------
 function openStudentSubmission(userId) {
-    // ДОП. ЗАЩИТА на клиенте
     const isAdminViewer = currentUser?.isTeacher || currentSpace?.is_admin;
     if (!isAdminViewer) return alert('Только преподаватель или админ может видеть работы учеников');
 
@@ -479,7 +475,6 @@ async function openMemberProfile(member) {
     const isSelf = member.id === currentUser?.id;
     const isAdminViewer = currentUser?.isTeacher || currentSpace?.is_admin;
 
-    // ЗАЩИТА: обычный ученик может смотреть только свой профиль
     if (!isSelf && !isAdminViewer) {
         return alert('Только преподаватель или админ может просматривать профили участников');
     }
