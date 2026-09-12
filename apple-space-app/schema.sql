@@ -3,11 +3,11 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- 1. Глобальные настройки системы (Root Teacher)
 CREATE TABLE IF NOT EXISTS system_settings (
     id INT PRIMARY KEY DEFAULT 1,
-    remote_mode BOOLEAN DEFAULT FALSE,         -- Тумблер «Удаленка» (фото ДЗ)
-    maintenance_mode BOOLEAN DEFAULT FALSE,    -- Тумблер «Технические работы»
-    exams_mode BOOLEAN DEFAULT FALSE,          -- Тумблер «Экзамены» (блокировка чата)
-    private_chat_mode BOOLEAN DEFAULT TRUE,    -- Тумблер «Закрытый чат» (скрывает чат от обычных учителей)
-    global_announcement TEXT DEFAULT '',       -- Объявление колледжа
+    remote_mode BOOLEAN DEFAULT FALSE,
+    maintenance_mode BOOLEAN DEFAULT FALSE,
+    exams_mode BOOLEAN DEFAULT FALSE,
+    private_chat_mode BOOLEAN DEFAULT TRUE,
+    global_announcement TEXT DEFAULT '',
     CONSTRAINT single_row CHECK (id = 1)
 );
 
@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS users (
     email VARCHAR(100) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     avatar_url TEXT DEFAULT NULL,
+    avatar_emoji VARCHAR(10) DEFAULT '👤',
 
     is_teacher BOOLEAN DEFAULT FALSE,
     is_teacher_verified BOOLEAN DEFAULT FALSE,
@@ -52,6 +53,17 @@ CREATE TABLE IF NOT EXISTS space_members (
     UNIQUE(space_id, user_id)
 );
 
+-- 4.1 Забаненные участники пространства
+CREATE TABLE IF NOT EXISTS space_blocked (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    space_id UUID REFERENCES spaces(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    blocked_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    reason TEXT,
+    blocked_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(space_id, user_id)
+);
+
 -- 5. Еженедельное расписание
 CREATE TABLE IF NOT EXISTS schedules (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -64,7 +76,7 @@ CREATE TABLE IF NOT EXISTS schedules (
     end_time TIME NOT NULL
 );
 
--- 6. Замены (красная карточка) и отмены (чёрная карточка)
+-- 6. Замены и отмены
 CREATE TABLE IF NOT EXISTS schedule_overrides (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     space_id UUID REFERENCES spaces(id) ON DELETE CASCADE,
@@ -88,7 +100,7 @@ CREATE TABLE IF NOT EXISTS homeworks (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 8. Отметки сдачи ДЗ + фото решения
+-- 8. Отметки сдачи ДЗ
 CREATE TABLE IF NOT EXISTS homework_completions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     homework_id UUID REFERENCES homeworks(id) ON DELETE CASCADE,
@@ -120,7 +132,3 @@ CREATE TABLE IF NOT EXISTS game_scores (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(space_id, user_id, game_id)
 );
-
--- Примечание: аккаунт root_teacher создаётся автоматически сервером при первом
--- запуске (см. server.js -> ensureRootTeacher()) с настоящим bcrypt-хэшем пароля
--- из переменной окружения ROOT_TEACHER_PASSWORD.
