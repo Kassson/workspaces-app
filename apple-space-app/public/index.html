@@ -55,8 +55,11 @@
 
     <div class="app-dashboard" id="dashboard">
         <aside class="sidebar">
-            <div class="sidebar-logo">🧭 Workspaces</div>
-            <select id="spaceSelect" class="form-control" style="margin-bottom:16px;" onchange="onSpaceSwitch(this.value)"></select>
+            <div class="sidebar-logo">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="28" height="28"><circle cx="256" cy="256" r="256" fill="#007AFF"/><g transform="translate(64, 64) scale(16)" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></g></svg>
+                Workspaces
+            </div>
+            <div id="currentSpaceLabel" style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:16px; padding-left:4px;">— выберите группу —</div>
             <a onclick="showTab('tab-today', this)" class="sidebar-item active" data-tab="tab-today">📅 Сегодня</a>
             <a onclick="showTab('tab-schedule', this)" class="sidebar-item" data-tab="tab-schedule">🗓️ Расписание</a>
             <a onclick="showTab('tab-hw', this)" class="sidebar-item" data-tab="tab-hw">📝 Домашние задания</a>
@@ -77,12 +80,7 @@
 
             <div id="tab-settings" class="tab-section">
                 <h1 class="page-title">Настройки</h1>
-                <div class="settings-card">
-                    <h3>Мои группы</h3>
-                    <div id="mySpacesList"></div>
-                    <button class="btn-secondary" onclick="openJoinSpaceForm()">➕ Присоединиться по коду</button>
-                </div>
-                <div class="settings-card">
+                <div class="settings-card" id="profileCard">
                     <h3>Профиль</h3>
                     <div style="display:flex; align-items:center; gap:12px; margin-bottom:10px;">
                         <div id="profileAvatarBig" style="font-size:2.5rem;">👤</div>
@@ -93,8 +91,12 @@
                     </div>
                     <button class="btn-secondary" onclick="openEditProfile()">✏️ Редактировать профиль</button>
                 </div>
+                <div class="settings-card" id="spaceActionsCard">
+                    <h3>Пространство</h3>
+                    <div id="spaceActionsContent"></div>
+                </div>
                 <div class="settings-card">
-                    <button class="btn-danger" onclick="logout()">Выйти</button>
+                    <button class="btn-danger" onclick="logout()">Выйти из аккаунта</button>
                 </div>
             </div>
         </main>
@@ -175,46 +177,64 @@
 
         function loadTabContent(tabId) {
             const spaceId = currentSpace?.id;
+            // ВАЖНО: используем currentSpace.is_admin вместо жёсткого false
+            const isAdmin = !!currentSpace?.is_admin;
             if (tabId === 'tab-today') renderTodayTab(document.getElementById('tab-today'), spaceId);
-            if (tabId === 'tab-schedule') renderScheduleTab(document.getElementById('tab-schedule'), spaceId, false);
-            if (tabId === 'tab-hw') renderHomeworkTab(document.getElementById('tab-hw'), spaceId, false);
-            if (tabId === 'tab-members') renderMembersTab(document.getElementById('tab-members'), spaceId, false);
-            if (tabId === 'tab-chat') renderChatTab(document.getElementById('tab-chat'), spaceId, false, currentUser?.id);
+            if (tabId === 'tab-schedule') renderScheduleTab(document.getElementById('tab-schedule'), spaceId, isAdmin);
+            if (tabId === 'tab-hw') renderHomeworkTab(document.getElementById('tab-hw'), spaceId, isAdmin);
+            if (tabId === 'tab-members') renderMembersTab(document.getElementById('tab-members'), spaceId, isAdmin);
+            if (tabId === 'tab-chat') renderChatTab(document.getElementById('tab-chat'), spaceId, isAdmin, currentUser?.id);
             if (tabId === 'tab-games') { if (!activeGame) renderGamesMenu(document.getElementById('tab-games')); }
+            if (tabId === 'tab-settings') renderSpaceActions();
         }
 
         async function reloadSpaces() {
             mySpaces = await apiGet('/api/spaces/mine');
-            const sel = document.getElementById('spaceSelect');
-            if (!mySpaces.length) { sel.innerHTML = '<option>Нет групп</option>'; currentSpace = null; }
-            else {
-                sel.innerHTML = mySpaces.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+            const label = document.getElementById('currentSpaceLabel');
+            if (!mySpaces.length) {
+                currentSpace = null;
+                if (label) label.textContent = '— вы не в группе —';
+            } else {
                 const savedId = localStorage.getItem('activeSpaceId');
                 const found = mySpaces.find(s => s.id === savedId) || mySpaces[0];
-                sel.value = found.id;
                 currentSpace = found;
+                if (label) label.textContent = found.name;
             }
-            renderMySpacesSettings();
+            renderSpaceActions();
             const activeTab = document.querySelector('.tab-section.active')?.id || 'tab-today';
             loadTabContent(activeTab);
         }
         window.__reloadSpaces = reloadSpaces;
 
-        function onSpaceSwitch(spaceId) {
-            currentSpace = mySpaces.find(s => s.id === spaceId);
-            localStorage.setItem('activeSpaceId', spaceId);
-            const activeTab = document.querySelector('.tab-section.active')?.id || 'tab-today';
-            loadTabContent(activeTab);
+        function renderSpaceActions() {
+            const box = document.getElementById('spaceActionsContent');
+            if (!box) return;
+            if (!currentSpace) {
+                box.innerHTML = `
+                    <p style="color:var(--text-secondary); margin-top:0;">Вы не состоите ни в одной группе.</p>
+                    <button class="btn-primary" onclick="openJoinSpaceForm()">➕ Присоединиться по коду</button>
+                `;
+            } else {
+                box.innerHTML = `
+                    <p style="margin-top:0;"><b>${escapeHtml(currentSpace.name)}</b></p>
+                    <p style="color:var(--text-secondary); font-size:0.85rem;">Код приглашения: <span class="code-pill">${currentSpace.invite_code}</span></p>
+                    ${currentSpace.is_admin ? '<span class="badge badge-blue">👑 Вы админ этой группы</span>' : ''}
+                    <div style="margin-top:14px;">
+                        <button class="btn-danger" onclick="leaveCurrentSpace()">🚪 Покинуть пространство</button>
+                    </div>
+                `;
+            }
         }
 
-        function renderMySpacesSettings() {
-            const box = document.getElementById('mySpacesList');
-            if (!mySpaces.length) { box.innerHTML = '<p class="empty-state">Вы не состоите ни в одной группе.</p>'; return; }
-            box.innerHTML = mySpaces.map(s => `
-                <div class="space-card">
-                    <span>${escapeHtml(s.name)}</span>
-                    <span class="code-pill">${s.invite_code}</span>
-                </div>`).join('');
+        async function leaveCurrentSpace() {
+            if (!currentSpace) return;
+            if (!confirm(`Покинуть «${currentSpace.name}»? Вернуться можно будет только по коду приглашения.`)) return;
+            try {
+                await apiPost(`/api/spaces/${currentSpace.id}/leave`, {});
+                localStorage.removeItem('activeSpaceId');
+                alert('Вы покинули пространство');
+                location.reload();
+            } catch (e) { alert(e.error || 'Ошибка'); }
         }
 
         function renderProfile() {
