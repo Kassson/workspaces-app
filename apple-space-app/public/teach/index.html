@@ -1,46 +1,59 @@
 <!DOCTYPE html>
-<html lang=»ru» data-theme=»dark»>
+<html lang="ru" data-theme="dark">
 <head>
-    <meta charset=»UTF-8»>
-    <meta name=»viewport» content=»width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no»>
-    <title>Workspaces — Личный Кабинет</title>
-    <link rel=»stylesheet» href=»/style.css»>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workspaces Faculty</title>
+    <!-- Путь начинается со слэша, чтобы подгрузить файл из корневой папки public -->
+    <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 
-    <!—Переключатель темы (Тёмная/Светлая) 
-    <button class=»theme-toggle-btn» id=»themeToggle» title=»Сменить тему»>🌙</button>
+    <button class="theme-toggle-btn" id="themeToggle">🌙</button>
 
-    <!—Контейнер Авторизации (По центру) 
-    <div class=»auth-container» id=»authBox»>
-        <div class=»app-logo»>
-            <svg viewBox=»0 0 24 24»>
-                <path d=»M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5»/>
-            </svg>
+    <div class="login-wrapper" id="loginWrapper">
+        <div class="auth-container">
+            <!-- ВАШ НОВЫЙ ЛОГОТИП -->
+            <div class="app-logo">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+                    <circle cx="256" cy="256" r="256" fill="#007AFF"/>
+                    <g transform="translate(64, 64) scale(16)" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                        <path d="M2 17l10 5 10-5"/>
+                        <path d="M2 12l10 5 10-5"/>
+                    </g>
+                </svg>
+            </div>
+            <h1 class="app-title">Workspaces Faculty</h1>
+            <p class="app-subtitle">Вход для преподавателей</p>
+
+            <form id="loginForm">
+                <div class="form-group"><input type="text" id="loginInput" class="form-control" placeholder="Логин (например, root_teacher)" required></div>
+                <div class="form-group"><input type="password" id="passwordInput" class="form-control" placeholder="Пароль" required></div>
+                <button type="submit" class="btn-primary">Авторизоваться</button>
+            </form>
+            <p id="errorMsg" style="color: #FF3B30; font-size: 0.85rem; margin-top: 10px; display: none;"></p>
+            <a href="/" class="teacher-link-btn">← Студенческий портал</a>
         </div>
-        <h1 class=»app-title»>Workspaces</h1>
-        <p class=»app-subtitle»>Единый портал колледжа</p>
-
-        <form id=»loginForm» style=»width: 100%;»>
-            <div class=»form-group»>
-                <input type=»text» id=»loginInput» class=»form-control» placeholder=»Логин или Email» required autocomplete=»username»>
-            </div>
-            <div class=»form-group»>
-                <input type=»password» id=»passwordInput» class=»form-control» placeholder=»Пароль» required autocomplete=»current-password»>
-            </div>
-            <button type=»submit» class=»btn-primary»>Войти</button>
-        </form>
-
-        <a href=»/teach» class=»teacher-link-btn»>Портал для преподавателей →</a>
     </div>
 
-    <!—Клиентский скрипт управления темой и авторизацией 
+    <!-- ПАНЕЛЬ УПРАВЛЕНИЯ ПРЕПОДАВАТЕЛЯ -->
+    <div class="app-dashboard" id="dashboard">
+        <aside class="sidebar">
+            <div class="sidebar-logo">Workspaces Faculty</div>
+            <a href="#" class="sidebar-item active">Настройки системы</a>
+            <button onclick="logout()" class="btn-primary" style="margin-top: auto;">Выйти</button>
+        </aside>
+        <main class="main-content">
+            <h1 style="font-size: 2rem; margin-bottom: 20px;">Панель управления</h1>
+            <p style="color: var(--text-secondary);">Управление колледжем.</p>
+        </main>
+    </div>
+
     <script>
-        // Переключение тем на лету
-        Const themeBtn = document.getElementById('themeToggle');
-        Const currentTheme = localStorage.getItem('theme') || 'dark';
-        
-        Document.documentElement.setAttribute('data-theme', currentTheme);
+        const themeBtn = document.getElementById('themeToggle');
+        const currentTheme = localStorage.getItem('theme') || 'dark';
+        document.documentElement.setAttribute('data-theme', currentTheme);
         themeBtn.textContent = currentTheme === 'dark' ? '☀️' : '🌙';
 
         themeBtn.addEventListener('click', () => {
@@ -49,62 +62,42 @@
             localStorage.setItem('theme', theme);
             themeBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
         });
-    </script>
-    <script src=»/socket.io/socket.io.js»></script>
-    <script src=»/app.js»></script>
-</body>
-</html>
 
-```
-### 3. Главный HTML файл портала учителей (public/teach/index.html)
-Обновите файл apple-space-app/public/teach/index.html:
-```html
-<!DOCTYPE html>
-<html lang=»ru» data-theme=»dark»>
-<head>
-    <meta charset=»UTF-8»>
-    <meta name=»viewport» content=»width=device-width, initial-scale=1.0»>
-    <title>Workspaces — Учительский Портал</title>
-    <link rel=»stylesheet» href=»/style.css»>
-</head>
-<body>
+        const loginForm = document.getElementById('loginForm');
+        const errorMsg = document.getElementById('errorMsg');
 
-    <button class=»theme-toggle-btn» id=»themeToggle»>🌙</button>
+        if (localStorage.getItem('token') && localStorage.getItem('role') === 'teacher') {
+            document.getElementById('loginWrapper').style.display = 'none';
+            document.getElementById('dashboard').style.display = 'flex';
+        }
 
-    <div class=»auth-container» id=»teacherAuthBox»>
-        <div class=»app-logo»>
-            <svg viewBox=»0 0 24 24»>
-                <path d=»M12 3L1 9l11 6 9-4.91V17h2V9L12 3z M5 13.18v4L12 21l7-3.82v-4L12 17l-7-3.82z»/>
-            </svg>
-        </div>
-        <h1 class=»app-title»>Workspaces Faculty</h1>
-        <p class=»app-subtitle»>Вход для преподавателей и Root</p>
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            errorMsg.style.display = 'none';
+            
+            const res = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    login: document.getElementById('loginInput').value,
+                    password: document.getElementById('passwordInput').value,
+                    isTeacher: true
+                })
+            });
+            const data = await res.json();
 
-        <form id=»teacherLoginForm» style=»width: 100%;»>
-            <div class=»form-group»>
-                <input type=»text» id=»teacherLogin» class=»form-control» placeholder=»Логин преподавателя» required>
-            </div>
-            <div class=»form-group»>
-                <input type=»password» id=»teacherPassword» class=»form-control» placeholder=»Пароль» required>
-            </div>
-            <button type=»submit» class=»btn-primary»>Авторизоваться</button>
-        </form>
-
-        <a href=»/» class=»teacher-link-btn»>← Вернуться на студенческий портал</a>
-    </div>
-
-    <script>
-        Const themeBtn = document.getElementById('themeToggle');
-        Const currentTheme = localStorage.getItem('theme') || 'dark';
-        Document.documentElement.setAttribute('data-theme', currentTheme);
-        themeBtn.textContent = currentTheme === 'dark' ? '☀️' : '🌙';
-
-        themeBtn.addEventListener('click', () => {
-            const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-            document.documentElement.setAttribute('data-theme', theme);
-            localStorage.setItem('theme', theme);
-            themeBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
+            if (res.ok) {
+                localStorage.setItem('token', data.token);
+                localStorage.setItem('fullName', data.user.fullName);
+                localStorage.setItem('role', 'teacher');
+                location.reload();
+            } else {
+                errorMsg.textContent = data.error;
+                errorMsg.style.display = 'block';
+            }
         });
+
+        function logout() { localStorage.clear(); location.reload(); }
     </script>
 </body>
 </html>
