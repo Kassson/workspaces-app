@@ -1,3 +1,6 @@
+/* ===================== WORKSPACES — STYLE.CSS ===================== */
+
+/* ===================== ТЕМЫ ===================== */
 :root[data-theme="light"] {
     --bg-color: #f5f7fa;
     --text-main: #1c1c1e;
@@ -30,6 +33,7 @@
     --sidebar-bg: #1c1c1e;
     --overlay: rgba(0,0,0,0.6);
 }
+
 * { box-sizing: border-box; }
 body {
     background-color: var(--bg-color); color: var(--text-main);
@@ -122,7 +126,7 @@ h1.page-title { font-size: 1.6rem; margin-bottom: 20px; }
     .app-dashboard { flex-direction: column; }
 }
 
-/* ============ SHEET MODAL (mobile) ============ */
+/* ============ SHEET MODAL ============ */
 .sheet-overlay { position: fixed; inset: 0; background: var(--overlay); z-index: 900; display: none; }
 .sheet-overlay.show { display: block; }
 .sheet {
@@ -158,6 +162,10 @@ h1.page-title { font-size: 1.6rem; margin-bottom: 20px; }
 .lesson-meta { font-size: 0.85rem; color: var(--text-secondary); }
 .lesson-row { display: flex; align-items: center; gap: 14px; flex: 1; }
 
+/* Действия с расписанием (Импорт / Экспорт) */
+.schedule-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.schedule-actions .btn-small { display: inline-flex; align-items: center; gap: 6px; }
+
 /* ============ HOMEWORK ============ */
 .hw-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 14px; padding: 16px 18px; margin-bottom: 12px; }
 .hw-card.done { border-color: var(--success); }
@@ -166,6 +174,7 @@ h1.page-title { font-size: 1.6rem; margin-bottom: 20px; }
 .hw-due { font-size: 0.8rem; color: var(--text-secondary); }
 .hw-title { margin: 6px 0 10px; }
 .hw-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.hw-stats-btn { display: inline-flex; align-items: center; gap: 6px; }
 
 /* ============ CHAT ============ */
 .chat-wrap { display: flex; flex-direction: column; height: calc(100vh - 220px); min-height: 400px; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 14px; overflow: hidden; }
@@ -181,7 +190,7 @@ h1.page-title { font-size: 1.6rem; margin-bottom: 20px; }
 .chat-input-row textarea { flex: 1; resize: none; border: 1px solid var(--input-border); background: var(--input-bg); color: var(--text-main); border-radius: 10px; padding: 10px; font-size: 0.95rem; max-height: 90px; font-family: inherit; }
 .chat-blocked-notice { text-align: center; padding: 14px; color: var(--text-secondary); font-size: 0.85rem; border-top: 1px solid var(--card-border); }
 
-/* ============ SWITCHES (iOS style) ============ */
+/* ============ SWITCHES ============ */
 .switch-row { display: flex; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--card-border); gap: 12px; }
 .switch-row:last-child { border-bottom: none; }
 .switch-label { font-weight: 600; }
@@ -199,6 +208,20 @@ h1.page-title { font-size: 1.6rem; margin-bottom: 20px; }
 .space-card .code-pill { font-family: monospace; background: var(--input-bg); padding: 4px 10px; border-radius: 8px; font-weight: 700; letter-spacing: 1px; }
 .empty-state { text-align: center; padding: 40px 20px; color: var(--text-secondary); }
 
+/* ============ УЧАСТНИКИ ============ */
+.member-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--card-border); cursor: pointer; }
+.member-row:last-child { border-bottom: none; }
+.member-row:hover { background: var(--input-bg); border-radius: 8px; }
+.member-avatar { font-size: 1.6rem; width: 40px; text-align: center; flex-shrink: 0; }
+.member-info { flex: 1; min-width: 0; }
+.member-name { font-weight: 500; }
+.member-username { color: var(--text-secondary); font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ============ ЭМОДЗИ-ПИКЕР (для профиля) ============ */
+.emoji-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(48px, 1fr)); gap: 8px; margin: 14px 0; max-height: 400px; overflow-y: auto; }
+.emoji-btn { font-size: 1.6rem; padding: 8px; border: 1px solid var(--card-border); border-radius: 10px; background: var(--input-bg); cursor: pointer; transition: transform .15s; }
+.emoji-btn:hover { transform: scale(1.15); border-color: var(--accent-blue); }
+
 /* ============ GAMES ============ */
 .games-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
 .game-tile { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 16px; padding: 20px 14px; text-align: center; cursor: pointer; transition: transform .15s; }
@@ -214,30 +237,9 @@ h1.page-title { font-size: 1.6rem; margin-bottom: 20px; }
 .leaderboard-list { text-align: left; background: rgba(255,255,255,0.05); border-radius: 12px; padding: 10px 14px; color: #fff; margin-top: 12px; }
 .leaderboard-list div { display: flex; justify-content: space-between; padding: 4px 0; font-size: 0.85rem; }
 
+/* ============ BADGES / MISC ============ */
 .badge { display: inline-block; padding: 3px 9px; border-radius: 20px; font-size: 0.72rem; font-weight: 700; }
 .badge-blue { background: rgba(0,122,255,0.12); color: var(--accent-blue); }
 .badge-green { background: rgba(52,199,89,0.12); color: var(--success); }
 .badge-orange { background: rgba(255,149,0,0.15); color: var(--warning); }
 .hidden { display: none !important; }
-
-/* ============ УЧАСТНИКИ ============ */
-.member-row { display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid var(--card-border); cursor:pointer; }
-.member-row:last-child { border-bottom:none; }
-.member-row:hover { background:var(--input-bg); border-radius:8px; }
-.member-avatar { font-size:1.6rem; width:40px; text-align:center; flex-shrink:0; }
-.member-info { flex:1; min-width:0; }
-.member-name { font-weight:500; }
-.member-username { color:var(--text-secondary); font-size:0.85rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-
-/* ============ ЭМОДЗИ-ПИКЕР ============ */
-.emoji-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(48px, 1fr)); gap:8px; margin:14px 0; max-height:400px; overflow-y:auto; }
-.emoji-btn { font-size:1.6rem; padding:8px; border:1px solid var(--card-border); border-radius:10px; background:var(--input-bg); cursor:pointer; transition:transform .15s; }
-.emoji-btn:hover { transform:scale(1.15); border-color:var(--accent-blue); }
-
-/* ============ РАСПИСАНИЕ: ДЕЙСТВИЯ ============ */
-.schedule-actions { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
-.schedule-actions .btn-small { display:inline-flex; align-items:center; gap:6px; }
-
-/* ============ ДОМАШКА: СТАТИСТИКА ============ */
-.hw-stats-btn { display:inline-flex; align-items:center; gap:6px; }
-.hw-progress-ring { display:inline-block; vertical-align:middle; }
