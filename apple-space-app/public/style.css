@@ -59,7 +59,6 @@ button { font-family: inherit; }
 .btn-primary {
     width: 100%; padding: 12px; background: var(--accent-blue); color: #fff; border: none;
     border-radius: 10px; font-size: 1rem; font-weight: 600; cursor: pointer; margin-top: 10px;
-    transition: background .2s;
 }
 .btn-primary:hover { background: var(--accent-hover); }
 .btn-primary:disabled { opacity: .6; cursor: default; }
@@ -162,6 +161,34 @@ h1.page-title { font-size: 1.6rem; margin-bottom: 20px; }
 .hw-title { margin: 6px 0 10px; }
 .hw-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .hw-stats-btn { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ============ HW: STUDENTS LIST (для статистики) ============ */
+.hw-students-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+    max-height: 400px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+.hw-student-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    background: var(--card-bg);
+    border: 2px solid #9ca3af;
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+.hw-student-item:hover {
+    transform: translateX(2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+.hw-student-item[style*="cursor:pointer"]:hover {
+    background: var(--input-bg);
+}
 
 /* ============ CHAT ============ */
 .chat-wrap { display: flex; flex-direction: column; height: calc(100vh - 220px); min-height: 400px; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 14px; overflow: hidden; }
@@ -433,6 +460,3 @@ h1.page-title { font-size: 1.6rem; margin-bottom: 20px; }
     animation: spin 0.8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
-
-/* ============ ROUND RECT POLYFILL-HELPER ============ */
-/* Используется в canvas context.roundRect — нативные браузеры поддерживают, но на всякий случай */
