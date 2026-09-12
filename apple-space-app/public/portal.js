@@ -1,32 +1,36 @@
 /* ===================== ОБЩАЯ ЛОГИКА ПОРТАЛА (студент + преподаватель) ===================== */
+
 let systemSettings = {};
 let currentSpace = null;
+let currentUser = null;
+window._hwStudents = [];
+window._currentHwStatsId = null;
 
 // ---------- ГЛОБАЛЬНЫЕ НАСТРОЙКИ ----------
-async function loadAndApplySettings(currentUser) {
+async function loadAndApplySettings(user) {
     try { systemSettings = await apiGet('/api/settings'); } catch (e) { systemSettings = {}; }
-    applyGlobalSettings(currentUser);
+    applyGlobalSettings(user);
 }
 socket.on('settings_updated', (s) => { systemSettings = s; applyGlobalSettings(window.__currentUser); });
 
-function applyGlobalSettings(currentUser) {
-    window.__currentUser = currentUser;
+function applyGlobalSettings(user) {
+    window.__currentUser = user;
     const banner = document.getElementById('announcementBanner');
     if (banner) {
         if (systemSettings.global_announcement) { banner.textContent = '📢 ' + systemSettings.global_announcement; banner.classList.add('show'); }
         else banner.classList.remove('show');
     }
     const maint = document.getElementById('maintenanceScreen');
-    const isPrivileged = currentUser && currentUser.isTeacher;
+    const isPrivileged = user && user.isTeacher;
     if (maint) {
         if (systemSettings.maintenance_mode && !isPrivileged) maint.classList.add('show');
         else maint.classList.remove('show');
     }
     document.querySelectorAll('.chat-input-row').forEach(el => {
-        el.classList.toggle('hidden', !!systemSettings.exams_mode && currentUser && !currentUser.isTeacher);
+        el.classList.toggle('hidden', !!systemSettings.exams_mode && user && !user.isTeacher);
     });
     document.querySelectorAll('.chat-blocked-notice').forEach(el => {
-        el.classList.toggle('hidden', !(systemSettings.exams_mode && currentUser && !currentUser.isTeacher));
+        el.classList.toggle('hidden', !(systemSettings.exams_mode && user && !user.isTeacher));
     });
 }
 
@@ -49,7 +53,7 @@ async function renderTodayTab(container, spaceId) {
             <div style="margin-top:16px;">
                 ${todays.length ? todays.map(l => lessonCardHtml(l, overrides, dateStr, false)).join('') : '<p class="empty-state">Пар сегодня нет 🎉</p>'}
             </div>`;
-    } catch (e) { container.innerHTML = `<p class="empty-state">${e.error || 'Ошибка загрузки расписания'}</p>`; }
+    } catch (e) { container.innerHTML = `<p class="empty-state">${e.error || 'Ошибка'}</p>`; }
 }
 
 // ---------- РАСПИСАНИЕ ----------
@@ -80,7 +84,7 @@ async function renderScheduleTab(container, spaceId, isAdmin) {
         container.innerHTML = html;
         window.__scheduleData = { lessons, overrides, spaceId, isAdmin };
         renderScheduleDay(todayDow, spaceId);
-    } catch (e) { container.innerHTML = `<p class="empty-state">${e.error || 'Ошибка загрузки расписания'}</p>`; }
+    } catch (e) { container.innerHTML = `<p class="empty-state">${e.error || 'Ошибка'}</p>`; }
 }
 
 function selectScheduleDay(el, spaceId) {
@@ -138,12 +142,29 @@ async function renderHomeworkTab(container, spaceId, isAdmin) {
         if (!list.length) html += '<p class="empty-state">Заданий пока нет</p>';
         else html += list.map(hw => homeworkCardHtml(hw, isAdmin, spaceId)).join('');
         container.innerHTML = html;
-    } catch (e) { container.innerHTML = `<p class="empty-state">${e.error || 'Ошибка загрузки ДЗ'}</p>`; }
+    } catch (e) { container.innerHTML = `<p class="empty-state">${e.error || 'Ошибка'}</p>`; }
 }
 
 function homeworkCardHtml(hw, isAdmin, spaceId) {
     const due = new Date(hw.due_date).toLocaleDateString('ru-RU');
     const remote = systemSettings.remote_mode;
+
+    // Для преподавателя/админа: только Статистика и Удалить
+    if (isAdmin) {
+        return `<div class="hw-card ${hw.is_done ? 'done' : ''}">
+            <div class="hw-top">
+                <span class="hw-subject">${escapeHtml(hw.subject_name)}</span>
+                <span class="hw-due">до ${due}</span>
+            </div>
+            <div class="hw-title">${escapeHtml(hw.title)}</div>
+            <div class="hw-actions">
+                <button class="btn-small hw-stats-btn" onclick="openHomeworkStats('${hw.id}')">📊 Статистика</button>
+                <button class="btn-small" onclick="deleteHomework('${hw.id}','${spaceId}')">🗑 Удалить</button>
+            </div>
+        </div>`;
+    }
+
+    // Для ученика
     return `<div class="hw-card ${hw.is_done ? 'done' : ''}">
         <div class="hw-top">
             <span class="hw-subject">${escapeHtml(hw.subject_name)}</span>
@@ -151,11 +172,7 @@ function homeworkCardHtml(hw, isAdmin, spaceId) {
         </div>
         <div class="hw-title">${escapeHtml(hw.title)}</div>
         <div class="hw-actions">
-            <button class="btn-small hw-stats-btn" onclick="openHomeworkStats('${hw.id}')">📊 Статистика</button>
-            ${isAdmin ? `
-                <button class="btn-small" onclick="viewCompletions('${hw.id}')">👥 Кто сдал</button>
-                <button class="btn-small" onclick="deleteHomework('${hw.id}','${spaceId}')">🗑 Удалить</button>
-            ` : hw.is_done ? `
+            ${hw.is_done ? `
                 <span class="badge badge-green">✅ Сдано</span>
                 ${hw.attachment_url ? `<img src="${hw.attachment_url}" style="max-width:80px;border-radius:8px;">` : ''}
                 <button class="btn-small" onclick="uncompleteHomework('${hw.id}','${spaceId}')">Отменить</button>
@@ -193,51 +210,26 @@ async function deleteHomework(id, spaceId) {
 }
 function currentHwContainerId() { return document.getElementById('tab-hw') ? 'tab-hw' : 'tab-homework'; }
 
-// ---------- КТО СДАЛ (модалка с профилями) ----------
-async function viewCompletions(homeworkId) {
-    const root = document.getElementById('dynamicSheetRoot');
-    root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div><p class="empty-state">Загрузка…</p></div>`;
-    document.getElementById('sheetOverlay').classList.add('show');
-    try {
-        const rows = await apiGet(`/api/homework/${homeworkId}/completions`);
-        let html = `<h2 class="app-title" style="font-size:1.3rem;">👥 Кто выполнил ДЗ</h2>`;
-        if (!rows.length) {
-            html += `<p class="empty-state">Пока никто не выполнил</p>`;
-        } else {
-            html += `<p style="color:var(--text-secondary); font-size:0.85rem;">Всего: ${rows.length}</p>`;
-            html += `<div class="settings-card" style="padding: 8px 18px;">`;
-            html += rows.map(r => `
-                <div class="member-row" style="cursor: default;">
-                    <div class="member-avatar">${escapeHtml(r.avatar_emoji || '👤')}</div>
-                    <div class="member-info">
-                        <div class="member-name">${escapeHtml(r.full_name)}</div>
-                        <div class="member-username">@${escapeHtml(r.username)}</div>
-                    </div>
-                    <div style="text-align:right; font-size:0.75rem; color:var(--text-secondary);">
-                        ${new Date(r.completed_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                        ${r.attachment_url ? '<br><span style="color:var(--success);">📷 с фото</span>' : ''}
-                    </div>
-                </div>
-            `).join('');
-            html += `</div>`;
-        }
-        html += `<button class="btn-secondary" style="margin-top:14px;" onclick="closeDynamicSheet()">Закрыть</button>`;
-        root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div>${html}</div>`;
-    } catch (e) {
-        root.innerHTML = `<div class="sheet show" id="dynamicSheet"><p class="empty-state">Ошибка: ${escapeHtml(e.error || '')}</p><button class="btn-secondary" onclick="closeDynamicSheet()">Закрыть</button></div>`;
-    }
-}
-
-// ---------- СТАТИСТИКА ДЗ ----------
+// ---------- СТАТИСТИКА ДЗ (с обводками) ----------
 async function openHomeworkStats(homeworkId) {
     if (!currentSpace) return;
+    // ДОП. ЗАЩИТА на клиенте — только админ/преподаватель
+    const isAdminViewer = currentUser?.isTeacher || currentSpace?.is_admin;
+    if (!isAdminViewer) return alert('Только преподаватель или админ может видеть статистику');
+
+    window._currentHwStatsId = homeworkId;
+
     const root = document.getElementById('dynamicSheetRoot');
     root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div><p class="empty-state">Загрузка…</p></div>`;
     document.getElementById('sheetOverlay').classList.add('show');
+
     try {
         const s = await apiGet(`/api/homework/${homeworkId}/stats`);
+        window._hwStudents = s.students || [];
+
         const size = 140, stroke = 18, r = (size - stroke) / 2, c = 2 * Math.PI * r;
         const dash = (s.percentage / 100) * c;
+
         let html = `
             <h2 class="app-title" style="font-size:1.3rem;">📊 Статистика ДЗ</h2>
             <div style="text-align:center; margin:14px 0;">
@@ -247,32 +239,116 @@ async function openHomeworkStats(homeworkId) {
                             stroke-dasharray="${dash} ${c}" stroke-linecap="round"></circle>
                 </svg>
                 <div style="margin-top:-95px; margin-bottom:60px; font-size:1.6rem; font-weight:700;">${s.percentage}%</div>
-                <p style="color:var(--text-secondary);">Выполнили: ${s.completed} из ${s.total}</p>
+                <p style="color:var(--text-secondary);">Выполнили: <b>${s.completed}</b> из <b>${s.total}</b></p>
+                ${s.isOverdue ? '<p style="color:var(--danger); font-size:0.85rem; font-weight:600;">⏰ Срок сдачи истёк</p>' : ''}
             </div>
+            <h3 style="margin-top:8px; font-size:1rem;">Ученики</h3>
+            <div class="hw-students-list">
         `;
-        if (s.canSeeStudents) {
-            if (s.students.length) {
-                html += `<h3>Выполнили:</h3><div class="settings-card" style="padding: 8px 18px;">`;
-                html += s.students.map(st => `
-                    <div class="member-row" style="cursor: default;">
-                        <div class="member-avatar">${escapeHtml(st.avatar_emoji || '👤')}</div>
+
+        if (!s.students.length) {
+            html += `<p class="empty-state" style="padding:20px 0;">В группе нет учеников</p>`;
+        } else {
+            s.students.forEach(st => {
+                let borderColor = '#9ca3af';
+                let label = '⏳ Не сдано';
+                let labelColor = 'var(--text-secondary)';
+                let clickable = false;
+                let opacity = 1;
+
+                if (st.status === 'done') {
+                    borderColor = 'var(--success)';
+                    label = '✅ Сдано';
+                    labelColor = 'var(--success)';
+                    clickable = true;
+                } else if (st.status === 'overdue') {
+                    borderColor = 'var(--danger)';
+                    label = '⏰ Просрочено';
+                    labelColor = 'var(--danger)';
+                    opacity = 0.85;
+                } else {
+                    borderColor = '#9ca3af';
+                    label = '⏳ Не сдано';
+                    labelColor = 'var(--text-secondary)';
+                    opacity = 0.8;
+                }
+
+                html += `
+                    <div class="hw-student-item" style="border-color:${borderColor}; opacity:${opacity}; ${clickable ? 'cursor:pointer;' : ''}"
+                         ${clickable ? `onclick="openStudentSubmission('${st.id}')"` : ''}>
+                        <div class="member-avatar">${escapeHtml(st.avatarEmoji || '👤')}</div>
                         <div class="member-info">
-                            <div class="member-name">${escapeHtml(st.full_name)}</div>
+                            <div class="member-name">${escapeHtml(st.fullName)}</div>
                             <div class="member-username">@${escapeHtml(st.username)}</div>
                         </div>
-                        <span style="font-size:0.75rem; color:var(--text-secondary);">${new Date(st.completed_at).toLocaleDateString('ru-RU')}</span>
+                        <span style="font-size:0.78rem; font-weight:600; color:${labelColor}; white-space:nowrap;">${label}</span>
                     </div>
-                `).join('');
-                html += `</div>`;
-            } else {
-                html += `<p class="empty-state">Пока никто не выполнил</p>`;
-            }
+                `;
+            });
         }
+        html += `</div>`;
         html += `<button class="btn-secondary" style="margin-top:14px;" onclick="closeDynamicSheet()">Закрыть</button>`;
+
         root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div>${html}</div>`;
     } catch (e) {
         root.innerHTML = `<div class="sheet show" id="dynamicSheet"><p class="empty-state">Ошибка: ${escapeHtml(e.error || '')}</p><button class="btn-secondary" onclick="closeDynamicSheet()">Закрыть</button></div>`;
     }
+}
+
+// ---------- ПРОСМОТР ФОТО УЧЕНИКА ----------
+function openStudentSubmission(userId) {
+    // ДОП. ЗАЩИТА на клиенте
+    const isAdminViewer = currentUser?.isTeacher || currentSpace?.is_admin;
+    if (!isAdminViewer) return alert('Только преподаватель или админ может видеть работы учеников');
+
+    const st = window._hwStudents.find(x => x.id === userId);
+    if (!st) return;
+
+    let timeStr = '—';
+    if (st.completedAt) {
+        const d = new Date(st.completedAt);
+        timeStr = d.toLocaleString('ru-RU', {
+            day: '2-digit', month: '2-digit', year: 'numeric',
+            hour: '2-digit', minute: '2-digit'
+        });
+    }
+
+    let imgHTML = '';
+    if (st.attachmentUrl) {
+        imgHTML = `
+            <p style="color:var(--text-secondary); font-size:0.85rem; margin: 8px 0 6px;">📷 Фото работы:</p>
+            <img src="${st.attachmentUrl}" style="width:100%; border-radius:12px; box-shadow: 0 6px 24px rgba(0,0,0,0.15);" />
+        `;
+    } else {
+        imgHTML = `
+            <div style="text-align:center; padding: 30px 20px; color: var(--text-secondary); background: var(--input-bg); border-radius:12px; margin-top:12px; border: 2px dashed var(--card-border);">
+                <div style="font-size:2.5rem; margin-bottom:8px;">☑️</div>
+                <div>Ученик отметил ДЗ как выполненное без фото</div>
+            </div>
+        `;
+    }
+
+    const root = document.getElementById('dynamicSheetRoot');
+    root.innerHTML = `
+        <div class="sheet show" id="dynamicSheet">
+            <div class="sheet-handle"></div>
+            <h2 class="app-title" style="font-size:1.3rem;">📝 Работа ученика</h2>
+            <div style="display:flex; align-items:center; gap:12px; margin: 12px 0;">
+                <div class="member-avatar" style="font-size:2.2rem;">${escapeHtml(st.avatarEmoji || '👤')}</div>
+                <div>
+                    <div style="font-weight:600;">${escapeHtml(st.fullName)}</div>
+                    <div style="color:var(--text-secondary); font-size:0.85rem;">@${escapeHtml(st.username)}</div>
+                </div>
+            </div>
+            <div style="background: var(--input-bg); padding: 10px 14px; border-radius: 10px; margin-bottom: 12px;">
+                <div style="font-size:0.8rem; color:var(--text-secondary);">🕐 Отправлено:</div>
+                <div style="font-weight: 600;">${timeStr}</div>
+            </div>
+            ${imgHTML}
+            <button class="btn-secondary" style="margin-top:14px;" onclick="openHomeworkStats(window._currentHwStatsId)">← Назад к статистике</button>
+            <button class="btn-secondary" style="margin-top:8px;" onclick="closeDynamicSheet()">Закрыть</button>
+        </div>`;
+    document.getElementById('sheetOverlay').classList.add('show');
 }
 
 // ---------- ИМПОРТ / ЭКСПОРТ РАСПИСАНИЯ ----------
@@ -401,10 +477,15 @@ async function renderMembersTab(container, spaceId, isAdmin) {
 
 async function openMemberProfile(member) {
     const isSelf = member.id === currentUser?.id;
-    const canManage = currentUser?.isTeacher && !isSelf;
-    const isAdminOfSpace = currentSpace?.is_admin && !isSelf;
-    const manageable = canManage || isAdminOfSpace;
+    const isAdminViewer = currentUser?.isTeacher || currentSpace?.is_admin;
+
+    // ЗАЩИТА: обычный ученик может смотреть только свой профиль
+    if (!isSelf && !isAdminViewer) {
+        return alert('Только преподаватель или админ может просматривать профили участников');
+    }
+
     const muted = member.muted_until && new Date(member.muted_until) > new Date();
+    const manageable = isAdminViewer && !isSelf;
 
     const body = `
         <div style="text-align:center; margin-bottom:16px;">
@@ -413,6 +494,7 @@ async function openMemberProfile(member) {
             <p style="color:var(--text-secondary); margin:0;">@${escapeHtml(member.username)}</p>
             <p style="margin:8px 0 0;"><span class="code-pill">${ROLE_LABELS[member.role] || member.role}</span>
                 ${muted ? '<span class="code-pill" style="background:var(--warning); color:#fff;">🔇 Мут</span>' : ''}
+                ${isSelf ? '<span class="code-pill" style="background:var(--accent-blue); color:#fff;">Вы</span>' : ''}
             </p>
         </div>
         ${manageable ? `
@@ -637,7 +719,7 @@ function showFormSheet(title, bodyHtml, onSubmit, submitLabel = 'Сохрани�
     document.getElementById('dynamicSheetForm').onsubmit = async (e) => {
         e.preventDefault();
         try { await onSubmit(new FormData(e.target)); closeDynamicSheet(); }
-        catch (err) { alert(err.error || err.message || 'Ошибка сохранения'); }
+        catch (err) { alert(err.error || err.message || 'Ошибка'); }
     };
 }
 function closeDynamicSheet() {
@@ -671,7 +753,7 @@ function openEditLessonSheet(lesson, dateStr, spaceId) {
     showFormSheet(`Урок: ${lesson.subject_name}`, `
         <p class="app-subtitle" style="text-align:left; margin-bottom:10px;">Изменения на ${new Date(dateStr).toLocaleDateString('ru-RU')}</p>
         <div class="form-group"><label><input type="checkbox" name="isCanceled"> Отменить урок в этот день</label></div>
-        <div class="form-group"><input name="replacementSubject" class="form-control" placeholder="Замена: новый предмет"></div>
+        <div class="form-group"><input name="replacementSubject" class="form-control" placeholder="Замена: предмет"></div>
         <div class="form-group"><input name="replacementClassroom" class="form-control" placeholder="Замена: кабинет"></div>
         <div class="form-group"><input name="replacementTeacher" class="form-control" placeholder="Замена: преподаватель"></div>
         <hr style="border:0; border-top:1px solid var(--card-border); margin:14px 0;">
