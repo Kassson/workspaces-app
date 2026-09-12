@@ -37,7 +37,7 @@
 
             <div id="viewReg" style="display: none;">
                 <h1 class="app-title">Регистрация</h1>
-                <p class="app-subtitle" style="font-size:0.8rem;">После регистрации нужно будет пройти верификацию у коллеги.</p>
+                <p class="app-subtitle" style="font-size:0.8rem;">После регистрации нужно пройти верификацию у коллеги.</p>
                 <form onsubmit="handleReg(event)">
                     <div class="form-group"><input type="text" id="regFull" class="form-control" placeholder="ФИО полностью" required></div>
                     <div class="form-group"><input type="email" id="regEmail" class="form-control" placeholder="Рабочая почта" required></div>
@@ -50,7 +50,7 @@
 
             <div id="viewRegCode" style="display: none;">
                 <h1 class="app-title">Ваш код профиля</h1>
-                <p class="app-subtitle" style="margin-bottom: 10px;">Сообщите код любому уже подтверждённому преподавателю или Root-администратору, чтобы он подтвердил вас во вкладке «Верификация».</p>
+                <p class="app-subtitle" style="margin-bottom: 10px;">Сообщите код любому подтверждённому преподавателю или Root-администратору, чтобы он подтвердил вас.</p>
                 <h2 id="generatedCodeDisplay" style="font-size: 2.5rem; letter-spacing: 5px; color: var(--accent-blue); margin-bottom: 20px;">T-0000</h2>
                 <button class="btn-primary" onclick="switchView('viewLogin')">Перейти ко входу</button>
             </div>
@@ -60,26 +60,25 @@
         <a href="/" class="outside-link">← Студенческий портал</a>
     </div>
 
-    <!-- Ожидание верификации -->
     <div class="login-wrapper" id="pendingWrapper" style="display:none;">
         <div class="auth-container">
             <h1 class="app-title">⏳ Ожидает верификации</h1>
-            <p class="app-subtitle">Сообщите этот код коллеге для подтверждения:</p>
+            <p class="app-subtitle">Сообщите код коллеге:</p>
             <h2 style="font-size: 2.3rem; letter-spacing: 5px; color: var(--accent-blue); margin-bottom: 20px;" id="pendingCode">T-0000</h2>
-            <button class="btn-secondary" onclick="location.reload()">🔄 Обновить статус</button>
+            <button class="btn-secondary" onclick="location.reload()">🔄 Обновить</button>
             <button class="btn-text" onclick="logout()">Выйти</button>
         </div>
     </div>
 
-    <!-- ================= ПАНЕЛЬ ПРЕПОДАВАТЕЛЯ ================= -->
     <div class="app-dashboard" id="dashboard">
         <aside class="sidebar">
-            <div class="sidebar-logo">🧭 Workspaces Faculty</div>
+            <div class="sidebar-logo">🧭 Workspaces</div>
             <select id="spaceSelect" class="form-control" style="margin-bottom:16px;" onchange="onSpaceSwitch(this.value)"></select>
             <a onclick="showTab('tab-system', this)" class="sidebar-item active" data-tab="tab-system">🏛 Панель управления</a>
             <a onclick="showTab('tab-spaces', this)" class="sidebar-item" data-tab="tab-spaces">🗂 Пространства</a>
             <a onclick="showTab('tab-schedule', this)" class="sidebar-item" data-tab="tab-schedule">🗓️ Расписание</a>
             <a onclick="showTab('tab-hw', this)" class="sidebar-item" data-tab="tab-hw">📝 Домашние задания</a>
+            <a onclick="showTab('tab-members', this)" class="sidebar-item" data-tab="tab-members">👥 Участники</a>
             <a onclick="showTab('tab-chat', this)" class="sidebar-item hidden" data-tab="tab-chat" id="navChat">💬 Чат</a>
             <a onclick="showTab('tab-auths', this)" class="sidebar-item" data-tab="tab-auths">🛡️ Верификация</a>
             <a onclick="showTab('tab-settings', this)" class="sidebar-item" data-tab="tab-settings" style="margin-top:auto;">⚙️ Настройки</a>
@@ -90,28 +89,28 @@
             <div id="tab-system" class="tab-section active">
                 <h1 class="page-title">Панель управления колледжем</h1>
                 <div class="settings-card" id="rootOnlyNotice" style="display:none;">
-                    <p style="color:var(--text-secondary); margin:0;">Только Root Teacher может изменять глобальные настройки. Ниже — текущее состояние.</p>
+                    <p style="color:var(--text-secondary); margin:0;">Только Root Teacher может изменять глобальные настройки.</p>
                 </div>
                 <div class="settings-card">
                     <div class="switch-row">
-                        <div><div class="switch-label">🟢 Удалёнка (фото ДЗ)</div><div class="switch-desc">Студенты прикладывают сжатое фото выполненной работы вместо галочки.</div></div>
+                        <div><div class="switch-label">🟢 Удалёнка (фото ДЗ)</div><div class="switch-desc">Студенты прикладывают фото вместо галочки.</div></div>
                         <label class="switch"><input type="checkbox" id="sw-remote"><span class="slider"></span></label>
                     </div>
                     <div class="switch-row">
-                        <div><div class="switch-label">🔴 Технические работы</div><div class="switch-desc">Блокирует доступ обычным студентам, показывая экран «Ведутся технические работы».</div></div>
+                        <div><div class="switch-label">🔴 Технические работы</div><div class="switch-desc">Блокирует доступ студентам.</div></div>
                         <label class="switch"><input type="checkbox" id="sw-maintenance"><span class="slider"></span></label>
                     </div>
                     <div class="switch-row">
-                        <div><div class="switch-label">🎓 Экзамены</div><div class="switch-desc">Полностью отключает отправку сообщений в чатах для студентов.</div></div>
+                        <div><div class="switch-label">🎓 Экзамены</div><div class="switch-desc">Отключает чат студентам.</div></div>
                         <label class="switch"><input type="checkbox" id="sw-exams"><span class="slider"></span></label>
                     </div>
                     <div class="switch-row">
-                        <div><div class="switch-label">🔒 Закрытый чат</div><div class="switch-desc">Скрывает чат от обычных учителей (студенты общаются свободно; Root видит всегда).</div></div>
+                        <div><div class="switch-label">🔒 Закрытый чат</div><div class="switch-desc">Скрывает чат от обычных учителей.</div></div>
                         <label class="switch"><input type="checkbox" id="sw-private"><span class="slider"></span></label>
                     </div>
                     <div class="form-group" style="margin-top:16px;">
                         <label class="switch-label">📢 Объявление колледжа</label>
-                        <textarea id="announcementText" class="form-control" rows="2" placeholder="Текст баннера для всех пользователей"></textarea>
+                        <textarea id="announcementText" class="form-control" rows="2" placeholder="Текст баннера"></textarea>
                     </div>
                     <button class="btn-primary" id="saveSettingsBtn" onclick="saveGlobalSettings()">Сохранить настройки</button>
                 </div>
@@ -125,13 +124,14 @@
 
             <div id="tab-schedule" class="tab-section"></div>
             <div id="tab-hw" class="tab-section"></div>
+            <div id="tab-members" class="tab-section"></div>
             <div id="tab-chat" class="tab-section"></div>
 
             <div id="tab-auths" class="tab-section">
                 <h1 class="page-title">Верификация коллег 🛡️</h1>
                 <div class="settings-card">
                     <h3>Подтвердить нового коллегу</h3>
-                    <p style="color:var(--text-secondary); font-size:0.9rem;">Попросите коллегу назвать его 4-значный код (например T-8492) и введите его здесь.</p>
+                    <p style="color:var(--text-secondary); font-size:0.9rem;">Попросите коллегу назвать 4-значный код (T-8492) и введите его.</p>
                     <div style="display:flex; gap:10px; max-width: 320px;">
                         <input type="text" id="colleagueCode" class="form-control" placeholder="T-0000">
                         <button class="btn-primary" style="margin:0; width: 140px;" onclick="verifyColleague()">Подтвердить</button>
@@ -142,7 +142,22 @@
             <div id="tab-settings" class="tab-section">
                 <h1 class="page-title">Настройки аккаунта</h1>
                 <div class="settings-card">
-                    <p id="teacherProfileInfo" style="color:var(--text-secondary);"></p>
+                    <div style="display:flex; align-items:center; gap:12px; margin-bottom:10px;">
+                        <div id="teacherAvatarBig" style="font-size:2.5rem;">👤</div>
+                        <div>
+                            <div id="teacherFullName" style="font-weight:500;"></div>
+                            <div id="teacherProfileInfo" style="color:var(--text-secondary); font-size:0.9rem;"></div>
+                        </div>
+                    </div>
+                    <button class="btn-secondary" onclick="openEditProfile()">✏️ Редактировать профиль</button>
+                </div>
+                <div class="settings-card">
+                    <h3>Настройки пространства</h3>
+                    <p style="color:var(--text-secondary); font-size:0.85rem;">Только для выбранного пространства</p>
+                    <button class="btn-secondary" style="margin-bottom:8px;" onclick="rotateInviteCode()">🔄 Сменить код приглашения</button>
+                    <button class="btn-secondary" onclick="openBlacklist()">🚫 Чёрный список</button>
+                </div>
+                <div class="settings-card">
                     <button class="btn-danger" onclick="logout()">Выйти из аккаунта</button>
                 </div>
             </div>
@@ -153,6 +168,7 @@
             <button class="tab-btn" data-tab="tab-spaces" onclick="showTab('tab-spaces', this)"><span class="ic">🗂</span>Группы</button>
             <button class="tab-btn" data-tab="tab-schedule" onclick="showTab('tab-schedule', this)"><span class="ic">🗓️</span>Пары</button>
             <button class="tab-btn" data-tab="tab-hw" onclick="showTab('tab-hw', this)"><span class="ic">📝</span>ДЗ</button>
+            <button class="tab-btn" data-tab="tab-members" onclick="showTab('tab-members', this)"><span class="ic">👥</span>Люди</button>
             <button class="tab-btn" data-tab="tab-auths" onclick="showTab('tab-auths', this)"><span class="ic">🛡️</span>Ещё</button>
         </nav>
     </div>
@@ -175,8 +191,7 @@
 
         function isValidEmailDomain(email) {
             const allowedDomains = ['gmail.com', 'mail.ru', 'yandex.ru', 'rambler.ru', 'bk.ru', 'list.ru', 'inbox.ru', 'ya.ru', 'outlook.com', 'yahoo.com'];
-            const domain = email.split('@')[1]?.toLowerCase();
-            return allowedDomains.includes(domain);
+            return allowedDomains.includes((email.split('@')[1] || '').toLowerCase());
         }
 
         async function handleReg(e) {
@@ -184,7 +199,7 @@
             errorMsg.textContent = '';
             if (document.getElementById('regPass1').value !== document.getElementById('regPass2').value) { errorMsg.textContent = 'Пароли не совпадают'; return; }
             const email = document.getElementById('regEmail').value.trim();
-            if (!isValidEmailDomain(email)) { errorMsg.textContent = 'Введите реальный адрес почты (gmail.com, mail.ru, yandex.ru и др.)'; return; }
+            if (!isValidEmailDomain(email)) { errorMsg.textContent = 'Введите реальный адрес почты'; return; }
             try {
                 const d = await apiPost('/api/teach/register', { fullName: document.getElementById('regFull').value, email, password: document.getElementById('regPass1').value });
                 document.getElementById('generatedCodeDisplay').textContent = d.code;
@@ -226,6 +241,7 @@
             const spaceId = currentSpace?.id;
             if (tabId === 'tab-schedule') renderScheduleTab(document.getElementById('tab-schedule'), spaceId, true);
             if (tabId === 'tab-hw') renderHomeworkTab(document.getElementById('tab-hw'), spaceId, true);
+            if (tabId === 'tab-members') renderMembersTab(document.getElementById('tab-members'), spaceId, true);
             if (tabId === 'tab-chat') renderChatTab(document.getElementById('tab-chat'), spaceId, true, currentUser?.id);
         }
 
@@ -255,7 +271,7 @@
 
         function renderAllSpacesList() {
             const box = document.getElementById('allSpacesList');
-            if (!mySpaces.length) { box.innerHTML = '<p class="empty-state">Пока нет ни одной группы. Создайте первую!</p>'; return; }
+            if (!mySpaces.length) { box.innerHTML = '<p class="empty-state">Пока нет ни одной группы.</p>'; return; }
             box.innerHTML = mySpaces.map(s => `
                 <div class="space-card">
                     <span>${escapeHtml(s.name)}</span>
@@ -271,13 +287,11 @@
             document.getElementById('sw-exams').checked = !!s.exams_mode;
             document.getElementById('sw-private').checked = !!s.private_chat_mode;
             document.getElementById('announcementText').value = s.global_announcement || '';
-
             const isRoot = currentUser?.isRoot;
             document.getElementById('rootOnlyNotice').style.display = isRoot ? 'none' : 'block';
             document.getElementById('saveSettingsBtn').style.display = isRoot ? 'block' : 'none';
             ['sw-remote', 'sw-maintenance', 'sw-exams', 'sw-private'].forEach(id => document.getElementById(id).disabled = !isRoot);
             document.getElementById('announcementText').disabled = !isRoot;
-
             document.getElementById('navChat').classList.toggle('hidden', !(isRoot || !s.private_chat_mode));
         }
 
@@ -290,11 +304,22 @@
                     private_chat_mode: document.getElementById('sw-private').checked,
                     global_announcement: document.getElementById('announcementText').value
                 });
-                alert('Настройки колледжа успешно сохранены!');
-            } catch (e) { alert(e.error || 'Ошибка сохранения'); }
+                alert('Настройки сохранены!');
+            } catch (e) { alert(e.error || 'Ошибка'); }
         }
 
         socket.on('settings_updated', () => { loadRootSettings(); });
+        socket.on('members_updated', () => {
+            const active = document.querySelector('.tab-section.active')?.id;
+            if (active === 'tab-members') loadTabContent('tab-members');
+        });
+
+        function renderTeacherProfile() {
+            if (!currentUser) return;
+            document.getElementById('teacherAvatarBig').textContent = currentUser.avatarEmoji || '👤';
+            document.getElementById('teacherFullName').textContent = currentUser.fullName;
+            document.getElementById('teacherProfileInfo').textContent = `@${currentUser.username}${currentUser.isRoot ? ' · 👑 Root' : ''}`;
+        }
 
         async function boot() {
             if (!(localStorage.getItem('token') && localStorage.getItem('role') === 'teacher')) return;
@@ -313,7 +338,7 @@
 
             document.getElementById('loginWrapper').style.display = 'none';
             document.getElementById('dashboard').style.display = 'flex';
-            document.getElementById('teacherProfileInfo').textContent = `${currentUser.fullName} · @${currentUser.username}${currentUser.isRoot ? ' · 👑 Root Teacher' : ''}`;
+            renderTeacherProfile();
 
             await loadAndApplySettings(currentUser);
             await loadRootSettings();
