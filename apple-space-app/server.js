@@ -53,7 +53,6 @@ const DAY_MAP = {
     'ВОСКРЕСЕНЬЕ': 7, 'ВС': 7
 };
 
-// ПУСТОЙ ШАБЛОН — заполняется пользователем вручную
 const DEFAULT_SCHEDULE_TEMPLATE = `День\t№ урока\tПредмет\tКабинет
 ПОНЕДЕЛЬНИК\t1\t\t
 ПОНЕДЕЛЬНИК\t2\t\t
@@ -152,8 +151,12 @@ async function isSpaceBlocked(userId, spaceId) {
 function publicUser(u) {
     if (!u) return null;
     return {
-        id: u.id, username: u.username, fullName: u.full_name, email: u.email,
-        isTeacher: u.is_teacher, isTeacherVerified: u.is_teacher_verified,
+        id: u.id,
+        username: u.username,
+        fullName: u.full_name,
+        email: u.email,
+        isTeacher: u.is_teacher,
+        isTeacherVerified: u.is_teacher_verified,
         verificationCode: u.verification_code,
         avatarEmoji: u.avatar_emoji || '👤',
         isRoot: u.username === 'root_teacher'
@@ -231,7 +234,8 @@ app.post('/api/auth/update-profile', verifyJWT, async (req, res) => {
         res.json({ success: true, user: publicUser(updated) });
     } catch (e) {
         if (e.code === '23505') return res.status(400).json({ error: 'Такой логин уже занят' });
-        res.status(500).json({ error: 'Ошибка обновления' });
+        console.error('Ошибка обновления профиля:', e);
+        res.status(500).json({ error: 'Ошибка обновления: ' + e.message });
     }
 });
 
@@ -293,11 +297,27 @@ app.post('/api/spaces/join', verifyJWT, async (req, res) => {
         return res.status(403).json({ error: 'Вы заблокированы в этой группе. Обратитесь к администратору.' });
     }
 
+    // Студент может быть только в одном пространстве
+    if (!isSuperAdmin(user)) {
+        const existing = await pool.query('SELECT space_id FROM space_members WHERE user_id = $1 LIMIT 1', [user.id]);
+        if (existing.rows.length && existing.rows[0].space_id !== space.rows[0].id) {
+            return res.status(400).json({ error: 'Вы уже состоите в другой группе. Покиньте её сначала.' });
+        }
+    }
+
     await pool.query(
         `INSERT INTO space_members (space_id, user_id, role) VALUES ($1, $2, 'member') ON CONFLICT (space_id, user_id) DO NOTHING`,
         [space.rows[0].id, user.id]
     );
     res.json(space.rows[0]);
+});
+
+// Покинуть пространство (только для студентов)
+app.post('/api/spaces/:spaceId/leave', verifyJWT, async (req, res) => {
+    const user = await getUserById(req.userId);
+    if (isSuperAdmin(user)) return res.status(400).json({ error: 'Преподаватели не могут покинуть пространство' });
+    await pool.query('DELETE FROM space_members WHERE space_id = $1 AND user_id = $2', [req.params.spaceId, user.id]);
+    res.json({ success: true });
 });
 
 app.get('/api/spaces/mine', verifyJWT, async (req, res) => {
@@ -353,7 +373,7 @@ app.post('/api/spaces/:spaceId/members/:userId/role', verifyJWT, requireSpaceAdm
     res.json(r.rows[0]);
 });
 
-// Кикнуть (может вернуться)
+// Кикнуть
 app.delete('/api/spaces/:spaceId/members/:userId', verifyJWT, requireSpaceAdmin, async (req, res) => {
     if (req.params.userId === req.currentUser.id) return res.status(400).json({ error: 'Нельзя исключить себя' });
     await pool.query('DELETE FROM space_members WHERE space_id = $1 AND user_id = $2', [req.params.spaceId, req.params.userId]);
@@ -766,10 +786,42 @@ async function cleanupOldMessages() {
 }
 setInterval(cleanupOldMessages, 24 * 60 * 60 * 1000);
 
+// ================= ИНИЦИАЛИЗАЦИЯ БД =================
 async function ensureSchema() {
+    // Основная схема (создаёт таблицы если их нет)
     const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
     await pool.query(schema);
+
+    // ===== МИГРАЦИИ для существующих БД =====
+    // (нужны, если таблицы уже были созданы до появления новых колонок)
+    const migrations = [
+        `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_emoji VARCHAR(50) DEFAULT '👤'`,
+        `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT DEFAULT NULL`,
+        `ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_code VARCHAR(10)`,
+        `ALTER TABLE users ADD COLUMN IF NOT EXISTS verified_by UUID`,
+        `ALTER TABLE space_members ADD COLUMN IF NOT EXISTS muted_until TIMESTAMP WITH TIME ZONE`,
+        `CREATE TABLE IF NOT EXISTS space_blocked (
+            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+            space_id UUID REFERENCES spaces(id) ON DELETE CASCADE,
+            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            blocked_by UUID REFERENCES users(id) ON DELETE SET NULL,
+            reason TEXT,
+            blocked_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(space_id, user_id)
+        )`
+    ];
+
+    for (const sql of migrations) {
+        try {
+            await pool.query(sql);
+        } catch (e) {
+            console.warn('⚠️ Миграция пропущена:', e.message);
+        }
+    }
+
+    console.log('✅ Схема БД инициализирована');
 }
+
 async function ensureRootTeacher() {
     const existing = await pool.query("SELECT * FROM users WHERE username = 'root_teacher'");
     if (existing.rows.length) return;
