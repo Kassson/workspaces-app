@@ -1,5 +1,3 @@
-/* ===================== WORKSPACES — STYLE.CSS ===================== */
-
 /* ===================== ТЕМЫ ===================== */
 :root[data-theme="light"] {
     --bg-color: #f5f7fa;
@@ -61,6 +59,7 @@ button { font-family: inherit; }
 .btn-primary {
     width: 100%; padding: 12px; background: var(--accent-blue); color: #fff; border: none;
     border-radius: 10px; font-size: 1rem; font-weight: 600; cursor: pointer; margin-top: 10px;
+    transition: background .2s;
 }
 .btn-primary:hover { background: var(--accent-hover); }
 .btn-primary:disabled { opacity: .6; cursor: default; }
@@ -84,32 +83,24 @@ button { font-family: inherit; }
 .sidebar-logo { font-size: 1.2rem; font-weight: 700; margin-bottom: 20px; color: var(--accent-blue); display: flex; align-items: center; gap: 8px; }
 .sidebar-item { padding: 12px 15px; margin-bottom: 5px; border-radius: 8px; cursor: pointer; color: var(--text-secondary); font-weight: 500; display: flex; align-items: center; gap: 10px; }
 .sidebar-item:hover, .sidebar-item.active { background: var(--input-bg); color: var(--text-main); }
-.sidebar-user { margin-top: auto; padding-top: 15px; border-top: 1px solid var(--card-border); font-size: 0.85rem; color: var(--text-secondary); }
 .main-content { flex: 1; padding: 30px 40px 90px; overflow-y: auto; max-width: 1100px; }
 .tab-section { display: none; }
 .tab-section.active { display: block; animation: fadeIn 0.25s; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-
 .settings-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 15px; padding: 22px; margin-bottom: 18px; }
 .settings-card h3 { margin-top: 0; }
 h1.page-title { font-size: 1.6rem; margin-bottom: 20px; }
-
-/* Announcement banner */
 .announcement-banner {
     background: linear-gradient(90deg, var(--accent-blue), #34aaff); color: #fff; padding: 10px 20px;
     font-size: 0.9rem; font-weight: 500; text-align: center; display: none;
 }
 .announcement-banner.show { display: block; }
-
-/* Maintenance overlay */
 .maintenance-screen {
     position: fixed; inset: 0; background: var(--bg-color); z-index: 2000; display: none;
     flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px;
 }
 .maintenance-screen.show { display: flex; }
 .maintenance-screen .icon { font-size: 4rem; margin-bottom: 15px; }
-
-/* Bottom mobile tab bar */
 .bottom-tabbar {
     display: none; position: fixed; bottom: 0; left: 0; right: 0; background: var(--sidebar-bg);
     border-top: 1px solid var(--card-border); padding: 6px 4px calc(env(safe-area-inset-bottom, 0) + 4px);
@@ -118,7 +109,6 @@ h1.page-title { font-size: 1.6rem; margin-bottom: 20px; }
 .bottom-tabbar .tab-btn { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 0.65rem; color: var(--text-secondary); background: none; border: none; cursor: pointer; padding: 6px 4px; flex: 1; }
 .bottom-tabbar .tab-btn .ic { font-size: 1.25rem; }
 .bottom-tabbar .tab-btn.active { color: var(--accent-blue); }
-
 @media (max-width: 860px) {
     .sidebar { display: none; }
     .main-content { padding: 16px 14px 90px; max-width: 100%; }
@@ -148,7 +138,6 @@ h1.page-title { font-size: 1.6rem; margin-bottom: 20px; }
 .day-tab.today { border-color: var(--accent-blue); color: var(--accent-blue); }
 .day-tab.past { opacity: 0.5; }
 .day-tab.active { background: var(--accent-blue); color: #fff; border-color: var(--accent-blue); }
-
 .lesson-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 14px; padding: 16px 18px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .lesson-card.past { opacity: 0.5; filter: grayscale(0.3); }
 .lesson-card.canceled { background: #1b1b1b; color: #f5f5f5; border-color: #000; }
@@ -161,8 +150,6 @@ h1.page-title { font-size: 1.6rem; margin-bottom: 20px; }
 .lesson-sub { font-weight: 600; font-size: 1.02rem; }
 .lesson-meta { font-size: 0.85rem; color: var(--text-secondary); }
 .lesson-row { display: flex; align-items: center; gap: 14px; flex: 1; }
-
-/* Действия с расписанием (Импорт / Экспорт) */
 .schedule-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
 .schedule-actions .btn-small { display: inline-flex; align-items: center; gap: 6px; }
 
@@ -202,13 +189,13 @@ h1.page-title { font-size: 1.6rem; margin-bottom: 20px; }
 .switch input:checked + .slider { background-color: var(--success); }
 .switch input:checked + .slider:before { transform: translateX(20px); }
 
-/* ============ SPACES / GROUPS ============ */
+/* ============ SPACES ============ */
 .space-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 14px; padding: 16px 18px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
 .space-card:hover { border-color: var(--accent-blue); }
 .space-card .code-pill { font-family: monospace; background: var(--input-bg); padding: 4px 10px; border-radius: 8px; font-weight: 700; letter-spacing: 1px; }
 .empty-state { text-align: center; padding: 40px 20px; color: var(--text-secondary); }
 
-/* ============ УЧАСТНИКИ ============ */
+/* ============ MEMBERS ============ */
 .member-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--card-border); cursor: pointer; }
 .member-row:last-child { border-bottom: none; }
 .member-row:hover { background: var(--input-bg); border-radius: 8px; }
@@ -217,37 +204,235 @@ h1.page-title { font-size: 1.6rem; margin-bottom: 20px; }
 .member-name { font-weight: 500; }
 .member-username { color: var(--text-secondary); font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* ============ ЭМОДЗИ-ПИКЕР (для профиля) ============ */
+/* ============ EMOJI PICKER ============ */
 .emoji-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(48px, 1fr)); gap: 8px; margin: 14px 0; max-height: 400px; overflow-y: auto; }
 .emoji-btn { font-size: 1.6rem; padding: 8px; border: 1px solid var(--card-border); border-radius: 10px; background: var(--input-bg); cursor: pointer; transition: transform .15s; }
 .emoji-btn:hover { transform: scale(1.15); border-color: var(--accent-blue); }
 
-/* ============ GAMES ============ */
-.games-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
-.game-tile { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 16px; padding: 20px 14px; text-align: center; cursor: pointer; transition: transform .15s; }
-.game-tile:hover { transform: translateY(-3px); border-color: var(--accent-blue); }
-.game-tile .g-icon { font-size: 2.4rem; margin-bottom: 8px; }
-.game-tile .g-name { font-weight: 600; font-size: 0.9rem; }
-.game-view { background: #0d0d0f; border-radius: 16px; padding: 14px; text-align: center; }
-.game-view canvas { max-width: 100%; background: #000; border-radius: 10px; touch-action: none; }
-.game-hud { display: flex; justify-content: space-between; align-items: center; color: #fff; margin-bottom: 10px; font-size: 0.9rem; }
-.game-controls-touch { display: flex; justify-content: center; gap: 40px; margin-top: 14px; }
-.dpad { display: grid; grid-template-columns: repeat(3, 46px); grid-template-rows: repeat(3, 46px); gap: 4px; }
-.dpad button { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: #fff; border-radius: 10px; font-size: 1.1rem; }
+/* ============ ЛИДЕРБОРД ============ */
+.leaderboard-tabs { display: flex; gap: 8px; margin-top: 12px; }
+.lb-tab { flex: 1; opacity: 0.6; transition: opacity .2s; }
+.lb-tab.active { opacity: 1; background: var(--accent-blue); color: #fff; border-color: var(--accent-blue); }
 .leaderboard-list { text-align: left; background: rgba(255,255,255,0.05); border-radius: 12px; padding: 10px 14px; color: #fff; margin-top: 12px; }
 .leaderboard-list div { display: flex; justify-content: space-between; padding: 4px 0; font-size: 0.85rem; }
+:root[data-theme="light"] .leaderboard-list { background: var(--input-bg); color: var(--text-main); }
 
-/* ============ BADGES / MISC ============ */
+/* ============ КРАСИВОЕ МЕНЮ ИГР ============ */
+.games-section-title {
+    font-size: 1.05rem;
+    font-weight: 700;
+    margin: 8px 0 12px 0;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+.games-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 14px;
+}
+.game-tile {
+    position: relative;
+    background: linear-gradient(145deg, var(--card-bg), var(--input-bg));
+    border: 1px solid var(--card-border);
+    border-radius: 18px;
+    padding: 22px 14px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: transform .2s, box-shadow .2s, border-color .2s;
+    overflow: hidden;
+    min-height: 150px;
+}
+.game-tile:hover {
+    transform: translateY(-4px) scale(1.02);
+    border-color: var(--accent-blue);
+    box-shadow: 0 14px 40px rgba(0,122,255,0.25);
+}
+.g-glow {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at 50% 0%, rgba(0,122,255,0.15), transparent 70%);
+    opacity: 0;
+    transition: opacity .3s;
+    pointer-events: none;
+}
+.game-tile:hover .g-glow { opacity: 1; }
+.game-tile .g-icon {
+    font-size: 3rem;
+    margin-bottom: 8px;
+    filter: drop-shadow(0 4px 8px rgba(0,0,0,0.2));
+    transition: transform .3s;
+}
+.game-tile:hover .g-icon { transform: scale(1.15) rotate(-5deg); }
+.game-tile .g-name {
+    font-weight: 700;
+    font-size: 1rem;
+    margin-bottom: 4px;
+}
+.game-tile .g-desc {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    line-height: 1.2;
+}
+.game-tile .g-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-size: 9px;
+    padding: 3px 8px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #007AFF, #00C7FF);
+    color: #fff;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
+/* ============ D-PAD ============ */
+.game-controls-touch { display: flex; justify-content: center; margin-top: 14px; }
+.dpad {
+    display: grid;
+    grid-template-columns: repeat(3, 56px);
+    grid-template-rows: repeat(3, 56px);
+    gap: 6px;
+}
+.dpad button {
+    background: linear-gradient(145deg, rgba(255,255,255,0.15), rgba(255,255,255,0.05));
+    border: 2px solid rgba(255,255,255,0.25);
+    color: #fff;
+    border-radius: 12px;
+    font-size: 1.3rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform .1s, background .15s;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+.dpad button:active { transform: scale(0.9); background: rgba(255,255,255,0.3); }
+.dpad.big { grid-template-columns: repeat(3, 70px); grid-template-rows: repeat(3, 70px); gap: 8px; }
+.dpad.big button { font-size: 1.7rem; border-radius: 16px; background: linear-gradient(145deg, #1a1a2e, #0f0f1e); border: 2px solid rgba(0,229,255,0.4); color: #00e5ff; box-shadow: 0 4px 12px rgba(0,229,255,0.2); }
+.dpad.big button:active { transform: scale(0.9); box-shadow: 0 2px 6px rgba(0,229,255,0.4); }
+
+/* ============ GAME VIEW ============ */
+.game-view {
+    background: linear-gradient(145deg, #0a0a15, #050508);
+    border-radius: 18px;
+    padding: 16px;
+    text-align: center;
+    border: 1px solid rgba(0,229,255,0.15);
+    box-shadow: inset 0 0 60px rgba(0,229,255,0.05);
+}
+.game-hud {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: #fff;
+    margin-bottom: 12px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    padding: 0 6px;
+}
+.game-hud b { color: #00e5ff; font-size: 1.1rem; }
+
+/* ============ МУЛЬТИПЛЕЕР: HUD ============ */
+.mp-hud {
+    position: relative;
+    height: 170px;
+    margin-top: 14px;
+    user-select: none;
+    -webkit-user-select: none;
+}
+.mp-joystick {
+    position: absolute;
+    left: 16px;
+    bottom: 10px;
+    width: 140px;
+    height: 140px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 50% 50%, rgba(255,255,255,0.14), rgba(255,255,255,0.04));
+    border: 3px solid rgba(255,255,255,0.25);
+    touch-action: none;
+    box-shadow: inset 0 0 30px rgba(0,229,255,0.15), 0 8px 24px rgba(0,0,0,0.4);
+}
+.mp-joystick.right { left: auto; right: 16px; }
+.mp-knob {
+    position: absolute;
+    left: 50%; top: 50%;
+    width: 60px; height: 60px;
+    margin-left: -30px; margin-top: -30px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #fff, #b0b8c4);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.5), inset 0 -3px 8px rgba(0,0,0,0.2);
+    pointer-events: none;
+    border: 2px solid rgba(255,255,255,0.5);
+}
+.mp-fire-btn {
+    position: absolute;
+    right: 30px;
+    bottom: 30px;
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, #ff7b7b, #d32f2f 60%, #8b0000);
+    border: 4px solid rgba(255,255,255,0.35);
+    color: #fff;
+    font-size: 36px;
+    box-shadow: 0 8px 30px rgba(255,60,60,0.6), inset 0 -4px 12px rgba(0,0,0,0.4);
+    cursor: pointer;
+    user-select: none;
+    touch-action: none;
+    transition: transform .08s;
+}
+.mp-fire-btn:active { transform: scale(0.9); box-shadow: 0 4px 15px rgba(255,60,60,0.8); }
+
+.mp-right-group { position: absolute; right: 0; bottom: 0; }
+.mp-right-group .mp-joystick { left: auto; right: 16px; }
+.mp-super-btn {
+    position: absolute;
+    right: 175px;
+    bottom: 130px;
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, rgba(255,235,100,0.4), rgba(255,200,0,0.15));
+    border: 3px solid #ffd60a;
+    color: #ffd60a;
+    font-size: 28px;
+    cursor: pointer;
+    user-select: none;
+    touch-action: none;
+    overflow: hidden;
+    box-shadow: 0 6px 20px rgba(255,214,10,0.4);
+    transition: transform .08s;
+}
+.mp-super-btn:active { transform: scale(0.9); }
+.mp-super-fill {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 0%;
+    height: 100%;
+    background: linear-gradient(180deg, rgba(255,235,100,0.5), rgba(255,200,0,0.7));
+    transition: width .2s linear;
+    pointer-events: none;
+}
+
+/* ============ BADGES ============ */
 .badge { display: inline-block; padding: 3px 9px; border-radius: 20px; font-size: 0.72rem; font-weight: 700; }
 .badge-blue { background: rgba(0,122,255,0.12); color: var(--accent-blue); }
 .badge-green { background: rgba(52,199,89,0.12); color: var(--success); }
 .badge-orange { background: rgba(255,149,0,0.15); color: var(--warning); }
 .hidden { display: none !important; }
 
-/* ============ ЛОГОТИП В SIDEBAR ============ */
-.sidebar-logo svg {
-    width: 28px;
-    height: 28px;
-    flex-shrink: 0;
+/* ============ LOADING ============ */
+.loading-spinner {
+    display: inline-block;
+    width: 24px; height: 24px;
+    border: 3px solid rgba(255,255,255,0.2);
+    border-top-color: var(--accent-blue);
     border-radius: 50%;
+    animation: spin 0.8s linear infinite;
 }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ============ ROUND RECT POLYFILL-HELPER ============ */
+/* Используется в canvas context.roundRect — нативные браузеры поддерживают, но на всякий случай */
