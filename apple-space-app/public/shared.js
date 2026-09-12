@@ -96,3 +96,80 @@ const WEEKDAY_SHORT = ['', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс
 
 function isoDowFromDate(date) { const d = date.getDay(); return d === 0 ? 7 : d; }
 function ymd(date) { return date.toISOString().slice(0, 10); }
+
+/* ===================== PUSH УВЕДОМЛЕНИЯ ===================== */
+
+function urlBase64ToUint8Array(base64) {
+    const padding = '='.repeat((4 - base64.length % 4) % 4);
+    const b64 = (base64 + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(b64);
+    return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
+function pushSupported() {
+    return ('serviceWorker' in navigator) && ('PushManager' in window);
+}
+
+async function getPushPublicKey() {
+    const r = await fetch('/api/push/public-key');
+    const j = await r.json();
+    return j.key;
+}
+
+async function isPushEnabled() {
+    if (!pushSupported()) return false;
+    try {
+        const reg = await navigator.serviceWorker.getRegistration('/');
+        if (!reg) return false;
+        const sub = await reg.pushManager.getSubscription();
+        return !!sub;
+    } catch (e) { return false; }
+}
+
+async function enablePush() {
+    if (!pushSupported()) throw new Error('Браузер не поддерживает пуши');
+    const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+    await navigator.serviceWorker.ready;
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') throw new Error('Разрешение не выдано');
+    const key = await getPushPublicKey();
+    if (!key) throw new Error('Публичный ключ не получен с сервера');
+
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+        sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(key)
+        });
+    }
+    await apiPost('/api/push/subscribe', sub.toJSON());
+}
+
+async function disablePush() {
+    if (!pushSupported()) return;
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) {
+        await apiPost('/api/push/unsubscribe', { endpoint: sub.endpoint }).catch(() => {});
+        await sub.unsubscribe();
+    }
+}
+
+// --- Муты чата ---
+async function getChatMute(spaceId) {
+    try { return await apiGet(`/api/spaces/${spaceId}/chat-mute`); }
+    catch (e) { return { muted_until: null, muted_forever: false }; }
+}
+async function setChatMute(spaceId, duration) {
+    return apiPost(`/api/spaces/${spaceId}/chat-mute`, { duration });
+}
+async function clearChatMute(spaceId) {
+    return apiDelete(`/api/spaces/${spaceId}/chat-mute`);
+}
+
+// Регистрируем SW при загрузке страницы (нужно для iOS и получения ключа)
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
+    });
+}
