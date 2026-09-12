@@ -1,11 +1,11 @@
 /* ===================== ИГРОВОЙ ЦЕНТР ===================== */
 
 window.GAMES_META = {
-    '2048': { name: '2048 (Apple Edition)', icon: '🔢' },
-    'snake-arena': { name: 'Snake Arena IO', icon: '🐍' },
+    '2048': { name: '2048', icon: '🔢' },
+    'snake-arena': { name: 'Snake Arena', icon: '🐍' },
     'cyber-runner': { name: 'Cyber Runner', icon: '🏃' },
-    'battle-tanks': { name: 'Battle Tanks 2D', icon: '🎯' },
-    'brawl-royale': { name: 'Brawl Battle Royale', icon: '🥊' },
+    'battle-tanks': { name: 'Battle Tanks', icon: '🎯' },
+    'brawl-royale': { name: 'Brawl Royale', icon: '🥊' },
     'cyber-arena': { name: 'Cyber Arena', icon: '⚔️' },
 };
 
@@ -14,6 +14,7 @@ window.gameKeys = {};
 
 window.addEventListener('keydown', function (e) {
     if (e && e.key) window.gameKeys[e.key.toLowerCase()] = true;
+    if (e && e.key === ' ') e.preventDefault();
 });
 window.addEventListener('keyup', function (e) {
     if (e && e.key) window.gameKeys[e.key.toLowerCase()] = false;
@@ -28,10 +29,13 @@ function stopActiveGame() {
 }
 
 function renderGamesMenu(container) {
+    if (!container) container = document.getElementById('tab-games');
     if (!container) return;
     try {
         var html = '<div class="games-grid">';
-        for (var id in window.GAMES_META) {
+        var ids = Object.keys(window.GAMES_META);
+        for (var i = 0; i < ids.length; i++) {
+            var id = ids[i];
             var g = window.GAMES_META[id];
             html += '<div class="game-tile" onclick="openGame(\'' + id + '\')">' +
                 '<div class="g-icon">' + g.icon + '</div>' +
@@ -41,47 +45,43 @@ function renderGamesMenu(container) {
         html += '</div>';
         container.innerHTML = html;
     } catch (e) {
+        console.error('renderGamesMenu error:', e);
         container.innerHTML = '<p class="empty-state">Ошибка загрузки игр: ' + e.message + '</p>';
     }
 }
 
 function openGame(gameId) {
-    var meta = window.GAMES_META[gameId];
-    if (!meta) return;
-    var container = document.getElementById('tab-games');
-    if (!container) return;
+    try {
+        var meta = window.GAMES_META[gameId];
+        if (!meta) { alert('Игра не найдена: ' + gameId); return; }
+        var container = document.getElementById('tab-games');
+        if (!container) return;
 
-    container.innerHTML = '' +
-        '<button class="btn-small" onclick="closeGame()">← Назад к играм</button>' +
-        '<div class="game-view" style="margin-top:14px;">' +
-        '<div class="game-hud">' +
-        '<span>' + meta.icon + ' ' + meta.name + '</span>' +
-        '<span>Счёт: <b id="gameScoreDisplay">0</b></span>' +
-        '</div>' +
-        '<canvas id="gameCanvas" width="480" height="480"></canvas>' +
-        '<div class="game-controls-touch">' +
-        '<div class="dpad">' +
-        '<span></span><button id="dp-up">▲</button><span></span>' +
-        '<button id="dp-left">◀</button><span id="dp-fire">●</span><button id="dp-right">▶</button>' +
-        '<span></span><button id="dp-down">▼</button><span></span>' +
-        '</div>' +
-        '</div>' +
-        '<div class="leaderboard-list" id="gameLeaderboard">Загрузка таблицы лидеров…</div>' +
-        '</div>';
+        container.innerHTML = '' +
+            '<button class="btn-small" onclick="closeGame()">← Назад к играм</button>' +
+            '<div class="game-view" style="margin-top:14px;">' +
+            '<div class="game-hud">' +
+            '<span>' + meta.icon + ' ' + meta.name + '</span>' +
+            '<span>Счёт: <b id="gameScoreDisplay">0</b></span>' +
+            '</div>' +
+            '<canvas id="gameCanvas" width="480" height="480" style="max-width:100%;"></canvas>' +
+            '<div class="game-controls-touch">' +
+            '<div class="dpad">' +
+            '<span></span><button id="dp-up">▲</button><span></span>' +
+            '<button id="dp-left">◀</button><span id="dp-fire">●</span><button id="dp-right">▶</button>' +
+            '<span></span><button id="dp-down">▼</button><span></span>' +
+            '</div>' +
+            '</div>' +
+            '<div class="leaderboard-list" id="gameLeaderboard">Загрузка…</div>' +
+            '</div>';
 
-    try { wireDpad(); } catch (e) { }
-    try { loadLeaderboard(gameId); } catch (e) { }
-    try { startGameEngine(gameId); } catch (e) {
-        var canvas = document.getElementById('gameCanvas');
-        if (canvas) {
-            var ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#000';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = '#fff';
-            ctx.font = '18px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('Ошибка запуска: ' + e.message, canvas.width / 2, canvas.height / 2);
-        }
+        wireDpad();
+        loadLeaderboard(gameId);
+        startGameEngine(gameId);
+    } catch (e) {
+        console.error('openGame error:', e);
+        var container2 = document.getElementById('tab-games');
+        if (container2) container2.innerHTML = '<p class="empty-state">Ошибка запуска: ' + e.message + '</p>';
     }
 }
 
@@ -109,13 +109,13 @@ function wireDpad() {
 async function loadLeaderboard(gameId) {
     var box = document.getElementById('gameLeaderboard');
     if (!box) return;
-    if (!window.currentSpace) { box.innerHTML = 'Выберите группу, чтобы сохранять рекорды.'; return; }
+    if (!window.currentSpace) { box.innerHTML = 'Выберите группу.'; return; }
     try {
         var rows = await apiGet('/api/games/' + window.currentSpace.id + '/' + gameId + '/leaderboard');
         box.innerHTML = '<b>🏆 Таблица лидеров</b>' + (rows.length
             ? rows.map(function (r) { return '<div><span>' + r.full_name + '</span><span>' + r.score + '</span></div>'; }).join('')
-            : '<div>Пока нет рекордов — станьте первым!</div>');
-    } catch (e) { box.innerHTML = 'Не удалось загрузить таблицу лидеров.'; }
+            : '<div>Пока нет рекордов</div>');
+    } catch (e) { box.innerHTML = 'Ошибка загрузки таблицы.'; }
 }
 
 async function submitScore(gameId, score) {
@@ -142,13 +142,12 @@ function startGameEngine(gameId) {
     else window.activeGame = runArenaSurvival(canvas, ctx, gameId);
 }
 
-/* ================= 2048 ================= */
+/* ============ 2048 ============ */
 function run2048(canvas, ctx, gameId) {
     var SIZE = 4, CELL = canvas.width / SIZE;
     var grid = [];
     for (var r = 0; r < SIZE; r++) { grid.push([]); for (var c = 0; c < SIZE; c++) grid[r].push(0); }
     var score = 0, over = false;
-
     function addRandom() {
         var empty = [];
         for (var r = 0; r < SIZE; r++) for (var c = 0; c < SIZE; c++) if (!grid[r][c]) empty.push([r, c]);
@@ -224,7 +223,7 @@ function run2048(canvas, ctx, gameId) {
     return { stop: function () { clearInterval(loop); } };
 }
 
-/* ================= SNAKE ================= */
+/* ============ SNAKE ============ */
 function runSnake(canvas, ctx, gameId) {
     var CELL = 20, COLS = canvas.width / CELL, ROWS = canvas.height / CELL;
     var snake = [{ x: 10, y: 10 }];
@@ -264,7 +263,7 @@ function runSnake(canvas, ctx, gameId) {
     return { stop: function () { clearInterval(loop); } };
 }
 
-/* ================= CYBER RUNNER ================= */
+/* ============ CYBER RUNNER ============ */
 function runRunner(canvas, ctx, gameId) {
     var player = { x: 60, y: canvas.height - 60, w: 30, h: 30, vy: 0, onGround: true };
     var obstacles = [], speed = 5, frame = 0, score = 0, over = false;
@@ -305,12 +304,12 @@ function runRunner(canvas, ctx, gameId) {
     return { stop: function () { clearInterval(loop); } };
 }
 
-/* ================= АРЕНА ================= */
+/* ============ АРЕНА ============ */
 function runArenaSurvival(canvas, ctx, gameId) {
     var themes = {
-        'battle-tanks': { bg: '#1a1f16', player: '#30d158', bot: '#ff453a', label: 'Уничтожай вражеские танки!' },
-        'brawl-royale': { bg: '#1a1620', player: '#ffd60a', bot: '#ff453a', label: 'Выживи дольше всех в зоне!' },
-        'cyber-arena': { bg: '#10141f', player: '#0a84ff', bot: '#bf5af2', label: 'Уклоняйся и атакуй ботов!' },
+        'battle-tanks': { bg: '#1a1f16', player: '#30d158', bot: '#ff453a', label: 'Уничтожай врагов!' },
+        'brawl-royale': { bg: '#1a1620', player: '#ffd60a', bot: '#ff453a', label: 'Выживи в зоне!' },
+        'cyber-arena': { bg: '#10141f', player: '#0a84ff', bot: '#bf5af2', label: 'Уклоняйся и атакуй!' },
     };
     var theme = themes[gameId] || themes['cyber-arena'];
     var player = { x: canvas.width / 2, y: canvas.height / 2, r: 14 };
