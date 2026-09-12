@@ -2,10 +2,20 @@
 
 let systemSettings = {};
 let currentSpace = null;
+
 // currentUser объявлен в inline-скрипте index.html / teach/index.html
 window._hwStudents = [];
 window._currentHwStatsId = null;
 let _memberForStatusEdit = null;
+// ---------- ЭКРАН ЗАГРУЗКИ ----------
+function showLoadingScreen() {
+    const el = document.getElementById('loadingScreen');
+    if (el) el.classList.add('show');
+}
+function hideLoadingScreen() {
+    const el = document.getElementById('loadingScreen');
+    if (el) el.classList.remove('show');
+}
 
 // ---------- ГЛОБАЛЬНЫЕ НАСТРОЙКИ ----------
 async function loadAndApplySettings(user) {
