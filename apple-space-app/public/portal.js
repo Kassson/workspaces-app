@@ -373,3 +373,347 @@ function emptySpaceState() {
         <button class="btn-primary" style="max-width:240px;" onclick="openSheet('joinSpaceSheet')">Присоединиться по коду</button>
     </div>`;
 }
+// ============================================================
+// УЧАСТНИКИ ГРУППЫ
+// ============================================================
+const ROLE_LABELS = { admin: '👑 Админ', member: '👤 Участник' };
+
+async function renderMembersTab(container, spaceId, isAdmin) {
+    if (!spaceId) { container.innerHTML = emptySpaceState(); return; }
+    container.innerHTML = '<p class="empty-state">Загрузка…</p>';
+    try {
+        const members = await apiGet(`/api/spaces/${spaceId}/members`);
+        if (!members.length) { container.innerHTML = '<p class="empty-state">В группе пока никого</p>'; return; }
+        let html = '<h1 class="page-title">Участники группы</h1><div class="settings-card">';
+        html += members.map(m => `
+            <div class="member-row" onclick='openMemberProfile(${JSON.stringify(m).replace(/'/g, "&#39;")})'>
+                <div class="member-avatar">${escapeHtml(m.avatar_emoji || '👤')}</div>
+                <div class="member-info">
+                    <div class="member-name">${escapeHtml(m.full_name)}</div>
+                    <div class="member-username">@${escapeHtml(m.username)}${m.is_teacher ? ' · 🎓' : ''}</div>
+                </div>
+                <span class="code-pill">${ROLE_LABELS[m.role] || m.role}</span>
+            </div>
+        `).join('');
+        html += '</div>';
+        container.innerHTML = html;
+    } catch (e) { container.innerHTML = `<p class="empty-state">Ошибка: ${escapeHtml(e.error || '')}</p>`; }
+}
+
+async function openMemberProfile(member) {
+    const isSelf = member.id === currentUser?.id;
+    const canManage = currentUser?.isTeacher && !isSelf;
+    const isAdminOfSpace = currentSpace?.is_admin && !isSelf;
+    const manageable = canManage || isAdminOfSpace;
+    const muted = member.muted_until && new Date(member.muted_until) > new Date();
+
+    const body = `
+        <div style="text-align:center; margin-bottom:16px;">
+            <div style="font-size:4rem;">${escapeHtml(member.avatar_emoji || '👤')}</div>
+            <h2 style="margin:8px 0 4px;">${escapeHtml(member.full_name)}</h2>
+            <p style="color:var(--text-secondary); margin:0;">@${escapeHtml(member.username)}</p>
+            <p style="margin:8px 0 0;"><span class="code-pill">${ROLE_LABELS[member.role] || member.role}</span>
+                ${muted ? '<span class="code-pill" style="background:var(--warning); color:#fff;">🔇 Мут</span>' : ''}
+            </p>
+        </div>
+        ${manageable ? `
+            <div style="display:flex; flex-direction:column; gap:8px; margin-top:16px;">
+                ${member.role !== 'admin' ? `<button class="btn-small" onclick="changeMemberRole('${member.id}', 'admin')">👑 Сделать админом</button>` : `<button class="btn-small" onclick="changeMemberRole('${member.id}', 'member')">⬇️ Снять админа</button>`}
+                ${muted
+                    ? `<button class="btn-small" onclick="unmuteMember('${member.id}')">🔊 Снять мут</button>`
+                    : `<button class="btn-small" onclick="muteMember('${member.id}')">🔇 Замутить</button>`}
+                <button class="btn-small" style="background:var(--warning); color:#fff;" onclick="blockMember('${member.id}', '${escapeHtml(member.full_name).replace(/'/g, "\\'")}')">🚫 Забанить</button>
+                <button class="btn-small" style="background:var(--danger); color:#fff;" onclick="kickMember('${member.id}', '${escapeHtml(member.full_name).replace(/'/g, "\\'")}')">🚪 Исключить</button>
+            </div>
+        ` : ''}
+    `;
+
+    const root = document.getElementById('dynamicSheetRoot');
+    root.innerHTML = `
+        <div class="sheet show" id="dynamicSheet">
+            <div class="sheet-handle"></div>
+            ${body}
+            <button type="button" class="btn-secondary" style="margin-top:14px;" onclick="closeDynamicSheet()">Закрыть</button>
+        </div>`;
+    document.getElementById('sheetOverlay').classList.add('show');
+}
+
+async function changeMemberRole(userId, role) {
+    try {
+        await apiPost(`/api/spaces/${currentSpace.id}/members/${userId}/role`, { role });
+        closeDynamicSheet();
+        refreshCurrentTab();
+    } catch (e) { alert(e.error || 'Ошибка'); }
+}
+
+function muteMember(userId) {
+    showFormSheet('Замутить участника', `
+        <div class="form-group"><label>Время мута (минуты)</label>
+            <input type="number" name="minutes" class="form-control" value="60" min="1" required>
+        </div>
+    `, async (fd) => {
+        await apiPost(`/api/spaces/${currentSpace.id}/members/${userId}/mute`, { minutes: parseInt(fd.get('minutes')) });
+        closeDynamicSheet();
+        refreshCurrentTab();
+    }, 'Замутить');
+}
+
+async function unmuteMember(userId) {
+    try {
+        await apiDelete(`/api/spaces/${currentSpace.id}/members/${userId}/mute`);
+        closeDynamicSheet();
+        refreshCurrentTab();
+    } catch (e) { alert(e.error || 'Ошибка'); }
+}
+
+function blockMember(userId, fullName) {
+    if (!confirm(`Забанить «${fullName}»? Участник будет исключён и не сможет вернуться, пока не разбаните.`)) return;
+    showFormSheet(`Забанить «${fullName}»`, `
+        <div class="form-group"><label>Причина (необязательно)</label>
+            <input type="text" name="reason" class="form-control" placeholder="Например: спам в чате">
+        </div>
+    `, async (fd) => {
+        await apiPost(`/api/spaces/${currentSpace.id}/members/${userId}/block`, { reason: fd.get('reason') || null });
+        closeDynamicSheet();
+        refreshCurrentTab();
+    }, 'Забанить');
+}
+
+async function kickMember(userId, fullName) {
+    if (!confirm(`Исключить «${fullName}»? Он сможет вернуться по коду приглашения.`)) return;
+    try {
+        await apiDelete(`/api/spaces/${currentSpace.id}/members/${userId}`);
+        closeDynamicSheet();
+        refreshCurrentTab();
+    } catch (e) { alert(e.error || 'Ошибка'); }
+}
+
+// ============================================================
+// ЧЁРНЫЙ СПИСОК
+// ============================================================
+async function openBlacklist() {
+    if (!currentSpace) return;
+    const root = document.getElementById('dynamicSheetRoot');
+    root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div><p class="empty-state">Загрузка…</p></div>`;
+    document.getElementById('sheetOverlay').classList.add('show');
+    try {
+        const data = await apiGet(`/api/spaces/${currentSpace.id}/blacklist`);
+        let html = `<h2 class="app-title" style="font-size:1.3rem;">🚫 Чёрный список</h2>`;
+        if (data.blocked.length) {
+            html += `<h3 style="margin-top:14px;">Забаненные</h3>`;
+            html += data.blocked.map(b => `
+                <div class="member-row">
+                    <div class="member-avatar">${escapeHtml(b.avatar_emoji || '👤')}</div>
+                    <div class="member-info">
+                        <div class="member-name">${escapeHtml(b.full_name)}</div>
+                        <div class="member-username">@${escapeHtml(b.username)}${b.reason ? ' · ' + escapeHtml(b.reason) : ''}</div>
+                    </div>
+                    <button class="btn-small" onclick="unblockMember('${b.id}')">✅ Разбанить</button>
+                </div>
+            `).join('');
+        }
+        if (data.muted.length) {
+            html += `<h3 style="margin-top:14px;">Замученные</h3>`;
+            html += data.muted.map(m => `
+                <div class="member-row">
+                    <div class="member-avatar">${escapeHtml(m.avatar_emoji || '👤')}</div>
+                    <div class="member-info">
+                        <div class="member-name">${escapeHtml(m.full_name)}</div>
+                        <div class="member-username">до ${new Date(m.muted_until).toLocaleString('ru-RU')}</div>
+                    </div>
+                    <button class="btn-small" onclick="unmuteMemberFromBlacklist('${m.id}')">🔊 Снять</button>
+                </div>
+            `).join('');
+        }
+        if (!data.blocked.length && !data.muted.length) html += `<p class="empty-state">Список пуст. Все ведут себя хорошо ✨</p>`;
+        html += `<button class="btn-secondary" style="margin-top:14px;" onclick="closeDynamicSheet()">Закрыть</button>`;
+        root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div>${html}</div>`;
+    } catch (e) {
+        root.innerHTML = `<div class="sheet show" id="dynamicSheet"><p class="empty-state">Ошибка: ${escapeHtml(e.error || '')}</p><button class="btn-secondary" onclick="closeDynamicSheet()">Закрыть</button></div>`;
+    }
+}
+
+async function unblockMember(userId) {
+    try {
+        await apiDelete(`/api/spaces/${currentSpace.id}/blocked/${userId}`);
+        openBlacklist();
+        refreshCurrentTab();
+    } catch (e) { alert(e.error || 'Ошибка'); }
+}
+
+async function unmuteMemberFromBlacklist(userId) {
+    try {
+        await apiDelete(`/api/spaces/${currentSpace.id}/members/${userId}/mute`);
+        openBlacklist();
+        refreshCurrentTab();
+    } catch (e) { alert(e.error || 'Ошибка'); }
+}
+
+// ============================================================
+// СМЕНА КОДА ПРИГЛАШЕНИЯ
+// ============================================================
+async function rotateInviteCode() {
+    if (!currentSpace) return;
+    if (!confirm('Сменить код приглашения? Старый код перестанет работать.')) return;
+    try {
+        const r = await apiPost(`/api/spaces/${currentSpace.id}/rotate-invite-code`, {});
+        alert(`✅ Новый код приглашения: ${r.inviteCode}\n\nСтарый код больше не действителен.`);
+        await window.__reloadSpaces?.();
+    } catch (e) { alert(e.error || 'Ошибка'); }
+}
+
+// ============================================================
+// ИМПОРТ / ЭКСПОРТ РАСПИСАНИЯ
+// ============================================================
+function openScheduleImport() {
+    if (!currentSpace) return alert('Выберите группу');
+    showFormSheet('📥 Импорт расписания', `
+        <p style="color:var(--text-secondary); font-size:0.85rem; text-align:left;">
+            Вставьте расписание из Excel/Google Sheets.<br>
+            Формат строки: <code>ДЕНЬ&nbsp;&nbsp;№&nbsp;&nbsp;Предмет&nbsp;&nbsp;Кабинет</code>
+        </p>
+        <div class="form-group">
+            <textarea name="text" class="form-control" rows="12" placeholder="ПОНЕДЕЛЬНИК&#9;1&#9;Биология&#9;8&#10;ПОНЕДЕЛЬНИК&#9;2&#9;Физкультура&#9;с/з&#10;..." required></textarea>
+        </div>
+        <div class="form-group" style="display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" name="replaceAll" id="replaceAllChk" checked>
+            <label for="replaceAllChk" style="margin:0;">Заменить всё расписание</label>
+        </div>
+    `, async (fd) => {
+        const r = await apiPost('/api/schedule/import', {
+            spaceId: currentSpace.id,
+            text: fd.get('text'),
+            replaceAll: fd.get('replaceAll') === 'on'
+        });
+        let msg = `✅ Импортировано уроков: ${r.imported}`;
+        if (r.skipped && r.skipped.length) msg += `\n⏭️ Пропущено пустых строк: ${r.skipped.length}`;
+        if (r.errors && r.errors.length) msg += `\n⚠️ Ошибок: ${r.errors.length}\n${r.errors.join('\n')}`;
+        alert(msg);
+        refreshCurrentTab();
+    }, 'Импортировать');
+}
+
+function exportSchedule() {
+    if (!currentSpace) return alert('Выберите группу');
+    const token = localStorage.getItem('token');
+    window.open(`/api/schedule/${currentSpace.id}/export?token=${encodeURIComponent(token)}`, '_blank');
+}
+
+function exportScheduleICS() {
+    if (!currentSpace) return alert('Выберите группу');
+    const token = localStorage.getItem('token');
+    window.open(`/api/schedule/${currentSpace.id}/ics?token=${encodeURIComponent(token)}`, '_blank');
+}
+
+// ============================================================
+// СТАТИСТИКА ДЗ (КРУГОВАЯ ДИАГРАММА)
+// ============================================================
+async function openHomeworkStats(homeworkId) {
+    if (!currentSpace) return;
+    const root = document.getElementById('dynamicSheetRoot');
+    root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div><p class="empty-state">Загрузка…</p></div>`;
+    document.getElementById('sheetOverlay').classList.add('show');
+    try {
+        const s = await apiGet(`/api/homework/${homeworkId}/stats`);
+        const size = 140, stroke = 18, r = (size - stroke) / 2, c = 2 * Math.PI * r;
+        const dash = (s.percentage / 100) * c;
+        let html = `
+            <h2 class="app-title" style="font-size:1.3rem;">📊 Статистика ДЗ</h2>
+            <div style="text-align:center; margin:14px 0;">
+                <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="transform:rotate(-90deg);">
+                    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--card-border)" stroke-width="${stroke}"></circle>
+                    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--success)" stroke-width="${stroke}"
+                            stroke-dasharray="${dash} ${c}" stroke-linecap="round"></circle>
+                </svg>
+                <div style="margin-top:-95px; margin-bottom:60px; font-size:1.6rem; font-weight:700;">${s.percentage}%</div>
+                <p style="color:var(--text-secondary);">Выполнили: ${s.completed} из ${s.total}</p>
+            </div>
+        `;
+        if (s.canSeeStudents) {
+            if (s.students.length) {
+                html += `<h3>Выполнили:</h3><div class="settings-card">`;
+                html += s.students.map(st => `
+                    <div class="member-row">
+                        <div class="member-avatar">${escapeHtml(st.avatar_emoji || '👤')}</div>
+                        <div class="member-info">
+                            <div class="member-name">${escapeHtml(st.full_name)}</div>
+                            <div class="member-username">@${escapeHtml(st.username)}</div>
+                        </div>
+                        <span style="font-size:0.75rem; color:var(--text-secondary);">${new Date(st.completed_at).toLocaleDateString('ru-RU')}</span>
+                    </div>
+                `).join('');
+                html += `</div>`;
+            } else {
+                html += `<p class="empty-state">Пока никто не выполнил</p>`;
+            }
+        }
+        html += `<button class="btn-secondary" style="margin-top:14px;" onclick="closeDynamicSheet()">Закрыть</button>`;
+        root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div>${html}</div>`;
+    } catch (e) {
+        root.innerHTML = `<div class="sheet show" id="dynamicSheet"><p class="empty-state">Ошибка: ${escapeHtml(e.error || '')}</p><button class="btn-secondary" onclick="closeDynamicSheet()">Закрыть</button></div>`;
+    }
+}
+
+// ============================================================
+// ПРОФИЛЬ: РЕДАКТИРОВАНИЕ
+// ============================================================
+const EMOJI_LIST = [
+    '👤','👨','👩','🧑','👦','👧','👨‍🎓','👩‍🎓','🧑‍🎓','👨‍🏫','👩‍🏫',
+    '😀','😎','🤓','🥳','🤔','😴','🧐','🥸','🤠','😺','🐶','🐱','🦊','🐼','🐨','🦁','🐯','🦉','🐧',
+    '🍕','🍔','🍟','🌮','🍣','🍎','🍓','🍉','☕','🍩','🎂',
+    '⚽','🏀','🎮','🎧','🎸','🎨','🚀','⚡','🔥','⭐','🌈','💎','🎯','🏆','🥇','👑','💡','📚','✏️','🎓'
+];
+let _selectedEmoji = '👤';
+
+function openEditProfile() {
+    if (!currentUser) return;
+    const parts = (currentUser.fullName || '').split(' ');
+    _selectedEmoji = currentUser.avatarEmoji || '👤';
+    showFormSheet('✏️ Редактирование профиля', `
+        <div style="text-align:center; margin:12px 0;">
+            <div id="editAvatarPreview" style="font-size:4rem; cursor:pointer;" onclick="openEmojiPicker()">${_selectedEmoji}</div>
+            <p style="color:var(--text-secondary); font-size:0.85rem; margin:4px 0 0;">Нажмите, чтобы сменить аватар</p>
+        </div>
+        <div class="form-group"><input name="firstName" class="form-control" placeholder="Имя" value="${escapeHtml(parts[0] || '')}" required></div>
+        <div class="form-group"><input name="lastName" class="form-control" placeholder="Фамилия" value="${escapeHtml(parts.slice(1).join(' ') || '')}" required></div>
+        ${currentUser.isTeacher ? '' : `<div class="form-group"><input name="nickname" class="form-control" placeholder="Ник (логин)" value="${escapeHtml(currentUser.username || '')}"></div>`}
+    `, async (fd) => {
+        const r = await apiPost('/api/auth/update-profile', {
+            firstName: fd.get('firstName'),
+            lastName: fd.get('lastName'),
+            nickname: currentUser.isTeacher ? null : fd.get('nickname'),
+            avatarEmoji: _selectedEmoji
+        });
+        currentUser = r.user;
+        localStorage.setItem('user', JSON.stringify(r.user));
+        alert('✅ Профиль сохранён');
+        location.reload();
+    }, 'Сохранить');
+}
+
+function openEmojiPicker() {
+    const root = document.getElementById('dynamicSheetRoot');
+    root.innerHTML = `
+        <div class="sheet show" id="dynamicSheet">
+            <div class="sheet-handle"></div>
+            <h2 class="app-title" style="font-size:1.2rem;">Выберите аватар</h2>
+            <div class="emoji-grid">
+                ${EMOJI_LIST.map(e => `<button type="button" class="emoji-btn" onclick="pickEmoji('${e}')">${e}</button>`).join('')}
+            </div>
+            <button type="button" class="btn-secondary" style="margin-top:14px;" onclick="openEditProfile()">Назад</button>
+        </div>`;
+    document.getElementById('sheetOverlay').classList.add('show');
+}
+
+function pickEmoji(e) {
+    _selectedEmoji = e;
+    openEditProfile();
+}
+
+// ============================================================
+// ХЕЛПЕР: ОБНОВИТЬ ТЕКУЩУЮ ВКЛАДКУ
+// ============================================================
+function refreshCurrentTab() {
+    const activeTab = document.querySelector('.tab-section.active');
+    if (activeTab) loadTabContent(activeTab.id);
+}
