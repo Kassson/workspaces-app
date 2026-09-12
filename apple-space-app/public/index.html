@@ -42,9 +42,7 @@
                     <div class="form-group"><input type="text" id="regFirst" class="form-control" placeholder="Имя" required></div>
                     <div class="form-group"><input type="text" id="regLast" class="form-control" placeholder="Фамилия" required></div>
                     <div class="form-group"><input type="text" id="regNick" class="form-control" placeholder="Логин (Ник)" required></div>
-                    <div class="form-group">
-                        <input type="email" id="regEmail" class="form-control" placeholder="Почта (gmail.com, mail.ru и др.)" required>
-                    </div>
+                    <div class="form-group"><input type="email" id="regEmail" class="form-control" placeholder="Почта (gmail.com, mail.ru и др.)" required></div>
                     <div class="form-group"><input type="password" id="regPass" class="form-control" placeholder="Пароль" required></div>
                     <button type="submit" class="btn-primary">Зарегистрироваться</button>
                 </form>
@@ -55,7 +53,6 @@
         <a href="/teach" class="outside-link">Вы преподаватель? →</a>
     </div>
 
-    <!-- ================= ПАНЕЛЬ СТУДЕНТА ================= -->
     <div class="app-dashboard" id="dashboard">
         <aside class="sidebar">
             <div class="sidebar-logo">🧭 Workspaces</div>
@@ -63,6 +60,7 @@
             <a onclick="showTab('tab-today', this)" class="sidebar-item active" data-tab="tab-today">📅 Сегодня</a>
             <a onclick="showTab('tab-schedule', this)" class="sidebar-item" data-tab="tab-schedule">🗓️ Расписание</a>
             <a onclick="showTab('tab-hw', this)" class="sidebar-item" data-tab="tab-hw">📝 Домашние задания</a>
+            <a onclick="showTab('tab-members', this)" class="sidebar-item" data-tab="tab-members">👥 Участники</a>
             <a onclick="showTab('tab-chat', this)" class="sidebar-item" data-tab="tab-chat">💬 Чат</a>
             <a onclick="showTab('tab-games', this)" class="sidebar-item" data-tab="tab-games">🎮 Игровой центр</a>
             <a onclick="showTab('tab-settings', this)" class="sidebar-item" data-tab="tab-settings" style="margin-top:auto;">⚙️ Настройки</a>
@@ -73,6 +71,7 @@
             <div id="tab-today" class="tab-section active"></div>
             <div id="tab-schedule" class="tab-section"></div>
             <div id="tab-hw" class="tab-section"></div>
+            <div id="tab-members" class="tab-section"></div>
             <div id="tab-chat" class="tab-section"></div>
             <div id="tab-games" class="tab-section"></div>
 
@@ -85,7 +84,14 @@
                 </div>
                 <div class="settings-card">
                     <h3>Профиль</h3>
-                    <p id="profileInfo" style="color:var(--text-secondary);"></p>
+                    <div style="display:flex; align-items:center; gap:12px; margin-bottom:10px;">
+                        <div id="profileAvatarBig" style="font-size:2.5rem;">👤</div>
+                        <div>
+                            <div id="profileFullName" style="font-weight:500;"></div>
+                            <div id="profileInfo" style="color:var(--text-secondary); font-size:0.9rem;"></div>
+                        </div>
+                    </div>
+                    <button class="btn-secondary" onclick="openEditProfile()">✏️ Редактировать профиль</button>
                 </div>
                 <div class="settings-card">
                     <button class="btn-danger" onclick="logout()">Выйти</button>
@@ -97,13 +103,13 @@
             <button class="tab-btn active" data-tab="tab-today" onclick="showTab('tab-today', this)"><span class="ic">📅</span>Сегодня</button>
             <button class="tab-btn" data-tab="tab-schedule" onclick="showTab('tab-schedule', this)"><span class="ic">🗓️</span>Пары</button>
             <button class="tab-btn" data-tab="tab-hw" onclick="showTab('tab-hw', this)"><span class="ic">📝</span>ДЗ</button>
+            <button class="tab-btn" data-tab="tab-members" onclick="showTab('tab-members', this)"><span class="ic">👥</span>Люди</button>
             <button class="tab-btn" data-tab="tab-chat" onclick="showTab('tab-chat', this)"><span class="ic">💬</span>Чат</button>
             <button class="tab-btn" data-tab="tab-games" onclick="showTab('tab-games', this)"><span class="ic">🎮</span>Игры</button>
             <button class="tab-btn" data-tab="tab-settings" onclick="showTab('tab-settings', this)"><span class="ic">⚙️</span>Ещё</button>
         </nav>
     </div>
 
-    <!-- Шторки (sheet modals) -->
     <div class="sheet-overlay" id="sheetOverlay" onclick="closeDynamicSheet()"></div>
     <div id="dynamicSheetRoot"></div>
 
@@ -123,15 +129,14 @@
 
         function isValidEmailDomain(email) {
             const allowedDomains = ['gmail.com', 'mail.ru', 'yandex.ru', 'rambler.ru', 'bk.ru', 'list.ru', 'inbox.ru', 'ya.ru', 'outlook.com', 'yahoo.com'];
-            const domain = email.split('@')[1]?.toLowerCase();
-            return allowedDomains.includes(domain);
+            return allowedDomains.includes((email.split('@')[1] || '').toLowerCase());
         }
 
         async function handleReg(e) {
             e.preventDefault();
             errorMsg.textContent = '';
             const email = document.getElementById('regEmail').value.trim();
-            if (!isValidEmailDomain(email)) { errorMsg.textContent = 'Введите реальный адрес почты (gmail.com, mail.ru, yandex.ru и др.)'; return; }
+            if (!isValidEmailDomain(email)) { errorMsg.textContent = 'Введите реальный адрес почты'; return; }
             try {
                 await apiPost('/api/auth/register', {
                     firstName: document.getElementById('regFirst').value,
@@ -173,6 +178,7 @@
             if (tabId === 'tab-today') renderTodayTab(document.getElementById('tab-today'), spaceId);
             if (tabId === 'tab-schedule') renderScheduleTab(document.getElementById('tab-schedule'), spaceId, false);
             if (tabId === 'tab-hw') renderHomeworkTab(document.getElementById('tab-hw'), spaceId, false);
+            if (tabId === 'tab-members') renderMembersTab(document.getElementById('tab-members'), spaceId, false);
             if (tabId === 'tab-chat') renderChatTab(document.getElementById('tab-chat'), spaceId, false, currentUser?.id);
             if (tabId === 'tab-games') { if (!activeGame) renderGamesMenu(document.getElementById('tab-games')); }
         }
@@ -180,10 +186,8 @@
         async function reloadSpaces() {
             mySpaces = await apiGet('/api/spaces/mine');
             const sel = document.getElementById('spaceSelect');
-            if (!mySpaces.length) {
-                sel.innerHTML = '<option>Нет групп</option>';
-                currentSpace = null;
-            } else {
+            if (!mySpaces.length) { sel.innerHTML = '<option>Нет групп</option>'; currentSpace = null; }
+            else {
                 sel.innerHTML = mySpaces.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
                 const savedId = localStorage.getItem('activeSpaceId');
                 const found = mySpaces.find(s => s.id === savedId) || mySpaces[0];
@@ -213,8 +217,15 @@
                 </div>`).join('');
         }
 
+        function renderProfile() {
+            if (!currentUser) return;
+            document.getElementById('profileAvatarBig').textContent = currentUser.avatarEmoji || '👤';
+            document.getElementById('profileFullName').textContent = currentUser.fullName;
+            document.getElementById('profileInfo').textContent = '@' + currentUser.username;
+        }
+
         async function boot() {
-            await loadAndApplySettings(null); // показываем «тех. работы»/баннер ещё до входа
+            await loadAndApplySettings(null);
             if (!(localStorage.getItem('token') && localStorage.getItem('role') === 'student')) return;
             try {
                 const { user } = await apiGet('/api/auth/me');
@@ -224,13 +235,18 @@
 
             document.getElementById('loginWrapper').style.display = 'none';
             document.getElementById('dashboard').style.display = 'flex';
-            document.getElementById('profileInfo').textContent = `${currentUser.fullName} · @${currentUser.username}`;
+            renderProfile();
 
             await loadAndApplySettings(currentUser);
             await reloadSpaces();
             startSelfPing();
         }
         boot();
+
+        socket.on('members_updated', () => {
+            const active = document.querySelector('.tab-section.active')?.id;
+            if (active === 'tab-members') loadTabContent('tab-members');
+        });
     </script>
 </body>
 </html>
