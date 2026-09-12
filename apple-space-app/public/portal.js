@@ -843,17 +843,17 @@ function openJoinSpaceForm() {
 
 function openCreateSpaceForm() {
     showFormSheet('Новая группа', `
-        <div class="form-group"><input name="name" class="form-control" placeholder="Название группы" required></div>
+        <div class="form-group"><input name="name" class="form-control" placeholder="Название пространства" required></div>
     `, async (fd) => {
         const space = await apiPost('/api/spaces', { name: fd.get('name') });
-        alert(`Группа создана! Код приглашения: ${space.invite_code}`);
+        alert(`Пространство создано! Код приглашения: ${space.invite_code}`);
         await window.__reloadSpaces?.();
     }, 'Создать');
 }
 
 function emptySpaceState() {
     return `<div class="empty-state">
-        <p>Вы пока не состоите ни в одной группе.</p>
+        <p>Вы пока не состоите ни в одном пространстве.</p>
         <button class="btn-primary" style="max-width:240px;" onclick="openJoinSpaceForm()">Присоединиться по коду</button>
     </div>`;
 }
