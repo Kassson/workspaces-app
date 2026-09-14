@@ -345,3 +345,16 @@ CREATE INDEX IF NOT EXISTS idx_space_announcements ON space_announcements(space_
 CREATE INDEX IF NOT EXISTS idx_prr_status ON password_reset_requests(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_prr_code ON password_reset_requests(code) WHERE code IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_prr_token ON password_reset_requests(token) WHERE token IS NOT NULL;
+
+-- ============================================================================
+-- 19. Виртуальные ученики журнала (для тех, кого нет в пространстве)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS journal_students (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    space_id UUID REFERENCES spaces(id) ON DELETE CASCADE,
+    subject_name VARCHAR(100) NOT NULL,
+    student_name VARCHAR(150) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(space_id, subject_name, student_name)
+);
+CREATE INDEX IF NOT EXISTS idx_journal_students ON journal_students(space_id, subject_name);
