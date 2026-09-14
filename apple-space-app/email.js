@@ -1,23 +1,14 @@
 // ============================================================================
-//  email.js — отправка писем через Gmail SMTP
+//  email.js — отправка писем через Resend API (HTTP, работает на Render)
 // ============================================================================
-const nodemailer = require('nodemailer');
-
-let transporter = null;
+const RESEND_API_URL = 'https://api.resend.com/emails';
 
 function initEmail() {
-    if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
-        console.warn('⚠️ Gmail SMTP не настроен — письма отключены');
+    if (!process.env.RESEND_API_KEY) {
+        console.warn('⚠️ RESEND_API_KEY не задан — письма отключены');
         return false;
     }
-    transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-            user: process.env.GMAIL_USER,
-            pass: process.env.GMAIL_APP_PASSWORD
-        }
-    });
-    console.log('✅ Gmail SMTP подключён');
+    console.log('✅ Resend API подключён');
     return true;
 }
 
@@ -56,8 +47,36 @@ function emailButton(text, url) {
     </td></tr></table>`;
 }
 
+async function sendEmail({ to, subject, html }) {
+    if (!process.env.RESEND_API_KEY) {
+        console.warn('⚠️ Письмо не отправлено: RESEND_API_KEY не задан');
+        return false;
+    }
+    const from = process.env.EMAIL_FROM || 'Workspaces <onboarding@resend.dev>';
+    try {
+        const res = await fetch(RESEND_API_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${process.env.RESEND_API_KEY}`
+            },
+            body: JSON.stringify({ from, to, subject, html })
+        });
+        if (!res.ok) {
+            const err = await res.text();
+            console.error('Resend error:', res.status, err);
+            return false;
+        }
+        const data = await res.json();
+        console.log('📧 Письмо отправлено:', data.id || '', '→', to);
+        return true;
+    } catch (e) {
+        console.error('Ошибка отправки письма:', e.message);
+        return false;
+    }
+}
+
 async function sendPasswordReset(toEmail, fullName, token) {
-    if (!transporter) return false;
     const link = `${process.env.APP_URL || 'https://workspaces-app.onrender.com'}/?reset=${token}`;
     const html = emailLayout('Сброс пароля', `
         <p style="margin:0 0 8px;color:#333;font-size:15px;">Здравствуйте, ${fullName || ''}!</p>
@@ -66,22 +85,10 @@ async function sendPasswordReset(toEmail, fullName, token) {
         ${emailButton('Сбросить пароль', link)}
         <p style="margin:0;color:#707579;font-size:13px;">Если вы не запрашивали сброс — просто проигнорируйте это письмо.</p>
     `);
-    try {
-        await transporter.sendMail({
-            from: `"Workspaces" <${process.env.GMAIL_USER}>`,
-            to: toEmail,
-            subject: 'Сброс пароля — Workspaces',
-            html
-        });
-        return true;
-    } catch (e) {
-        console.error('Ошибка отправки письма (reset):', e.message);
-        return false;
-    }
+    return sendEmail({ to: toEmail, subject: 'Сброс пароля — Workspaces', html });
 }
 
 async function sendEmailVerification(toEmail, fullName, token) {
-    if (!transporter) return false;
     const link = `${process.env.APP_URL || 'https://workspaces-app.onrender.com'}/api/auth/verify-email?token=${token}`;
     const html = emailLayout('Подтверждение почты', `
         <p style="margin:0 0 8px;color:#333;font-size:15px;">Здравствуйте, ${fullName || ''}!</p>
@@ -89,22 +96,12 @@ async function sendEmailVerification(toEmail, fullName, token) {
         ${emailButton('Подтвердить почту', link)}
         <p style="margin:0;color:#707579;font-size:13px;">Ссылка действует 24 часа.</p>
     `);
-    try {
-        await transporter.sendMail({
-            from: `"Workspaces" <${process.env.GMAIL_USER}>`,
-            to: toEmail,
-            subject: 'Подтверждение почты — Workspaces',
-            html
-        });
-        return true;
-    } catch (e) {
-        console.error('Ошибка отправки письма (verify):', e.message);
-        return false;
-    }
+    return sendEmail({ to: toEmail, subject: 'Подтверждение почты — Workspaces', html });
 }
 
 module.exports = {
     initEmail,
+    sendEmail,
     sendPasswordReset,
     sendEmailVerification
 };
