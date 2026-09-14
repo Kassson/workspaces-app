@@ -1,0 +1,54 @@
+{
+    "name": "Workspaces",
+    "short_name": "Workspaces",
+    "description": "Пространство колледжа",
+    "start_url": "/",
+    "scope": "/",
+    "display": "standalone",
+    "orientation": "portrait",
+    "background_color": "#ffffff",
+    "theme_color": "#0088cc",
+    "lang": "ru",
+    "dir": "ltr",
+    "categories": ["education", "productivity"],
+    "icons": [
+        {
+            "src": "/icon.svg",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "any"
+        },
+        {
+            "src": "/icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ],
+    "shortcuts": [
+        {
+            "name": "Расписание",
+            "short_name": "Пары",
+            "url": "/?tab=tab-schedule",
+            "icons": [{ "src": "/icon.svg", "sizes": "any" }]
+        },
+        {
+            "name": "Чат",
+            "short_name": "Чат",
+            "url": "/?tab=tab-chat",
+            "icons": [{ "src": "/icon.svg", "sizes": "any" }]
+        },
+        {
+            "name": "Журнал",
+            "short_name": "Журнал",
+            "url": "/?tab=tab-grades",
+            "icons": [{ "src": "/icon.svg", "sizes": "any" }]
+        }
+    ]
+}
