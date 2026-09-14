@@ -18,18 +18,14 @@ const socket = io({ query: { token: localStorage.getItem('token') || '' } });
         const userTheme = user.theme || 'auto';
 
         if (isMobile) {
-            // На телефоне всегда системная
             return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
         }
-
-        // На ПК: если пользователь выбрал вручную — его выбор; если авто — берём системную
         if (userTheme === 'light' || userTheme === 'dark') return userTheme;
         return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     }
 
     applyTheme(getEffectiveTheme());
 
-    // Следим за системной темой
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
         applyTheme(getEffectiveTheme());
     });
@@ -41,7 +37,6 @@ const socket = io({ query: { token: localStorage.getItem('token') || '' } });
             const current = document.documentElement.getAttribute('data-theme');
             const next = current === 'dark' ? 'light' : 'dark';
             applyTheme(next);
-            // Сохраняем в аккаунт
             const user = JSON.parse(localStorage.getItem('user') || '{}');
             user.theme = next;
             localStorage.setItem('user', JSON.stringify(user));
@@ -112,7 +107,7 @@ function startSelfPing() {
 }
 
 // ============================================================================
-//  TOASTS — кастомные уведомления вместо alert()
+//  TOASTS
 // ============================================================================
 function ensureToastContainer() {
     let container = document.getElementById('toastContainer');
@@ -180,7 +175,7 @@ function showToast(text, type = 'info', duration = 3000) {
 }
 
 // ============================================================================
-//  CONFIRM — кастомная модалка вместо confirm()
+//  CONFIRM
 // ============================================================================
 function showConfirm(title, text = '', okLabel = 'OK', cancelLabel = 'Отмена', danger = false) {
     return new Promise((resolve) => {
@@ -227,7 +222,7 @@ function showConfirm(title, text = '', okLabel = 'OK', cancelLabel = 'Отмен
 }
 
 // ============================================================================
-//  PROMPT — кастомный ввод вместо prompt()
+//  PROMPT
 // ============================================================================
 function showPrompt(title, placeholder = '', defaultValue = '') {
     return new Promise((resolve) => {
@@ -338,7 +333,7 @@ function timeAgo(dateStr) {
 }
 
 // ============================================================================
-//  IMAGE VIEWER — полноэкранный просмотр фото
+//  IMAGE VIEWER
 // ============================================================================
 function openImageViewer(urls, startIndex = 0) {
     if (!urls || !urls.length) return;
@@ -391,7 +386,6 @@ function openImageViewer(urls, startIndex = 0) {
     function close() { overlay.remove(); }
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
 
-    // Свайпы
     let touchStartX = 0, touchStartY = 0;
     overlay.addEventListener('touchstart', (e) => {
         touchStartX = e.touches[0].clientX;
@@ -427,6 +421,58 @@ async function uploadFiles(files, spaceId) {
     }
     const data = await res.json();
     return data.files || [];
+}
+
+// ============================================================================
+//  ВОССТАНОВЛЕНИЕ ПАРОЛЯ (локально, через учителей)
+// ============================================================================
+
+// Запрос на восстановление — со страницы входа
+async function requestPasswordReset(login) {
+    return apiPost('/api/auth/request-password-reset', { login });
+}
+
+// Проверка статуса запроса (для polling на странице ввода кода)
+async function getPasswordResetStatus(login) {
+    try {
+        const res = await fetch(`/api/auth/password-reset-status/${encodeURIComponent(login)}`);
+        if (!res.ok) return { status: 'none' };
+        return await res.json();
+    } catch (e) { return { status: 'none' }; }
+}
+
+// Ученик сбрасывает пароль по коду
+async function resetPasswordWithCode(login, code, newPassword) {
+    return apiPost('/api/auth/reset-password-with-code', { login, code, newPassword });
+}
+
+// Учитель сбрасывает пароль по токену (после подтверждения коллегой)
+async function resetPasswordWithToken(token, newPassword) {
+    return apiPost('/api/auth/reset-password-with-token', { token, newPassword });
+}
+
+// Проверка magic-токена (для страницы reset учителя)
+async function checkResetToken(token) {
+    try {
+        const res = await fetch(`/api/auth/check-reset-token/${encodeURIComponent(token)}`);
+        if (!res.ok) return { valid: false };
+        return await res.json();
+    } catch (e) { return { valid: false }; }
+}
+
+// Учитель получает список pending-запросов
+async function getPasswordResetRequests() {
+    return apiGet('/api/password-reset-requests');
+}
+
+// Учитель подтверждает запрос
+async function approvePasswordReset(requestId) {
+    return apiPost(`/api/password-reset-requests/${requestId}/approve`, {});
+}
+
+// Учитель отклоняет запрос
+async function declinePasswordReset(requestId) {
+    return apiDelete(`/api/password-reset-requests/${requestId}`);
 }
 
 // ============================================================================
@@ -502,7 +548,6 @@ async function getChatMute(spaceId) {
 async function setChatMute(spaceId, duration) { return apiPost(`/api/spaces/${spaceId}/chat-mute`, { duration }); }
 async function clearChatMute(spaceId) { return apiDelete(`/api/spaces/${spaceId}/chat-mute`); }
 
-// ---- Настройки уведомлений ----
 async function getNotificationPrefs() {
     try { return await apiGet('/api/notification-prefs'); }
     catch (e) { return null; }
@@ -512,7 +557,7 @@ async function saveNotificationPrefs(prefs) {
 }
 
 // ============================================================================
-//  PRESENCE — активен ли пользователь
+//  PRESENCE
 // ============================================================================
 let _presenceInterval = null;
 function startPresenceTracking() {
@@ -542,7 +587,6 @@ async function updateBadges() {
     const counts = await getUnreadCounts();
     const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
-    // Обновляем бейдж на иконке чата
     const chatBtn = document.querySelector('[data-tab="tab-chat"]');
     if (chatBtn) {
         let badge = chatBtn.querySelector('.unread-badge');
@@ -560,7 +604,6 @@ async function updateBadges() {
         }
     }
 
-    // PWA badge
     if ('setAppBadge' in navigator) {
         if (total > 0) navigator.setAppBadge(total).catch(() => {});
         else navigator.clearAppBadge().catch(() => {});
@@ -569,14 +612,13 @@ async function updateBadges() {
 
 socket.on('unread_count_update', () => { updateBadges(); });
 
-// Регистрируем SW при загрузке
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
     });
 }
 
-// CSS-анимации для toast/confirm
+// CSS-анимации
 (function injectToastStyles() {
     if (document.getElementById('toastStyles')) return;
     const style = document.createElement('style');
