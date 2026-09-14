@@ -10,7 +10,6 @@
     <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-    <!-- Экран загрузки -->
     <div class="loading-screen show" id="loadingScreen">
         <div class="loading-content">
             <div class="loading-logo">
@@ -79,8 +78,32 @@
                 <h1 class="app-title">Ваш код профиля</h1>
                 <p class="app-subtitle" style="margin-bottom: 10px;">Сообщите код любому подтверждённому преподавателю.</p>
                 <h2 id="generatedCodeDisplay" style="font-size: 2.5rem; letter-spacing: 5px; color: #0088cc; margin-bottom: 20px;">T-0000</h2>
-                <p style="color:var(--text-secondary); font-size:0.8rem; margin-bottom:16px;">Проверьте почту для подтверждения email.</p>
                 <button class="btn-primary" onclick="switchView('viewLogin')">Перейти ко входу</button>
+            </div>
+
+            <div id="viewForgot" style="display: none;">
+                <h1 class="app-title">Восстановление пароля</h1>
+                <p class="app-subtitle" style="font-size:0.85rem;">Введите логин. Другой преподаватель получит запрос и подтвердит его.</p>
+                <div class="form-group"><input type="text" id="forgotLogin" class="form-control" placeholder="Логин или Почта" required></div>
+                <button class="btn-primary" onclick="submitForgotPassword()">Отправить запрос</button>
+                <button class="btn-text" onclick="switchView('viewLogin')">Назад</button>
+            </div>
+
+            <div id="viewForgotSent" style="display: none;">
+                <h1 class="app-title">Запрос отправлен</h1>
+                <p class="app-subtitle" style="font-size:0.9rem;">
+                    Обратитесь к любому подтверждённому преподавателю — он увидит ваш запрос в разделе «Верификация» и нажмёт «Подтвердить».<br><br>
+                    После этого вам будет передана ссылка для смены пароля.
+                </p>
+                <button class="btn-primary" onclick="switchView('viewLogin')">Назад ко входу</button>
+            </div>
+
+            <div id="viewResetToken" style="display: none;">
+                <h1 class="app-title">Новый пароль</h1>
+                <p class="app-subtitle" style="font-size:0.9rem;">Введите новый пароль для восстановления доступа.</p>
+                <div class="form-group"><input type="password" id="tokenNewPass" class="form-control" placeholder="Новый пароль (мин. 8 символов)" required></div>
+                <button class="btn-primary" onclick="submitResetWithToken()">Сменить пароль</button>
+                <button class="btn-text" onclick="switchView('viewLogin')">Отмена</button>
             </div>
 
             <p id="errorMsg" style="color: #ff453a; font-size: 0.85rem; margin-top: 10px;"></p>
@@ -98,7 +121,7 @@
         </div>
     </div>
 
-    <!-- Дашборд преподавателя -->
+    <!-- Дашборд -->
     <div class="app-dashboard" id="dashboard">
         <aside class="sidebar">
             <div class="sidebar-logo">
@@ -183,13 +206,24 @@
             <div id="tab-members" class="tab-section"></div>
 
             <div id="tab-auths" class="tab-section">
-                <h1 class="page-title">Верификация коллег</h1>
+                <h1 class="page-title">Верификация</h1>
+
                 <div class="settings-card">
                     <h3>Подтвердить нового коллегу</h3>
                     <p style="color:var(--text-secondary); font-size:0.9rem;">Попросите коллегу назвать 4-значный код (T-8492) и введите его.</p>
                     <div style="display:flex; gap:10px; max-width: 320px;">
                         <input type="text" id="colleagueCode" class="form-control" placeholder="T-0000">
                         <button class="btn-primary" style="margin:0; width: 140px;" onclick="verifyColleague()">Подтвердить</button>
+                    </div>
+                </div>
+
+                <div class="settings-card">
+                    <h3>Запросы на восстановление пароля</h3>
+                    <p style="color:var(--text-secondary); font-size:0.85rem; margin-bottom:12px;">
+                        Студенты — сообщите код лично. Учителей — подтвердите кнопкой, после чего передайте им ссылку для смены пароля.
+                    </p>
+                    <div id="resetRequestsList">
+                        <p class="empty-state" style="padding:16px 0;">Нет активных запросов</p>
                     </div>
                 </div>
             </div>
@@ -218,8 +252,7 @@
 
                 <div class="settings-card">
                     <h3>Безопасность</h3>
-                    <button class="btn-secondary" onclick="openChangePassword()" style="margin-bottom:8px;">Сменить пароль</button>
-                    <button class="btn-secondary" onclick="logoutAllDevices()">Выйти со всех устройств</button>
+                    <button class="btn-secondary" onclick="openChangePasswordInfo()">Как сменить пароль</button>
                 </div>
 
                 <div class="settings-card">
@@ -254,8 +287,8 @@
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.5 3-6 6.5-6s6.5 2.5 6.5 6"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14c2.5 0 4.5 1.8 4.5 4"/></svg>
                 <span>Люди</span>
             </button>
-            <button class="tab-btn" data-tab="tab-settings" onclick="showTab('tab-settings', this)">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3h.1a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>
+            <button class="tab-btn" data-tab="tab-auths" onclick="showTab('tab-auths', this)">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-4z"/><path d="M9 12l2 2 4-4"/></svg>
                 <span>Ещё</span>
             </button>
         </nav>
@@ -270,12 +303,18 @@
     <script>
         const errorMsg = document.getElementById('errorMsg');
         function switchView(viewId) {
-            ['viewLogin', 'viewReg', 'viewRegCode'].forEach(id => document.getElementById(id).style.display = 'none');
-            document.getElementById(viewId).style.display = 'block'; errorMsg.textContent = '';
+            ['viewLogin', 'viewReg', 'viewRegCode', 'viewForgot', 'viewForgotSent', 'viewResetToken'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = 'none';
+            });
+            const target = document.getElementById(viewId);
+            if (target) target.style.display = 'block';
+            errorMsg.textContent = '';
         }
 
         let mySpaces = [];
         let currentUser = null;
+        let _resetToken = null;
 
         function isValidEmailDomain(email) {
             const allowedDomains = ['gmail.com', 'mail.ru', 'yandex.ru', 'rambler.ru', 'bk.ru', 'list.ru', 'inbox.ru', 'ya.ru', 'outlook.com', 'yahoo.com'];
@@ -316,12 +355,144 @@
             setTimeout(() => { localStorage.clear(); location.reload(); }, 150);
         }
 
+        // ===== Восстановление пароля учителя =====
+        function openForgotPassword() {
+            document.getElementById('forgotLogin').value = document.getElementById('logInput').value || '';
+            switchView('viewForgot');
+        }
+
+        async function submitForgotPassword() {
+            const login = document.getElementById('forgotLogin').value.trim();
+            if (!login) { errorMsg.textContent = 'Введите логин'; return; }
+            try {
+                await requestPasswordReset(login);
+                switchView('viewForgotSent');
+            } catch (d) { errorMsg.textContent = d.error || 'Ошибка отправки'; }
+        }
+
+        async function submitResetWithToken() {
+            const newPassword = document.getElementById('tokenNewPass').value;
+            if (!newPassword) { errorMsg.textContent = 'Введите пароль'; return; }
+            try {
+                await resetPasswordWithToken(_resetToken, newPassword);
+                showToast('Пароль изменён. Войдите с новым.', 'success', 5000);
+                history.replaceState(null, '', '/teach');
+                _resetToken = null;
+                switchView('viewLogin');
+            } catch (d) { errorMsg.textContent = d.error || 'Ошибка смены пароля'; }
+        }
+
+        async function checkResetTokenInUrl() {
+            const params = new URLSearchParams(location.search);
+            const token = params.get('reset');
+            if (!token) return false;
+            const r = await checkResetToken(token);
+            if (!r.valid) {
+                showToast('Ссылка недействительна или устарела', 'error', 5000);
+                history.replaceState(null, '', '/teach');
+                return false;
+            }
+            _resetToken = token;
+            switchView('viewResetToken');
+            return true;
+        }
+
+        // ===== Верификация =====
         async function verifyColleague() {
             const code = document.getElementById('colleagueCode').value.trim(); if (!code) return;
             try { const d = await apiPost('/api/teach/verify-colleague', { code }); showToast(d.message, 'success'); document.getElementById('colleagueCode').value = ''; }
             catch (d) { showToast(d.error || 'Ошибка', 'error'); }
         }
 
+        async function loadResetRequests() {
+            try {
+                const list = await getPasswordResetRequests();
+                renderResetRequests(list);
+            } catch (e) { /* тихо */ }
+        }
+
+        function renderResetRequests(list) {
+            const box = document.getElementById('resetRequestsList');
+            if (!box) return;
+            if (!list.length) {
+                box.innerHTML = '<p class="empty-state" style="padding:16px 0;">Нет активных запросов</p>';
+                return;
+            }
+            box.innerHTML = list.map(r => {
+                const isTeacher = r.user_type === 'teacher';
+                const isApproved = r.status === 'approved';
+                if (isTeacher) {
+                    return `
+                        <div style="padding:12px;background:var(--input-bg);border-radius:12px;margin-bottom:8px;">
+                            <div style="font-weight:600;margin-bottom:6px;">${escapeHtml(r.display_name)}</div>
+                            <div style="color:var(--text-secondary);font-size:0.85rem;margin-bottom:8px;">
+                                Хочет восстановить пароль.
+                                ${isApproved ? '<br><span style="color:#30d158;">✅ Уже подтверждён другим преподавателем</span>' : ''}
+                            </div>
+                            ${!isApproved ? `
+                                <div style="display:flex;gap:8px;">
+                                    <button class="btn-small" style="background:#30d158;color:#fff;" onclick="approveReset('${r.id}')">Подтвердить</button>
+                                    <button class="btn-small" style="background:#ff453a;color:#fff;" onclick="declineReset('${r.id}')">Отклонить</button>
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                }
+                // Студент
+                return `
+                    <div style="padding:12px;background:var(--input-bg);border-radius:12px;margin-bottom:8px;">
+                        <div style="font-weight:600;margin-bottom:6px;">${escapeHtml(r.display_name)} ${r.username ? '(@' + escapeHtml(r.username) + ')' : ''}</div>
+                        <div style="color:var(--text-secondary);font-size:0.85rem;margin-bottom:8px;">
+                            Хочет восстановить пароль. Сообщите ученику код:
+                        </div>
+                        <div style="font-size:1.6rem;font-weight:800;letter-spacing:6px;color:#0088cc;padding:8px 0;text-align:center;background:var(--bg-card);border-radius:8px;margin-bottom:8px;">${escapeHtml(r.code || '----')}</div>
+                        <button class="btn-small" style="background:#ff453a;color:#fff;" onclick="declineReset('${r.id}')">Отклонить</button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function approveReset(id) {
+            try {
+                const r = await approvePasswordReset(id);
+                if (r.link) {
+                    const fullUrl = location.origin + r.link;
+                    // Показываем окно со ссылкой
+                    const root = document.getElementById('dynamicSheetRoot');
+                    root.innerHTML = `
+                        <div class="sheet show" id="dynamicSheet">
+                            <div class="sheet-handle"></div>
+                            <h2 class="app-title" style="font-size:1.2rem;">Ссылка для коллеги</h2>
+                            <p style="color:var(--text-secondary);font-size:0.9rem;">Передайте эту ссылку преподавателю любым способом.</p>
+                            <div style="background:var(--input-bg);padding:12px;border-radius:10px;word-break:break-all;font-size:0.85rem;margin:10px 0;" id="resetLinkBox">${escapeHtml(fullUrl)}</div>
+                            <button class="btn-primary" onclick="copyResetLink('${escapeHtml(fullUrl)}')">Скопировать</button>
+                            <button class="btn-secondary" onclick="closeDynamicSheet()">Закрыть</button>
+                        </div>
+                    `;
+                    document.getElementById('sheetOverlay').classList.add('show');
+                }
+                loadResetRequests();
+            } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
+        }
+
+        async function declineReset(id) {
+            const ok = await showConfirm('Отклонить запрос?', 'Пользователь сможет создать новый запрос позже.', 'Отклонить', 'Отмена', true);
+            if (!ok) return;
+            try {
+                await declinePasswordReset(id);
+                loadResetRequests();
+            } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
+        }
+
+        function copyResetLink(link) {
+            navigator.clipboard.writeText(link).then(() => showToast('Скопировано', 'success')).catch(() => showToast('Ошибка копирования', 'error'));
+        }
+
+        // Live-обновления
+        socket.on('password_reset_request', () => { loadResetRequests(); });
+        socket.on('password_reset_updated', () => { loadResetRequests(); });
+
+        // ===== Остальные вкладки =====
         function showTab(tabId, el) {
             document.querySelectorAll('.tab-section').forEach(s => s.classList.remove('active'));
             document.querySelectorAll('.sidebar-item, .bottom-tabbar .tab-btn').forEach(s => s.classList.remove('active'));
@@ -337,6 +508,7 @@
             if (tabId === 'tab-grades') renderGradesTab(document.getElementById('tab-grades'), spaceId, true);
             if (tabId === 'tab-members') renderMembersTab(document.getElementById('tab-members'), spaceId, true);
             if (tabId === 'tab-settings') renderPushSettingsCard();
+            if (tabId === 'tab-auths') loadResetRequests();
         }
 
         async function reloadSpaces() {
@@ -419,29 +591,20 @@
             document.getElementById('teacherProfileInfo').textContent = `@${currentUser.username}${currentUser.isRoot ? ' · Root' : ''}`;
         }
 
-        async function openForgotPassword() {
-            const email = await showPrompt('Введите email', 'you@example.com');
-            if (!email) return;
-            try {
-                await apiPost('/api/auth/forgot-password', { email });
-                showToast('Если email зарегистрирован — письмо отправлено', 'success', 5000);
-            } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
-        }
-
-        async function openChangePassword() {
-            const newPass = await showPrompt('Новый пароль (мин. 8 символов, буква+цифра)');
-            if (!newPass) return;
-            showToast('Для смены пароля воспользуйтесь «Забыли пароль?» на экране входа', 'info', 6000);
-        }
-
-        async function logoutAllDevices() {
-            const ok = await showConfirm('Выйти со всех устройств?', 'Придётся войти заново на всех устройствах', 'Выйти', 'Отмена', true);
-            if (!ok) return;
-            localStorage.clear();
-            location.reload();
+        async function openChangePasswordInfo() {
+            const ok = await showConfirm('Сменить пароль', 'Выйдите из аккаунта, нажмите «Забыли пароль?», введите логин. Другой преподаватель подтвердит запрос в разделе «Верификация».', 'Понятно', 'Закрыть');
+            if (ok) logout();
         }
 
         async function boot() {
+            // Сначала проверяем magic-ссылку
+            if (location.search.includes('reset=')) {
+                document.getElementById('loginWrapper').style.display = 'flex';
+                await checkResetTokenInUrl();
+                hideLoadingScreen();
+                return;
+            }
+
             if (!(localStorage.getItem('token') && localStorage.getItem('role') === 'teacher')) {
                 hideLoadingScreen();
                 return;
@@ -471,36 +634,11 @@
             startPresenceTracking();
             updateBadges();
 
+            loadResetRequests();
+
             hideLoadingScreen();
         }
         boot();
-
-        // ===== Обработка ссылок сброса пароля и подтверждения email =====
-        (async function handleAuthLinks() {
-            const params = new URLSearchParams(location.search);
-
-            const resetToken = params.get('reset');
-            if (resetToken) {
-                await new Promise(r => setTimeout(r, 800));
-                const newPass = await showPrompt('Новый пароль', 'Минимум 8 символов, буква+цифра');
-                if (!newPass) {
-                    history.replaceState(null, '', '/teach');
-                    return;
-                }
-                try {
-                    await apiPost('/api/auth/reset-password', { token: resetToken, newPassword: newPass });
-                    showToast('Пароль изменён. Войдите с новым.', 'success', 5000);
-                } catch (e) {
-                    showToast(e.error || 'Ошибка сброса пароля', 'error', 5000);
-                }
-                history.replaceState(null, '', '/teach');
-            }
-
-            if (params.get('verified') === '1') {
-                setTimeout(() => showToast('Почта подтверждена', 'success'), 400);
-                history.replaceState(null, '', '/teach');
-            }
-        })();
     </script>
 </body>
 </html>
