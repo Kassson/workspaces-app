@@ -1,4 +1,5 @@
 require('dotenv').config();
+const { registerJournalRoutes } = require('./routes/journal');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -1271,6 +1272,7 @@ app.post('/api/presence/inactive', verifyJWT, async (req, res) => {
 // ================= ФАЙЛЫ И EXCEL =================
 registerFileRoutes(app, pool, verifyJWT, requireSpaceAccess);
 registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin);
+registerJournalRoutes(app, pool, verifyJWT, requireSpaceAccess);
 
 // ================= ИГРЫ =================
 const VALID_GAMES = ['2048', 'snake-arena', 'rpg-clicker', 'memory', 'reaction'];
