@@ -11,7 +11,6 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Экран загрузки -->
     <div class="loading-screen show" id="loadingScreen">
         <div class="loading-content">
             <div class="loading-logo">
@@ -76,10 +75,21 @@
                 <button class="btn-text" onclick="switchView('viewLogin')">Отмена</button>
             </div>
 
-            <div id="viewRegSuccess" style="display: none;">
-                <h1 class="app-title">Готово!</h1>
-                <p class="app-subtitle">Мы отправили письмо для подтверждения почты. Проверьте входящие (и спам).</p>
-                <button class="btn-primary" onclick="switchView('viewLogin')">Перейти ко входу</button>
+            <div id="viewForgot" style="display: none;">
+                <h1 class="app-title">Восстановление пароля</h1>
+                <p class="app-subtitle" style="font-size:0.85rem;">Введите свой логин. Преподаватель получит запрос и сообщит вам код.</p>
+                <div class="form-group"><input type="text" id="forgotLogin" class="form-control" placeholder="Логин или Почта" required></div>
+                <button class="btn-primary" onclick="submitForgotPassword()">Отправить запрос</button>
+                <button class="btn-text" onclick="switchView('viewLogin')">Назад</button>
+            </div>
+
+            <div id="viewForgotCode" style="display: none;">
+                <h1 class="app-title">Введите код</h1>
+                <p class="app-subtitle" style="font-size:0.85rem;">Преподаватель получил ваш запрос. Попросите у него 4-значный код и введите его ниже вместе с новым паролем.</p>
+                <div class="form-group"><input type="text" id="resetCode" class="form-control" placeholder="Код от преподавателя" maxlength="4" inputmode="numeric" style="text-align:center;letter-spacing:8px;font-size:1.4rem;font-weight:700;"></div>
+                <div class="form-group"><input type="password" id="resetNewPass" class="form-control" placeholder="Новый пароль (мин. 8 символов)" required></div>
+                <button class="btn-primary" onclick="submitResetWithCode()">Сменить пароль</button>
+                <button class="btn-text" onclick="switchView('viewLogin')">Отмена</button>
             </div>
 
             <p id="errorMsg" style="color: #ff453a; font-size: 0.85rem; margin-top: 10px;"></p>
@@ -87,7 +97,7 @@
         <a href="/teach" class="outside-link">Вы преподаватель? →</a>
     </div>
 
-    <!-- Основной дашборд -->
+    <!-- Дашборд -->
     <div class="app-dashboard" id="dashboard">
         <aside class="sidebar">
             <div class="sidebar-logo">
@@ -160,8 +170,7 @@
 
                 <div class="settings-card">
                     <h3>Безопасность</h3>
-                    <button class="btn-secondary" onclick="openChangePassword()" style="margin-bottom:8px;">Сменить пароль</button>
-                    <button class="btn-secondary" onclick="logoutAllDevices()">Выйти со всех устройств</button>
+                    <button class="btn-secondary" onclick="openChangePasswordInfo()">Как сменить пароль</button>
                 </div>
 
                 <div class="settings-card">
@@ -217,12 +226,18 @@
     <script>
         const errorMsg = document.getElementById('errorMsg');
         function switchView(viewId) {
-            ['viewLogin', 'viewReg', 'viewRegSuccess'].forEach(id => document.getElementById(id).style.display = 'none');
-            document.getElementById(viewId).style.display = 'block'; errorMsg.textContent = '';
+            ['viewLogin', 'viewReg', 'viewForgot', 'viewForgotCode'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = 'none';
+            });
+            const target = document.getElementById(viewId);
+            if (target) target.style.display = 'block';
+            errorMsg.textContent = '';
         }
 
         let mySpaces = [];
         let currentUser = null;
+        let _resetLogin = '';
 
         function isValidEmailDomain(email) {
             const allowedDomains = ['gmail.com', 'mail.ru', 'yandex.ru', 'rambler.ru', 'bk.ru', 'list.ru', 'inbox.ru', 'ya.ru', 'outlook.com', 'yahoo.com'];
@@ -241,7 +256,8 @@
                     nickName: document.getElementById('regNick').value,
                     email, password: document.getElementById('regPass').value
                 });
-                switchView('viewRegSuccess');
+                showToast('Регистрация завершена. Войдите в аккаунт.', 'success');
+                switchView('viewLogin');
             } catch (d) { errorMsg.textContent = d.error || 'Ошибка регистрации'; }
         }
 
@@ -264,6 +280,39 @@
         function logout() {
             showLoadingScreen();
             setTimeout(() => { localStorage.clear(); location.reload(); }, 150);
+        }
+
+        // ===== Восстановление пароля =====
+        function openForgotPassword() {
+            document.getElementById('forgotLogin').value = document.getElementById('logInput').value || '';
+            switchView('viewForgot');
+        }
+
+        async function submitForgotPassword() {
+            const login = document.getElementById('forgotLogin').value.trim();
+            if (!login) { errorMsg.textContent = 'Введите логин'; return; }
+            _resetLogin = login;
+            try {
+                await requestPasswordReset(login);
+                showToast('Запрос отправлен. Обратитесь к преподавателю за кодом.', 'success', 6000);
+                switchView('viewForgotCode');
+            } catch (d) {
+                errorMsg.textContent = d.error || 'Ошибка отправки';
+            }
+        }
+
+        async function submitResetWithCode() {
+            const code = document.getElementById('resetCode').value.trim();
+            const newPassword = document.getElementById('resetNewPass').value;
+            if (!code || !newPassword) { errorMsg.textContent = 'Заполните все поля'; return; }
+            try {
+                await resetPasswordWithCode(_resetLogin, code, newPassword);
+                showToast('Пароль изменён. Войдите с новым.', 'success', 5000);
+                switchView('viewLogin');
+                document.getElementById('logInput').value = _resetLogin;
+                document.getElementById('resetCode').value = '';
+                document.getElementById('resetNewPass').value = '';
+            } catch (d) { errorMsg.textContent = d.error || 'Ошибка смены пароля'; }
         }
 
         function showTab(tabId, el) {
@@ -343,26 +392,9 @@
             document.getElementById('profileInfo').textContent = '@' + currentUser.username;
         }
 
-        async function openForgotPassword() {
-            const email = await showPrompt('Введите email', 'you@example.com');
-            if (!email) return;
-            try {
-                await apiPost('/api/auth/forgot-password', { email });
-                showToast('Если email зарегистрирован — письмо отправлено', 'success', 5000);
-            } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
-        }
-
-        async function openChangePassword() {
-            const newPass = await showPrompt('Новый пароль (мин. 8 символов, буква+цифра)');
-            if (!newPass) return;
-            showToast('Для смены пароля воспользуйтесь «Забыли пароль?» на экране входа', 'info', 6000);
-        }
-
-        async function logoutAllDevices() {
-            const ok = await showConfirm('Выйти со всех устройств?', 'Придётся войти заново на всех устройствах', 'Выйти', 'Отмена', true);
-            if (!ok) return;
-            localStorage.clear();
-            location.reload();
+        async function openChangePasswordInfo() {
+            const ok = await showConfirm('Сменить пароль', 'Выйдите из аккаунта, нажмите «Забыли пароль?», введите логин, получите код у преподавателя.', 'Понятно', 'Закрыть');
+            if (ok) logout();
         }
 
         async function boot() {
@@ -395,35 +427,6 @@
             const active = document.querySelector('.tab-section.active')?.id;
             if (active === 'tab-members') loadTabContent('tab-members');
         });
-
-        // ===== Обработка ссылок сброса пароля и подтверждения email =====
-        (async function handleAuthLinks() {
-            const params = new URLSearchParams(location.search);
-
-            // Сброс пароля
-            const resetToken = params.get('reset');
-            if (resetToken) {
-                await new Promise(r => setTimeout(r, 800));
-                const newPass = await showPrompt('Новый пароль', 'Минимум 8 символов, буква+цифра');
-                if (!newPass) {
-                    history.replaceState(null, '', '/');
-                    return;
-                }
-                try {
-                    await apiPost('/api/auth/reset-password', { token: resetToken, newPassword: newPass });
-                    showToast('Пароль изменён. Войдите с новым.', 'success', 5000);
-                } catch (e) {
-                    showToast(e.error || 'Ошибка сброса пароля', 'error', 5000);
-                }
-                history.replaceState(null, '', '/');
-            }
-
-            // Подтверждение email
-            if (params.get('verified') === '1') {
-                setTimeout(() => showToast('Почта подтверждена', 'success'), 400);
-                history.replaceState(null, '', '/');
-            }
-        })();
     </script>
 </body>
 </html>
