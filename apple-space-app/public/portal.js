@@ -7,7 +7,7 @@ window._hwStudents = [];
 window._currentHwStatsId = null;
 let _memberForStatusEdit = null;
 
-// ---------- ЭКРАН ЗАГРУЗКИ ----------
+// ===================== ЭКРАН ЗАГРУЗКИ =====================
 function showLoadingScreen() {
     const el = document.getElementById('loadingScreen');
     if (el) el.classList.add('show');
@@ -17,7 +17,7 @@ function hideLoadingScreen() {
     if (el) el.classList.remove('show');
 }
 
-// ---------- ГЛОБАЛЬНЫЕ НАСТРОЙКИ ----------
+// ===================== ГЛОБАЛЬНЫЕ НАСТРОЙКИ =====================
 async function loadAndApplySettings(user) {
     try { systemSettings = await apiGet('/api/settings'); } catch (e) { systemSettings = {}; }
     applyGlobalSettings(user);
@@ -45,8 +45,8 @@ function applyGlobalSettings(user) {
     });
 }
 
-// ---------- СЕГОДНЯ + РАСПИСАНИЕ (объединённая вкладка) ----------
-let _scheduleViewMode = 'today'; // 'today' | 'week'
+// ===================== РАСПИСАНИЕ =====================
+let _scheduleViewMode = 'today';
 let _scheduleWeekDay = null;
 
 async function renderScheduleUnified(container, spaceId, isAdmin) {
@@ -56,7 +56,6 @@ async function renderScheduleUnified(container, spaceId, isAdmin) {
         const { lessons, overrides } = await apiGet(`/api/schedule/${spaceId}`);
         const today = new Date();
         const todayDow = isoDowFromDate(today);
-        const dateStr = ymd(today);
 
         window.__scheduleData = { lessons, overrides, spaceId, isAdmin, todayDow };
 
@@ -171,19 +170,17 @@ function lessonCardHtml(l, overrides, dateStr, isPast, isAdmin, spaceId) {
     </div>`;
 }
 
-// ---------- ДОМАШНИЕ ЗАДАНИЯ ----------
+// ===================== ДОМАШНИЕ ЗАДАНИЯ =====================
 async function renderHomeworkTab(container, spaceId, isAdmin) {
     if (!spaceId) { container.innerHTML = emptySpaceState(); return; }
     container.innerHTML = '<p class="empty-state">Загрузка…</p>';
     try {
         const list = await apiGet(`/api/homework/${spaceId}`);
         let html = `<h1 class="page-title">Домашние задания</h1>`;
-
         html += `<div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
             <input type="text" id="hwSearch" class="form-control" placeholder="Поиск по ДЗ..." style="flex:1; min-width:200px;">
             ${isAdmin ? `<button class="btn-small" onclick="openAddHomeworkSheet('${spaceId}')">Добавить</button>` : ''}
         </div>`;
-
         html += `<div id="hwList"></div>`;
         container.innerHTML = html;
 
@@ -292,7 +289,7 @@ async function deleteHomework(id, spaceId) {
 }
 function currentHwContainerId() { return document.getElementById('tab-hw') ? 'tab-hw' : 'tab-homework'; }
 
-// ---------- СТАТИСТИКА ДЗ ----------
+// ===================== СТАТИСТИКА ДЗ =====================
 async function openHomeworkStats(homeworkId) {
     if (!currentSpace) return;
     const isAdminViewer = currentUser?.isTeacher || currentSpace?.is_admin;
@@ -307,8 +304,6 @@ async function openHomeworkStats(homeworkId) {
     try {
         const s = await apiGet(`/api/homework/${homeworkId}/stats`);
         window._hwStudents = s.students || [];
-
-        const allPhotoUrls = s.students.filter(st => st.attachmentUrl).map(st => st.attachmentUrl);
 
         const size = 140, stroke = 18, r = (size - stroke) / 2, c = 2 * Math.PI * r;
         const dash = (s.percentage / 100) * c;
@@ -332,7 +327,8 @@ async function openHomeworkStats(homeworkId) {
         if (!s.students.length) {
             html += `<p class="empty-state" style="padding:20px 0;">В группе нет учеников</p>`;
         } else {
-            s.students.forEach((st, idx) => {
+            const allPhotoUrls = s.students.filter(st => st.attachmentUrl).map(st => st.attachmentUrl);
+            s.students.forEach((st) => {
                 let borderColor = '#9ca3af';
                 let label = 'Не сдано';
                 let labelColor = 'var(--text-secondary)';
@@ -353,11 +349,11 @@ async function openHomeworkStats(homeworkId) {
 
                 const photoIdx = st.attachmentUrl ? allPhotoUrls.indexOf(st.attachmentUrl) : -1;
                 const photoPreview = st.attachmentUrl
-                    ? `<img src="${st.attachmentUrl}" style="width:44px;height:44px;object-fit:cover;border-radius:8px;cursor:pointer;" onclick="event.stopPropagation();openImageViewer(window._hwStudents.filter(x=>x.attachmentUrl).map(x=>x.attachmentUrl), ${photoIdx})">`
+                    ? `<img src="${st.attachmentUrl}" style="width:44px;height:44px;object-fit:cover;border-radius:8px;cursor:pointer;" onclick="event.stopPropagation();openImageViewer(${JSON.stringify(allPhotoUrls).replace(/"/g, '&quot;')}, ${photoIdx})">`
                     : '';
 
                 const gradeSelect = `
-                    <select onchange="setGradeFromStats('${st.id}', '${st.fullName.replace(/'/g, "\\'")}', this.value, '${homeworkId}')"
+                    <select onchange="setGradeFromStats('${st.id}', '${escapeHtml(st.fullName).replace(/'/g, "\\'")}', this.value, '${homeworkId}')"
                             style="padding:4px 8px;border-radius:8px;border:1px solid var(--card-border);background:var(--input-bg);color:var(--text);font-weight:700;">
                         <option value="">—</option>
                         <option value="2" ${st.gradeValue === 2 ? 'selected' : ''}>2</option>
@@ -392,11 +388,11 @@ async function openHomeworkStats(homeworkId) {
 async function setGradeFromStats(studentUserId, studentName, value, homeworkId) {
     if (!currentSpace) return;
     try {
-        const hw = await apiGet(`/api/homework/${homeworkId}/stats`);
-        const subjectName = hw.subjectName || 'Предмет';
-        const hwData = window._currentHwData || {};
+        // Загружаем stats чтобы узнать subjectName
+        const s = await apiGet(`/api/homework/${homeworkId}/stats`);
+        const subjectName = s.subjectName || 'Предмет';
 
-        const body = {
+        await apiPost('/api/grades', {
             spaceId: currentSpace.id,
             studentName: studentName,
             studentUserId: studentUserId,
@@ -405,51 +401,465 @@ async function setGradeFromStats(studentUserId, studentName, value, homeworkId) 
             attendance: 'present',
             lessonDate: ymd(new Date()),
             homeworkId: homeworkId
-        };
-        await apiPost('/api/grades', body);
+        });
         showToast(value ? `Оценка ${value} выставлена` : 'Оценка снята', 'success');
     } catch (e) {
         showToast(e.error || 'Ошибка', 'error');
     }
 }
 
-// ---------- ИМПОРТ / ЭКСПОРТ ----------
-function openScheduleImport() {
-    if (!currentSpace) return showToast('Выберите группу', 'error');
-    showFormSheet('Импорт расписания', `
-        <p style="color:var(--text-secondary); font-size:0.85rem; text-align:left;">
-            Вставьте расписание из Excel/Google Sheets.<br>
-            Формат: <code>ДЕНЬ&nbsp;&nbsp;№&nbsp;&nbsp;Предмет&nbsp;&nbsp;Кабинет</code>
-        </p>
-        <div class="form-group">
-            <textarea name="text" class="form-control" rows="12" placeholder="ПОНЕДЕЛЬНИК	1	Биология	8" required></textarea>
-        </div>
-        <div class="form-group" style="display:flex; align-items:center; gap:8px;">
-            <input type="checkbox" name="replaceAll" id="replaceAllChk" checked>
-            <label for="replaceAllChk" style="margin:0;">Заменить всё расписание</label>
-        </div>
-    `, async (fd) => {
-        const r = await apiPost('/api/schedule/import', { spaceId: currentSpace.id, text: fd.get('text'), replaceAll: fd.get('replaceAll') === 'on' });
-        let msg = `Импортировано уроков: ${r.imported}`;
-        if (r.skipped && r.skipped.length) msg += `, пропущено: ${r.skipped.length}`;
-        if (r.errors && r.errors.length) msg += `, ошибок: ${r.errors.length}`;
-        showToast(msg, 'success');
-        refreshCurrentTab();
-    }, 'Импортировать');
+// ===================== ЖУРНАЛ — НОВАЯ ЛОГИКА =====================
+
+async function renderGradesTab(container, spaceId, isAdmin) {
+    if (!spaceId) { container.innerHTML = emptySpaceState(); return; }
+    const isTeacher = currentUser?.isTeacher;
+    if (isTeacher) {
+        renderTeacherJournal(container, spaceId);
+    } else {
+        renderStudentGrades(container, spaceId);
+    }
 }
 
-function exportSchedule() {
-    if (!currentSpace) return showToast('Выберите группу', 'error');
-    const token = localStorage.getItem('token');
-    window.open(`/api/schedule/${currentSpace.id}/export?token=${encodeURIComponent(token)}`, '_blank');
+/* ---------- ЖУРНАЛ УЧИТЕЛЯ ---------- */
+async function renderTeacherJournal(container, spaceId) {
+    container.innerHTML = '<p class="empty-state">Загрузка…</p>';
+
+    try {
+        // Получаем все оценки в пространстве (для определения доступных предметов и дат)
+        const allGrades = await apiGet(`/api/grades/${spaceId}`);
+
+        // Уникальные предметы — из оценок + из предметов учителя
+        let subjectsFromGrades = [...new Set(allGrades.map(g => g.subject_name).filter(Boolean))].sort();
+        let mySubjects = [];
+        try {
+            mySubjects = (await apiGet(`/api/teacher-subjects/${spaceId}`)).map(s => s.subject_name);
+        } catch (e) { /* возможно учитель не ведёт */ }
+
+        let subjects = [...new Set([...mySubjects, ...subjectsFromGrades])].sort();
+        if (!subjects.length) subjects = ['Предмет'];
+
+        let currentSubject = window.__journalSubject;
+        if (!subjects.includes(currentSubject)) currentSubject = subjects[0];
+        window.__journalSubject = currentSubject;
+
+        // Данные по текущему предмету
+        window.__journalData = {
+            spaceId,
+            subject: currentSubject,
+            subjects,
+            allGrades: allGrades.filter(g => g.subject_name === currentSubject)
+        };
+
+        container.innerHTML = renderTeacherJournalHtml();
+        attachTeacherJournalHandlers();
+        await loadJournalTable(spaceId, currentSubject);
+    } catch (e) {
+        container.innerHTML = `<p class="empty-state">Ошибка: ${escapeHtml(e.error || '')}</p>`;
+    }
 }
 
-// ---------- ЧАТ ----------
+function renderTeacherJournalHtml() {
+    const { subjects, subject } = window.__journalData;
+    let html = `<h1 class="page-title">Журнал</h1>`;
+
+    // Слайдер предметов
+    html += `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:12px;">`;
+    for (const s of subjects) {
+        html += `<button class="day-tab ${s === subject ? 'active' : ''}" data-subject="${escapeHtml(s)}" style="flex-shrink:0;">${escapeHtml(s)}</button>`;
+    }
+    html += `<button class="day-tab" data-subject="__add__" style="flex-shrink:0;background:var(--accent-blue-light);color:var(--accent-blue);">+ предмет</button>`;
+    html += `</div>`;
+
+    // Кнопки действий
+    html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+        <button class="btn-small" onclick="addJournalLesson()">+ урок</button>
+        <button class="btn-small" onclick="addJournalStudent()">+ ученик</button>
+        <button class="btn-small" onclick="exportJournalExcel('${window.__journalData.spaceId}')">Экспорт Excel</button>
+        <button class="btn-small" onclick="importJournalExcel('${window.__journalData.spaceId}')">Импорт Excel</button>
+    </div>`;
+
+    // Контейнер таблицы
+    html += `<div id="journalTableWrap" style="overflow-x:auto;"></div>`;
+
+    return html;
+}
+
+function attachTeacherJournalHandlers() {
+    document.querySelectorAll('[data-subject]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const subj = btn.dataset.subject;
+            if (subj === '__add__') {
+                const newSubj = await showPrompt('Название предмета', 'Например: Математика');
+                if (!newSubj) return;
+                try {
+                    await apiPost('/api/teacher-subjects', {
+                        spaceId: window.__journalData.spaceId,
+                        subjectName: newSubj.trim()
+                    });
+                    window.__journalSubject = newSubj.trim();
+                    renderTeacherJournal(document.getElementById('tab-grades'), window.__journalData.spaceId);
+                } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
+                return;
+            }
+            window.__journalSubject = subj;
+            renderTeacherJournal(document.getElementById('tab-grades'), window.__journalData.spaceId);
+        });
+    });
+}
+
+async function loadJournalTable(spaceId, subject) {
+    const wrap = document.getElementById('journalTableWrap');
+    if (!wrap) return;
+    wrap.innerHTML = '<p class="empty-state">Загрузка…</p>';
+
+    try {
+        // Ученики из пространства
+        const members = await apiGet(`/api/spaces/${spaceId}/members`);
+        const studentNames = members.map(m => m.full_name);
+
+        // Все оценки по предмету
+        const grades = await apiGet(`/api/grades/${spaceId}?subject=${encodeURIComponent(subject)}`);
+
+        // Уникальные даты имена из оценок
+        const datesFromGrades = [...new Set(grades.map(g => new Date(g.lesson_date).toISOString().slice(0, 10)))].sort();
+        const namesFromGrades = [...new Set(grades.map(g => g.student_name))];
+
+        // Объединённый список учеников: из пространства + те, кто есть в оценках
+        const allStudents = [...new Set([...studentNames, ...namesFromGrades])].sort();
+
+        if (!allStudents.length) {
+            wrap.innerHTML = '<p class="empty-state">В пространстве пока нет учеников</p>';
+            return;
+        }
+
+        // Собираем все даты (максимум 15 последних)
+        let allDates = datesFromGrades.slice(-15);
+        if (!allDates.length) {
+            // показываем последние 7 дней по умолчанию
+            const today = new Date();
+            for (let i = 6; i >= 0; i--) {
+                const d = new Date(today); d.setDate(d.getDate() - i);
+                allDates.push(ymd(d));
+            }
+        }
+
+        window.__journalData.dates = allDates;
+        window.__journalData.students = allStudents;
+        window.__journalData.grades = grades;
+
+        renderJournalTable();
+    } catch (e) {
+        wrap.innerHTML = `<p class="empty-state">Ошибка: ${escapeHtml(e.error || '')}</p>`;
+    }
+}
+
+function renderJournalTable() {
+    const wrap = document.getElementById('journalTableWrap');
+    const { dates, students, grades, subject } = window.__journalData;
+
+    let html = `<table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+        <thead><tr>
+            <th style="text-align:left;padding:8px;background:var(--input-bg);position:sticky;left:0;z-index:2;min-width:180px;border-radius:8px 0 0 0;">Ученик</th>`;
+    for (const d of dates) {
+        const shortD = d.slice(5); // MM-DD
+        html += `<th style="padding:6px 8px;background:var(--input-bg);text-align:center;white-space:nowrap;min-width:70px;">${shortD}</th>`;
+    }
+    html += `<th style="padding:6px 8px;background:var(--input-bg);text-align:center;border-radius:0 8px 0 0;">Ср. балл</th>`;
+    html += `</tr></thead><tbody>`;
+
+    for (const st of students) {
+        html += `<tr>`;
+        html += `<td style="padding:6px 8px;border-top:1px solid var(--card-border);position:sticky;left:0;background:var(--bg-card);z-index:1;font-weight:600;">${escapeHtml(st)}</td>`;
+
+        const studentGrades = grades.filter(g => g.student_name === st && g.grade_value);
+        const avg = studentGrades.length
+            ? (studentGrades.reduce((s, g) => s + g.grade_value, 0) / studentGrades.length).toFixed(2)
+            : '';
+
+        for (const d of dates) {
+            const cell = grades.find(g => g.student_name === st && new Date(g.lesson_date).toISOString().slice(0, 10) === d);
+            let cellText = '';
+            let cellColor = 'transparent';
+            if (cell) {
+                if (cell.grade_value) cellText = String(cell.grade_value);
+                if (cell.attendance === 'absent') { cellText = cellText ? cellText + ' Н' : 'Н'; cellColor = 'rgba(255,69,58,0.15)'; }
+                else if (cell.attendance === 'late') { cellText = cellText ? cellText + ' О' : 'О'; cellColor = 'rgba(255,159,10,0.15)'; }
+            }
+            html += `<td onclick="openGradeCell('${escapeHtml(st).replace(/'/g, "\\'")}', '${d}')" style="padding:8px;border-top:1px solid var(--card-border);text-align:center;cursor:pointer;background:${cellColor};transition:background 0.15s;" onmouseover="this.style.background='var(--accent-blue-light)'" onmouseout="this.style.background='${cellColor}'">${cellText || '—'}</td>`;
+        }
+        html += `<td style="padding:8px;border-top:1px solid var(--card-border);text-align:center;font-weight:700;color:#0088cc;">${avg || '—'}</td>`;
+        html += `</tr>`;
+    }
+
+    html += `</tbody></table>`;
+    wrap.innerHTML = html;
+}
+
+async function openGradeCell(studentName, date) {
+    const { spaceId, subject, grades } = window.__journalData;
+    const existing = grades.find(g => g.student_name === studentName && new Date(g.lesson_date).toISOString().slice(0, 10) === date);
+
+    const currentGrade = existing?.grade_value || '';
+    const currentAttendance = existing?.attendance || 'present';
+
+    const root = document.getElementById('dynamicSheetRoot');
+    root.innerHTML = `
+        <div class="sheet show" id="dynamicSheet">
+            <div class="sheet-handle"></div>
+            <h2 class="app-title" style="font-size:1.15rem;margin-bottom:6px;">${escapeHtml(studentName)}</h2>
+            <p style="color:var(--text-secondary);font-size:0.85rem;margin:0 0 16px 0;">${escapeHtml(subject)} · ${date}</p>
+
+            <div style="margin-bottom:16px;">
+                <div style="font-weight:600;margin-bottom:8px;">Оценка</div>
+                <div style="display:flex;gap:8px;">
+                    <button class="grade-btn ${currentGrade === '' ? 'active' : ''}" data-grade="">—</button>
+                    <button class="grade-btn ${currentGrade === 2 ? 'active' : ''}" data-grade="2">2</button>
+                    <button class="grade-btn ${currentGrade === 3 ? 'active' : ''}" data-grade="3">3</button>
+                    <button class="grade-btn ${currentGrade === 4 ? 'active' : ''}" data-grade="4">4</button>
+                    <button class="grade-btn ${currentGrade === 5 ? 'active' : ''}" data-grade="5">5</button>
+                </div>
+            </div>
+
+            <div style="margin-bottom:16px;">
+                <div style="font-weight:600;margin-bottom:8px;">Посещаемость</div>
+                <div style="display:flex;gap:8px;">
+                    <button class="att-btn ${currentAttendance === 'present' ? 'active' : ''}" data-att="present">Присутствовал</button>
+                    <button class="att-btn ${currentAttendance === 'late' ? 'active' : ''}" data-att="late">Опоздал</button>
+                    <button class="att-btn ${currentAttendance === 'absent' ? 'active' : ''}" data-att="absent">Отсутствовал</button>
+                </div>
+            </div>
+
+            <div style="display:flex;gap:8px;">
+                <button class="btn-primary" id="gradeSaveBtn" style="flex:1;">Сохранить</button>
+                ${existing ? `<button class="btn-danger" id="gradeDeleteBtn" style="flex:1;">Удалить</button>` : ''}
+            </div>
+            <button class="btn-secondary" style="margin-top:8px;" onclick="closeDynamicSheet()">Отмена</button>
+        </div>
+    `;
+    document.getElementById('sheetOverlay').classList.add('show');
+
+    // Стили для кнопок
+    if (!document.getElementById('journalStyles')) {
+        const s = document.createElement('style');
+        s.id = 'journalStyles';
+        s.textContent = `
+            .grade-btn, .att-btn { padding: 10px 14px; border-radius: 10px; border: 1px solid var(--card-border); background: var(--input-bg); color: var(--text); font-weight: 600; cursor: pointer; transition: all 0.15s; }
+            .grade-btn.active { background: #0088cc; color: #fff; border-color: #0088cc; }
+            .att-btn.active { background: #30d158; color: #fff; border-color: #30d158; }
+        `;
+        document.head.appendChild(s);
+    }
+
+    let selectedGrade = currentGrade;
+    let selectedAtt = currentAttendance;
+
+    root.querySelectorAll('.grade-btn').forEach(b => {
+        b.addEventListener('click', () => {
+            root.querySelectorAll('.grade-btn').forEach(x => x.classList.remove('active'));
+            b.classList.add('active');
+            selectedGrade = b.dataset.grade;
+        });
+    });
+    root.querySelectorAll('.att-btn').forEach(b => {
+        b.addEventListener('click', () => {
+            root.querySelectorAll('.att-btn').forEach(x => x.classList.remove('active'));
+            b.classList.add('active');
+            selectedAtt = b.dataset.att;
+        });
+    });
+
+    root.querySelector('#gradeSaveBtn').addEventListener('click', async () => {
+        try {
+            // Ищем student_user_id по ФИ
+            const members = await apiGet(`/api/spaces/${spaceId}/members`);
+            const match = members.find(m => m.full_name === studentName);
+            const studentUserId = match?.id || null;
+
+            await apiPost('/api/grades', {
+                spaceId,
+                studentName,
+                studentUserId,
+                subjectName: subject,
+                gradeValue: selectedGrade ? parseInt(selectedGrade) : null,
+                attendance: selectedAtt,
+                lessonDate: date
+            });
+            showToast('Сохранено', 'success');
+            closeDynamicSheet();
+            await loadJournalTable(spaceId, subject);
+        } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
+    });
+
+    const delBtn = root.querySelector('#gradeDeleteBtn');
+    if (delBtn) {
+        delBtn.addEventListener('click', async () => {
+            if (!existing) return;
+            try {
+                await apiDelete(`/api/grades/${existing.id}`);
+                showToast('Запись удалена', 'success');
+                closeDynamicSheet();
+                await loadJournalTable(spaceId, subject);
+            } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
+        });
+    }
+}
+
+async function addJournalLesson() {
+    const { spaceId, subject } = window.__journalData;
+    if (!subject) { showToast('Выберите предмет', 'error'); return; }
+    const date = await showPrompt('Дата урока (YYYY-MM-DD)', ymd(new Date()));
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        if (date) showToast('Неверный формат даты', 'error');
+        return;
+    }
+    if (!window.__journalData.dates.includes(date)) {
+        window.__journalData.dates.push(date);
+        window.__journalData.dates.sort();
+    }
+    renderJournalTable();
+    showToast('Дата добавлена. Кликните по ячейке, чтобы поставить оценку.', 'info', 4000);
+}
+
+async function addJournalStudent() {
+    const { spaceId } = window.__journalData;
+    const name = await showPrompt('ФИО ученика', 'Иванов Иван');
+    if (!name) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    if (!window.__journalData.students.includes(trimmed)) {
+        window.__journalData.students.push(trimmed);
+        window.__journalData.students.sort();
+    }
+    renderJournalTable();
+    showToast('Ученик добавлен. Кликните по ячейке, чтобы поставить оценку.', 'info', 4000);
+}
+
+/* ---------- ЖУРНАЛ УЧЕНИКА ---------- */
+async function renderStudentGrades(container, spaceId) {
+    container.innerHTML = '<p class="empty-state">Загрузка…</p>';
+    try {
+        const grades = await apiGet(`/api/grades/${spaceId}`);
+
+        if (!grades.length) {
+            container.innerHTML = `<h1 class="page-title">Журнал</h1><p class="empty-state">Оценок пока нет</p>`;
+            return;
+        }
+
+        // Группируем по предмету
+        const bySubject = {};
+        for (const g of grades) {
+            if (!bySubject[g.subject_name]) bySubject[g.subject_name] = [];
+            bySubject[g.subject_name].push(g);
+        }
+
+        let html = `<h1 class="page-title">Мои оценки</h1>`;
+
+        for (const [subject, list] of Object.entries(bySubject)) {
+            const numeric = list.filter(g => g.grade_value).map(g => g.grade_value);
+            const avg = numeric.length
+                ? (numeric.reduce((s, v) => s + v, 0) / numeric.length).toFixed(2)
+                : '—';
+
+            const absent = list.filter(g => g.attendance === 'absent').length;
+            const late = list.filter(g => g.attendance === 'late').length;
+
+            html += `<div class="settings-card">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                    <div style="font-weight:700;font-size:1.05rem;">${escapeHtml(subject)}</div>
+                    <div style="font-size:1.4rem;font-weight:800;color:#0088cc;">${avg}</div>
+                </div>
+                <div style="color:var(--text-secondary);font-size:0.8rem;margin-bottom:10px;">
+                    Оценок: ${numeric.length} · Пропусков: ${absent} · Опозданий: ${late}
+                </div>
+                <div style="display:flex;flex-direction:column;gap:6px;">`;
+
+            // Сортируем по дате убыв.
+            const sorted = [...list].sort((a, b) => new Date(b.lesson_date) - new Date(a.lesson_date));
+            for (const g of sorted) {
+                const d = new Date(g.lesson_date).toLocaleDateString('ru-RU');
+                let marks = [];
+                if (g.grade_value) marks.push(`<b style="color:#30d158;">${g.grade_value}</b>`);
+                if (g.attendance === 'absent') marks.push('<span style="color:#ff453a;">Н</span>');
+                else if (g.attendance === 'late') marks.push('<span style="color:#ff9f0a;">О</span>');
+                if (!marks.length) marks.push('—');
+                html += `<div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--divider);">
+                    <span style="color:var(--text-secondary);font-size:0.85rem;">${d}</span>
+                    <span>${marks.join(' · ')}</span>
+                </div>`;
+            }
+
+            html += `</div></div>`;
+        }
+
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = `<p class="empty-state">Ошибка: ${escapeHtml(e.error || '')}</p>`;
+    }
+}
+
+/* ---------- EXCEL ---------- */
+async function exportJournalExcel(spaceId) {
+    const subject = window.__journalData?.subject || '';
+    try {
+        const res = await fetch(`/api/grades/${spaceId}/export${subject ? '?subject=' + encodeURIComponent(subject) : ''}`, {
+            headers: authHeaders()
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Ошибка выгрузки');
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `journal-${subject || 'all'}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        showToast('Файл выгружен', 'success');
+    } catch (e) {
+        showToast(e.message || 'Ошибка', 'error');
+    }
+}
+
+function importJournalExcel(spaceId) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.xlsx';
+    input.addEventListener('change', async () => {
+        const file = input.files[0];
+        if (!file) return;
+        const subject = window.__journalData?.subject || await showPrompt('Предмет для импорта');
+        if (!subject) return;
+
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('subject', subject);
+
+        try {
+            const res = await fetch(`/api/grades/${spaceId}/import`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: formData
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Ошибка импорта');
+            showToast(`Импорт: +${data.inserted} новых, ${data.updated} обновлено`, 'success', 5000);
+            window.__journalSubject = subject;
+            renderTeacherJournal(document.getElementById('tab-grades'), spaceId);
+        } catch (e) {
+            showToast(e.message || 'Ошибка', 'error');
+        }
+    });
+    input.click();
+}
+
+// ===================== ЧАТ =====================
 let chatJoinedSpace = null;
 let chatIsAdmin = false;
 let chatCurrentUserId = null;
 let typingUsers = new Map();
-let typingTimer = null;
 
 function renderChatTab(container, spaceId, isAdmin, currentUserId) {
     if (!spaceId) { container.innerHTML = emptySpaceState(); return; }
@@ -489,14 +899,12 @@ function renderChatTab(container, spaceId, isAdmin, currentUserId) {
         chatJoinedSpace = spaceId;
     }
 
-    // Кнопка мутов
     const muteBtn = document.getElementById('chatMuteBtn');
     if (muteBtn) {
         refreshChatMuteBtn(spaceId);
         muteBtn.addEventListener('click', (e) => { e.stopPropagation(); openChatMutePanel(spaceId); });
     }
 
-    // Поиск
     const searchInput = document.getElementById('chatSearch');
     let searchTimeout;
     searchInput.addEventListener('input', (e) => {
@@ -506,7 +914,6 @@ function renderChatTab(container, spaceId, isAdmin, currentUserId) {
         }, 300);
     });
 
-    // Файлы
     const fileInput = document.getElementById('chatFileInput');
     let pendingFiles = [];
     fileInput.addEventListener('change', () => {
@@ -516,7 +923,6 @@ function renderChatTab(container, spaceId, isAdmin, currentUserId) {
     window.__pendingFiles = () => pendingFiles;
     window.__clearPendingFiles = () => { pendingFiles = []; renderFilePreview([]); fileInput.value = ''; };
 
-    // Ввод + typing
     const input = document.getElementById('chatInput');
     let typingStopTimer;
     input.onkeydown = (e) => {
@@ -532,7 +938,6 @@ function renderChatTab(container, spaceId, isAdmin, currentUserId) {
     };
     input.onblur = () => { clearTimeout(typingStopTimer); socket.emit('typing_stop'); };
 
-    // Socket events
     socket.off('new_message'); socket.off('message_deleted'); socket.off('reaction_updated');
     socket.off('user_typing'); socket.off('user_stopped_typing');
     socket.on('new_message', (msg) => { if (msg.space_id === spaceId) appendChatMessage(msg, isAdmin, currentUserId); });
@@ -547,7 +952,6 @@ function renderChatTab(container, spaceId, isAdmin, currentUserId) {
         renderTypingIndicator();
     });
 
-    // Mark read
     apiPost(`/api/chat/${spaceId}/mark-read`, {}).catch(() => {});
     updateBadges();
 }
@@ -568,7 +972,7 @@ function renderFilePreview(files) {
     const box = document.getElementById('filePreviewContainer');
     if (!box) return;
     if (!files.length) { box.innerHTML = ''; return; }
-    box.innerHTML = files.map((f, i) => `
+    box.innerHTML = files.map((f) => `
         <div style="display:inline-block;margin:4px;padding:6px 10px;background:var(--input-bg);border-radius:8px;font-size:12px;">
             ${escapeHtml(f.name)} (${formatBytes(f.size)})
         </div>
@@ -605,7 +1009,7 @@ function appendChatMessage(m, isAdmin, currentUserId) {
         : '';
 
     const filesHtml = (m.files && m.files.length)
-        ? m.files.map((f, idx) => {
+        ? m.files.map((f) => {
             if (f.mime.startsWith('image/')) {
                 const allUrls = m.files.filter(x => x.mime.startsWith('image/')).map(x => x.url);
                 const myIdx = allUrls.indexOf(f.url);
@@ -715,24 +1119,20 @@ async function sendChatMessage(spaceId) {
             fileIds = uploaded.filter(f => f.id).map(f => f.id);
         }
 
-        // Извлекаем упоминания @nickname
+        // Упоминания
         const mentions = [];
         const mentionRegex = /@([a-zA-Z0-9_]+)/g;
         let match;
-        while ((match = mentionRegex.exec(text)) !== null) {
-            mentions.push(match[1]);
-        }
-        // Резолвим в userId через сервер — упрощённо: отправим ники
-        // (в реальном приложении нужен эндпоинт /api/users/find?nickname=)
+        while ((match = mentionRegex.exec(text)) !== null) mentions.push(match[1]);
         let mentionIds = [];
         if (mentions.length) {
-            for (const nick of mentions) {
-                try {
-                    const members = await apiGet(`/api/spaces/${spaceId}/members`);
+            try {
+                const members = await apiGet(`/api/spaces/${spaceId}/members`);
+                for (const nick of mentions) {
                     const found = members.find(m => m.username === nick);
                     if (found) mentionIds.push(found.id);
-                } catch (e) {}
-            }
+                }
+            } catch (e) {}
         }
 
         socket.emit('send_message', {
@@ -753,7 +1153,7 @@ function deleteChatMessage(id) {
     socket.emit('delete_message', { messageId: id });
 }
 
-// ---------- МУТЫ ЧАТА ----------
+// ===================== МУТЫ ЧАТА =====================
 function formatMuteLabel(m) {
     if (!m) return 'Уведомления';
     if (m.muted_forever) return 'Выкл.';
@@ -822,7 +1222,7 @@ function openChatMutePanel(spaceId) {
     }, 0);
 }
 
-// ---------- УЧАСТНИКИ ----------
+// ===================== УЧАСТНИКИ =====================
 const ROLE_LABELS = { admin: 'Админ', starosta: 'Староста', member: 'Участник' };
 
 function getMemberDisplayStatus(m) {
@@ -956,7 +1356,7 @@ async function kickMember(userId, fullName) {
     catch (e) { showToast(e.error || 'Ошибка', 'error'); }
 }
 
-// ---------- ЧЁРНЫЙ СПИСОК ----------
+// ===================== ЧЁРНЫЙ СПИСОК =====================
 async function openBlacklist() {
     if (!currentSpace) return;
     const root = document.getElementById('dynamicSheetRoot');
@@ -998,7 +1398,7 @@ async function rotateInviteCode() {
     catch (e) { showToast(e.error || 'Ошибка', 'error'); }
 }
 
-// ---------- ПРОФИЛЬ ----------
+// ===================== ПРОФИЛЬ =====================
 const EMOJI_LIST = ['👤','👨','👩','🧑','👦','👧','👨‍🎓','👩‍🎓','🧑‍🎓','👨‍🏫','👩‍🏫','😀','😎','🤓','🥳','🤔','😴','🧐','🥸','🤠','😺','🐶','🐱','🦊','🐼','🐨','🦁','🐯','🦉','🐧','🍕','🍔','🍟','🌮','🍣','🍎','🍓','🍉','☕','🍩','🎂','⚽','🏀','🎮','🎧','🎸','🎨','🚀','⚡','🔥','⭐','🌈','💎','🎯','🏆','🥇','👑','💡','📚','✏️','🎓'];
 let _selectedEmoji = '👤';
 let _editingProfileState = null;
@@ -1057,7 +1457,7 @@ function openEmojiPicker() {
 
 function pickEmoji(e) { _selectedEmoji = e; openEditProfile(true); }
 
-// ---------- УНИВЕРСАЛЬНАЯ ФОРМА ----------
+// ===================== УНИВЕРСАЛЬНАЯ ФОРМА =====================
 function showFormSheet(title, bodyHtml, onSubmit, submitLabel = 'Сохранить') {
     const root = document.getElementById('dynamicSheetRoot');
     root.innerHTML = `
@@ -1290,64 +1690,4 @@ async function openPushSettingsModal() {
             catch (e) { showToast('Ошибка', 'error'); }
         });
     });
-}
-
-/* ===================== ЖУРНАЛ ОЦЕНОК ===================== */
-
-async function renderGradesTab(container, spaceId, isAdmin) {
-    if (!spaceId) { container.innerHTML = emptySpaceState(); return; }
-    container.innerHTML = '<p class="empty-state">Загрузка…</p>';
-    try {
-        const grades = await apiGet(`/api/grades/${spaceId}`);
-        const subjects = [...new Set(grades.map(g => g.subject_name))];
-
-        let html = `<h1 class="page-title">Журнал</h1>`;
-
-        if (!grades.length) {
-            html += '<p class="empty-state">Оценок пока нет</p>';
-            container.innerHTML = html;
-            return;
-        }
-
-        // Сводка по предметам для студента
-        const isTeacher = currentUser?.isTeacher;
-        if (!isTeacher) {
-            html += '<div style="display:flex;flex-direction:column;gap:10px;">';
-            for (const subj of subjects) {
-                const subjGrades = grades.filter(g => g.subject_name === subj && g.grade_value);
-                const avg = subjGrades.length ? (subjGrades.reduce((s, g) => s + g.grade_value, 0) / subjGrades.length).toFixed(2) : '—';
-                const absent = grades.filter(g => g.subject_name === subj && g.attendance === 'absent').length;
-                const late = grades.filter(g => g.subject_name === subj && g.attendance === 'late').length;
-                html += `<div class="settings-card">
-                    <div style="display:flex;justify-content:space-between;align-items:center;">
-                        <div><b>${escapeHtml(subj)}</b></div>
-                        <div style="font-size:1.4rem;font-weight:700;color:#0088cc;">${avg}</div>
-                    </div>
-                    <div style="color:var(--text-secondary);font-size:0.85rem;margin-top:6px;">
-                        Оценок: ${subjGrades.length} · Пропусков: ${absent} · Опозданий: ${late}
-                    </div>
-                </div>`;
-            }
-            html += '</div>';
-        } else {
-            // Учитель — таблица
-            const students = [...new Set(grades.map(g => g.student_name))];
-            html += '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:0.85rem;"><thead><tr><th style="text-align:left;padding:6px;">Ученик</th>';
-            for (const subj of subjects) html += `<th style="padding:6px;">${escapeHtml(subj)}</th>`;
-            html += '</tr></thead><tbody>';
-            for (const st of students) {
-                html += `<tr><td style="padding:6px;border-top:1px solid var(--card-border);">${escapeHtml(st)}</td>`;
-                for (const subj of subjects) {
-                    const vals = grades.filter(g => g.student_name === st && g.subject_name === subj && g.grade_value).map(g => g.grade_value);
-                    html += `<td style="padding:6px;border-top:1px solid var(--card-border);text-align:center;">${vals.join(', ') || '—'}</td>`;
-                }
-                html += '</tr>';
-            }
-            html += '</tbody></table></div>';
-        }
-
-        container.innerHTML = html;
-    } catch (e) {
-        container.innerHTML = `<p class="empty-state">Ошибка: ${escapeHtml(e.error || '')}</p>`;
-    }
 }
