@@ -13,7 +13,6 @@ const crypto = require('crypto');
 
 const push = require('./push');
 const storage = require('./storage');
-const email = require('./email');
 const { registerFileRoutes } = require('./routes/files');
 const { registerExcelRoutes } = require('./routes/excel');
 
@@ -34,6 +33,8 @@ const io = new Server(server, {
         credentials: true
     }
 });
+
+app.set('trust proxy', 1);
 
 app.use(helmet({
     contentSecurityPolicy: false,
@@ -70,7 +71,6 @@ const JWT_SECRET = process.env.JWT_SECRET;
 
 storage.initStorage();
 push.initWebPush();
-email.initEmail();
 setInterval(() => push.checkLessonReminders(pool), 60 * 1000);
 
 // ================= РАСПИСАНИЕ ЗВОНКОВ =================
@@ -202,7 +202,7 @@ function publicUser(u) {
         verificationCode: u.verification_code,
         avatarEmoji: u.avatar_emoji || '👤',
         theme: u.theme || 'auto',
-        emailVerified: u.email_verified,
+        emailVerified: true,
         isRoot: u.username === 'root_teacher'
     };
 }
@@ -231,16 +231,12 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
     if (violatesProfanityFilter(firstName, lastName, nickName)) return res.status(400).json({ error: 'Запрещённые слова' });
     try {
         const hash = await bcrypt.hash(password, 10);
-        const verifyToken = crypto.randomBytes(32).toString('hex');
-        const insertResult = await pool.query(
-            `INSERT INTO users (username, full_name, email, password_hash, is_teacher, is_teacher_verified, email_verified, email_verification_token)
-             VALUES ($1, $2, $3, $4, false, false, false, $5)
-             RETURNING id, email, full_name`,
-            [nickName, `${firstName} ${lastName}`, userEmail, hash, verifyToken]
+        await pool.query(
+            `INSERT INTO users (username, full_name, email, password_hash, is_teacher, is_teacher_verified, email_verified)
+             VALUES ($1, $2, $3, $4, false, false, true)`,
+            [nickName, `${firstName} ${lastName}`, userEmail, hash]
         );
-        email.sendEmailVerification(insertResult.rows[0].email, insertResult.rows[0].full_name, verifyToken)
-            .catch(e => console.error('email verify:', e.message));
-        res.json({ message: 'Успех. Проверьте почту для подтверждения.' });
+        res.json({ message: 'Успех' });
     } catch (err) { res.status(400).json({ error: 'Почта или логин уже заняты' }); }
 });
 
@@ -254,14 +250,11 @@ app.post('/api/teach/register', authLimiter, async (req, res) => {
         const hash = await bcrypt.hash(password, 10);
         const code = 'T-' + generateCode(4);
         const username = userEmail.split('@')[0] + '_' + generateCode(3);
-        const verifyToken = crypto.randomBytes(32).toString('hex');
         await pool.query(
-            `INSERT INTO users (username, full_name, email, password_hash, is_teacher, is_teacher_verified, verification_code, email_verified, email_verification_token)
-             VALUES ($1, $2, $3, $4, true, false, $5, false, $6)`,
-            [username, fullName, userEmail, hash, code, verifyToken]
+            `INSERT INTO users (username, full_name, email, password_hash, is_teacher, is_teacher_verified, verification_code, email_verified)
+             VALUES ($1, $2, $3, $4, true, false, $5, true)`,
+            [username, fullName, userEmail, hash, code]
         );
-        email.sendEmailVerification(userEmail, fullName, verifyToken)
-            .catch(e => console.error('email verify:', e.message));
         res.json({ code });
     } catch (err) { res.status(400).json({ error: 'Email уже используется' }); }
 });
@@ -358,6 +351,205 @@ app.post('/api/settings/update', verifyJWT, async (req, res) => {
         push.notifyCollegeAnnouncement(pool, newAnnouncement).catch(e => console.error('push announcement:', e.message));
     }
     res.json(r.rows[0]);
+});
+
+// ================= ВОССТАНОВЛЕНИЕ ПАРОЛЯ (локально) =================
+
+// Запрос на восстановление — со страницы входа
+app.post('/api/auth/request-password-reset', authLimiter, async (req, res) => {
+    const { login } = req.body;
+    if (!login) return res.status(400).json({ error: 'Введите логин или email' });
+
+    try {
+        const userQ = await pool.query('SELECT * FROM users WHERE email = $1 OR username = $1', [login]);
+        if (!userQ.rows.length) {
+            // Не раскрываем, есть ли такой пользователь
+            return res.json({ ok: true, message: 'Запрос отправлен. Обратитесь к преподавателю.' });
+        }
+        const user = userQ.rows[0];
+
+        // Уже есть активный запрос?
+        const existing = await pool.query(
+            `SELECT * FROM password_reset_requests WHERE user_id = $1 AND status IN ('pending','approved') ORDER BY created_at DESC LIMIT 1`,
+            [user.id]
+        );
+
+        let request;
+        if (existing.rows.length && (Date.now() - new Date(existing.rows[0].created_at).getTime()) < 60 * 60 * 1000) {
+            request = existing.rows[0];
+        } else {
+            const code = user.is_teacher ? null : generateCode(4);
+            const token = user.is_teacher ? crypto.randomBytes(32).toString('hex') : null;
+            const displayName = user.is_teacher
+                ? `Преподаватель: ${user.full_name}`
+                : user.full_name;
+            const r = await pool.query(
+                `INSERT INTO password_reset_requests (user_id, user_type, display_name, username, code, token)
+                 VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+                [user.id, user.is_teacher ? 'teacher' : 'student', displayName, user.username, code, token]
+            );
+            request = r.rows[0];
+
+            // Оповещаем всех подтверждённых учителей через Socket.IO
+            io.to('teachers').emit('password_reset_request', {
+                id: request.id,
+                displayName: request.display_name,
+                username: request.username,
+                userType: request.user_type,
+                code: request.code,
+                createdAt: request.created_at
+            });
+        }
+
+        res.json({ ok: true, message: 'Запрос отправлен. Обратитесь к преподавателю.' });
+    } catch (e) {
+        console.error('request-password-reset:', e.message);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
+// Проверка статуса запроса (для страницы ввода кода — polling)
+app.get('/api/auth/password-reset-status/:login', authLimiter, async (req, res) => {
+    try {
+        const userQ = await pool.query('SELECT id FROM users WHERE email = $1 OR username = $1', [req.params.login]);
+        if (!userQ.rows.length) return res.json({ status: 'none' });
+        const r = await pool.query(
+            `SELECT id, status, code, token FROM password_reset_requests WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`,
+            [userQ.rows[0].id]
+        );
+        if (!r.rows.length) return res.json({ status: 'none' });
+        res.json(r.rows[0]);
+    } catch (e) { res.json({ status: 'none' }); }
+});
+
+// Учитель получает список pending-запросов
+app.get('/api/password-reset-requests', verifyJWT, async (req, res) => {
+    const user = await getUserById(req.userId);
+    if (!isSuperAdmin(user)) return res.status(403).json({ error: 'Только для учителей' });
+
+    const r = await pool.query(
+        `SELECT prr.*, u.full_name AS teacher_full_name
+         FROM password_reset_requests prr
+         LEFT JOIN users u ON u.id = prr.user_id
+         WHERE prr.status IN ('pending','approved') AND prr.created_at > NOW() - INTERVAL '24 hours'
+         ORDER BY prr.created_at DESC`
+    );
+    res.json(r.rows);
+});
+
+// Учитель подтверждает запрос учителя → возвращает magic-токен
+app.post('/api/password-reset-requests/:id/approve', verifyJWT, async (req, res) => {
+    const approver = await getUserById(req.userId);
+    if (!isSuperAdmin(approver)) return res.status(403).json({ error: 'Только для учителей' });
+
+    const r = await pool.query('SELECT * FROM password_reset_requests WHERE id = $1', [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Запрос не найден' });
+    const request = r.rows[0];
+    if (request.status === 'resolved') return res.status(400).json({ error: 'Запрос уже выполнен' });
+
+    // Если запрос от самого себя — нельзя
+    if (request.user_id === approver.id) {
+        return res.status(400).json({ error: 'Нельзя подтвердить свой запрос' });
+    }
+
+    await pool.query(
+        `UPDATE password_reset_requests SET status = 'approved', approved_by = $1, approved_at = NOW() WHERE id = $2`,
+        [approver.id, req.params.id]
+    );
+
+    io.to('teachers').emit('password_reset_updated', { id: req.params.id, status: 'approved' });
+
+    res.json({
+        ok: true,
+        token: request.token,
+        link: request.token ? `/?reset=${request.token}` : null
+    });
+});
+
+// Учитель отклоняет запрос
+app.delete('/api/password-reset-requests/:id', verifyJWT, async (req, res) => {
+    const user = await getUserById(req.userId);
+    if (!isSuperAdmin(user)) return res.status(403).json({ error: 'Только для учителей' });
+    await pool.query('DELETE FROM password_reset_requests WHERE id = $1', [req.params.id]);
+    io.to('teachers').emit('password_reset_updated', { id: req.params.id, status: 'deleted' });
+    res.json({ ok: true });
+});
+
+// Ученик сбрасывает пароль по коду
+app.post('/api/auth/reset-password-with-code', authLimiter, async (req, res) => {
+    const { login, code, newPassword } = req.body;
+    if (!login || !code || !newPassword) return res.status(400).json({ error: 'Заполните все поля' });
+    if (!isValidPassword(newPassword)) return res.status(400).json({ error: 'Пароль: минимум 8 символов, буква и цифра' });
+
+    try {
+        const userQ = await pool.query('SELECT * FROM users WHERE email = $1 OR username = $1', [login]);
+        if (!userQ.rows.length) return res.status(400).json({ error: 'Неверный код' });
+        const user = userQ.rows[0];
+
+        const r = await pool.query(
+            `SELECT * FROM password_reset_requests WHERE user_id = $1 AND code = $2 AND status IN ('pending','approved') ORDER BY created_at DESC LIMIT 1`,
+            [user.id, String(code).trim()]
+        );
+        if (!r.rows.length) return res.status(400).json({ error: 'Неверный или устаревший код' });
+
+        const hash = await bcrypt.hash(newPassword, 10);
+        await pool.query(
+            'UPDATE users SET password_hash = $1, failed_login_attempts = 0, locked_until = NULL WHERE id = $2',
+            [hash, user.id]
+        );
+        await pool.query(
+            `UPDATE password_reset_requests SET status = 'resolved', resolved_at = NOW() WHERE id = $1`,
+            [r.rows[0].id]
+        );
+
+        io.to('teachers').emit('password_reset_updated', { id: r.rows[0].id, status: 'resolved' });
+
+        res.json({ ok: true });
+    } catch (e) {
+        console.error('reset-with-code:', e.message);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
+// Учитель сбрасывает пароль по токену (magic-link)
+app.post('/api/auth/reset-password-with-token', authLimiter, async (req, res) => {
+    const { token, newPassword } = req.body;
+    if (!token || !newPassword) return res.status(400).json({ error: 'Заполните поля' });
+    if (!isValidPassword(newPassword)) return res.status(400).json({ error: 'Пароль: минимум 8 символов, буква и цифра' });
+
+    try {
+        const r = await pool.query(
+            `SELECT * FROM password_reset_requests WHERE token = $1 AND status = 'approved' AND created_at > NOW() - INTERVAL '24 hours' LIMIT 1`,
+            [token]
+        );
+        if (!r.rows.length) return res.status(400).json({ error: 'Ссылка недействительна или устарела' });
+
+        const hash = await bcrypt.hash(newPassword, 10);
+        await pool.query(
+            'UPDATE users SET password_hash = $1, failed_login_attempts = 0, locked_until = NULL WHERE id = $2',
+            [hash, r.rows[0].user_id]
+        );
+        await pool.query(
+            `UPDATE password_reset_requests SET status = 'resolved', resolved_at = NOW() WHERE id = $1`,
+            [r.rows[0].id]
+        );
+
+        io.to('teachers').emit('password_reset_updated', { id: r.rows[0].id, status: 'resolved' });
+
+        res.json({ ok: true });
+    } catch (e) {
+        console.error('reset-with-token:', e.message);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+});
+
+// Проверка токена (для страницы reset — узнать, валиден ли)
+app.get('/api/auth/check-reset-token/:token', authLimiter, async (req, res) => {
+    const r = await pool.query(
+        `SELECT id, status FROM password_reset_requests WHERE token = $1 AND status = 'approved' AND created_at > NOW() - INTERVAL '24 hours' LIMIT 1`,
+        [req.params.token]
+    );
+    res.json({ valid: r.rows.length > 0 });
 });
 
 // ================= ПРОСТРАНСТВА =================
@@ -832,16 +1024,6 @@ app.post('/api/grades', verifyJWT, async (req, res) => {
         return res.status(400).json({ error: 'Заполните поля' });
     }
 
-    if (!(await isSpaceAdmin(user, spaceId))) {
-        const subjCheck = await pool.query(
-            'SELECT 1 FROM teacher_subjects WHERE space_id = $1 AND teacher_id = $2 AND subject_name = $3',
-            [spaceId, user.id, subjectName]
-        );
-        if (!subjCheck.rows.length && !isSuperAdmin(user)) {
-            return res.status(403).json({ error: 'Вы не ведёте этот предмет' });
-        }
-    }
-
     try {
         const r = await pool.query(
             `INSERT INTO grades (space_id, student_user_id, student_name, subject_name, teacher_id, grade_value, attendance, lesson_date, homework_id, comment)
@@ -1086,14 +1268,12 @@ app.post('/api/presence/inactive', verifyJWT, async (req, res) => {
     res.json({ ok: true });
 });
 
-// ================= ФАЙЛЫ =================
+// ================= ФАЙЛЫ И EXCEL =================
 registerFileRoutes(app, pool, verifyJWT, requireSpaceAccess);
-
-// ================= EXCEL =================
 registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin);
 
 // ================= ИГРЫ =================
-const VALID_GAMES = ['2048', 'cyber-runner', 'snake-arena', 'rpg-clicker', 'neon-runner', 'neon-rider'];
+const VALID_GAMES = ['2048', 'snake-arena', 'rpg-clicker', 'memory', 'reaction'];
 
 app.get('/api/games-global/:gameId/leaderboard', verifyJWT, async (req, res) => {
     if (!VALID_GAMES.includes(req.params.gameId)) return res.json([]);
@@ -1133,61 +1313,6 @@ app.post('/api/games/:spaceId/:gameId/reset', verifyJWT, requireSpaceAdmin, asyn
     res.json({ message: 'Рекорды сброшены' });
 });
 
-// ================= ЗАБЫЛИ ПАРОЛЬ / СБРОС =================
-app.post('/api/auth/forgot-password', authLimiter, async (req, res) => {
-    const { email: userEmail } = req.body;
-    if (!userEmail) return res.status(400).json({ error: 'Введите email' });
-    try {
-        const user = await pool.query('SELECT * FROM users WHERE email = $1', [userEmail]);
-        if (user.rows.length) {
-            const token = crypto.randomBytes(32).toString('hex');
-            const expires = new Date(Date.now() + 60 * 60 * 1000);
-            await pool.query(
-                'UPDATE users SET password_reset_token = $1, password_reset_expires = $2 WHERE id = $3',
-                [token, expires, user.rows[0].id]
-            );
-            email.sendPasswordReset(user.rows[0].email, user.rows[0].full_name, token)
-                .catch(e => console.error('email reset:', e.message));
-        }
-        res.json({ ok: true, message: 'Если такой email зарегистрирован — письмо отправлено.' });
-    } catch (e) {
-        console.error('forgot-password:', e.message);
-        res.status(500).json({ error: 'Ошибка сервера' });
-    }
-});
-
-app.post('/api/auth/reset-password', authLimiter, async (req, res) => {
-    const { token, newPassword } = req.body;
-    if (!token || !newPassword) return res.status(400).json({ error: 'Заполните поля' });
-    if (!isValidPassword(newPassword)) return res.status(400).json({ error: 'Пароль: минимум 8 символов, буква и цифра' });
-    const user = await pool.query(
-        'SELECT * FROM users WHERE password_reset_token = $1 AND password_reset_expires > NOW()',
-        [token]
-    );
-    if (!user.rows.length) return res.status(400).json({ error: 'Ссылка недействительна' });
-    const hash = await bcrypt.hash(newPassword, 10);
-    await pool.query(
-        'UPDATE users SET password_hash = $1, password_reset_token = NULL, password_reset_expires = NULL, failed_login_attempts = 0, locked_until = NULL WHERE id = $2',
-        [hash, user.rows[0].id]
-    );
-    res.json({ ok: true });
-});
-
-app.get('/api/auth/verify-email', async (req, res) => {
-    const { token } = req.query;
-    if (!token) return res.status(400).send('Неверная ссылка');
-    const r = await pool.query(
-        'SELECT id FROM users WHERE email_verification_token = $1',
-        [token]
-    );
-    if (!r.rows.length) return res.status(400).send('Ссылка недействительна или уже использована');
-    await pool.query(
-        'UPDATE users SET email_verified = TRUE, email_verification_token = NULL WHERE id = $1',
-        [r.rows[0].id]
-    );
-    res.redirect('/?verified=1');
-});
-
 // ================= SOCKET.IO =================
 io.on('connection', async (socket) => {
     try {
@@ -1195,7 +1320,13 @@ io.on('connection', async (socket) => {
         if (token && token !== 'null' && token !== '') {
             const { userId } = jwt.verify(token, JWT_SECRET);
             const user = await getUserById(userId);
-            if (user) { socket.userId = user.id; socket.gameUser = user; }
+            if (user) {
+                socket.userId = user.id;
+                socket.gameUser = user;
+                if (isSuperAdmin(user)) {
+                    socket.join('teachers');
+                }
+            }
         }
     } catch (e) { }
 
@@ -1207,6 +1338,7 @@ io.on('connection', async (socket) => {
             socket.userId = user.id;
             socket.spaceId = spaceId;
             socket.join(`space:${spaceId}`);
+            if (isSuperAdmin(user)) socket.join('teachers');
         } catch (e) {}
     });
 
@@ -1344,6 +1476,14 @@ async function cleanupOldMessages() {
 }
 setInterval(cleanupOldMessages, 24 * 60 * 60 * 1000);
 
+// Чистим старые запросы восстановления пароля
+async function cleanupOldResetRequests() {
+    try {
+        await pool.query("DELETE FROM password_reset_requests WHERE created_at < NOW() - INTERVAL '24 hours' AND status != 'resolved'");
+    } catch (e) { /* тихо */ }
+}
+setInterval(cleanupOldResetRequests, 60 * 60 * 1000);
+
 process.on('unhandledRejection', (err) => {
     console.error('❌ UNHANDLED REJECTION:', err?.message || err);
 });
@@ -1352,16 +1492,24 @@ process.on('uncaughtException', (err) => {
 });
 
 async function ensureSchema() {
-    const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
-    await pool.query(schema);
+    try {
+        const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
+        await pool.query(schema);
+    } catch (e) {
+        console.warn('⚠️ schema.sql не применён целиком:', e.message);
+    }
+
     const migrations = [
-        `ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE`,
+        `ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT TRUE`,
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token VARCHAR(100)`,
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token VARCHAR(100)`,
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_expires TIMESTAMP WITH TIME ZONE`,
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_attempts INT DEFAULT 0`,
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP WITH TIME ZONE`,
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS theme VARCHAR(20) DEFAULT 'auto'`,
+        `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_emoji VARCHAR(50) DEFAULT '👤'`,
+        `ALTER TABLE space_members ADD COLUMN IF NOT EXISTS muted_until TIMESTAMP WITH TIME ZONE`,
+        `ALTER TABLE space_members ADD COLUMN IF NOT EXISTS custom_status VARCHAR(50) DEFAULT NULL`,
         `ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES chat_messages(id) ON DELETE SET NULL`
     ];
     for (const sql of migrations) {
