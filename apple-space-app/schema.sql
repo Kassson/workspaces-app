@@ -1,7 +1,7 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- ============================================================================
--- 1. Глобальные настройки системы
+-- 1. Глобальные настройки
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS system_settings (
     id INT PRIMARY KEY DEFAULT 1,
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS users (
     verification_code VARCHAR(10) UNIQUE,
     verified_by UUID REFERENCES users(id),
 
-    email_verified BOOLEAN DEFAULT FALSE,
+    email_verified BOOLEAN DEFAULT TRUE,
     email_verification_token VARCHAR(100),
     password_reset_token VARCHAR(100),
     password_reset_expires TIMESTAMP WITH TIME ZONE,
@@ -142,10 +142,6 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_chat_created_at ON chat_messages(created_at);
-CREATE INDEX IF NOT EXISTS idx_chat_space ON chat_messages(space_id);
-CREATE INDEX IF NOT EXISTS idx_chat_space_created ON chat_messages(space_id, created_at DESC);
-
 -- ============================================================================
 -- 8. Рекорды игр
 -- ============================================================================
@@ -160,7 +156,7 @@ CREATE TABLE IF NOT EXISTS game_scores (
 );
 
 -- ============================================================================
--- 9. Push-подписки
+-- 9. Push
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS push_subscriptions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -224,7 +220,7 @@ CREATE TABLE IF NOT EXISTS message_mentions (
 );
 
 -- ============================================================================
--- 12. Состояние прочтения и присутствие
+-- 12. Чтение и присутствие
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS chat_read_state (
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
@@ -240,7 +236,7 @@ CREATE TABLE IF NOT EXISTS user_presence (
 );
 
 -- ============================================================================
--- 13. Настройки уведомлений
+-- 13. Уведомления
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS user_notification_prefs (
     user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -267,7 +263,7 @@ CREATE TABLE IF NOT EXISTS teacher_subjects (
 );
 
 -- ============================================================================
--- 15. Журнал
+-- 15. Журнал оценок
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS grades (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -284,9 +280,6 @@ CREATE TABLE IF NOT EXISTS grades (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_grades_unique
-    ON grades(space_id, student_name, subject_name, lesson_date, teacher_id);
 
 -- ============================================================================
 -- 16. Объявления и отложенные уведомления
@@ -309,30 +302,30 @@ CREATE TABLE IF NOT EXISTS pending_notifications (
 );
 
 -- ============================================================================
--- 17. Запросы на восстановление пароля (локально, без почты)
+-- 17. Запросы на восстановление пароля
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS password_reset_requests (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    user_type VARCHAR(20) NOT NULL,           -- 'student' | 'teacher'
-    display_name VARCHAR(200) NOT NULL,       -- ФИО для отображения учителям
-    username VARCHAR(100),                    -- ник
-    code VARCHAR(10),                         -- 4-значный код для ученика
-    token VARCHAR(100),                       -- длинный токен для magic-ссылки (учитель)
-    status VARCHAR(20) DEFAULT 'pending',     -- 'pending' | 'approved' | 'resolved'
+    user_type VARCHAR(20) NOT NULL,
+    display_name VARCHAR(200) NOT NULL,
+    username VARCHAR(100),
+    code VARCHAR(10),
+    token VARCHAR(100),
+    status VARCHAR(20) DEFAULT 'pending',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
     approved_at TIMESTAMP WITH TIME ZONE,
     resolved_at TIMESTAMP WITH TIME ZONE
 );
 
-CREATE INDEX IF NOT EXISTS idx_prr_status ON password_reset_requests(status, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_prr_code ON password_reset_requests(code) WHERE code IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_prr_token ON password_reset_requests(token) WHERE token IS NOT NULL;
-
 -- ============================================================================
--- 18. Индексы
+-- 18. ИНДЕКСЫ (в самом конце, чтобы не ломать создание таблиц)
 -- ============================================================================
+CREATE INDEX IF NOT EXISTS idx_chat_created_at ON chat_messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_chat_space ON chat_messages(space_id);
+CREATE INDEX IF NOT EXISTS idx_chat_space_created ON chat_messages(space_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_reply ON chat_messages(reply_to_id);
 CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_chat_mutes_user_space ON chat_mutes(user_id, space_id);
 CREATE INDEX IF NOT EXISTS idx_files_space ON files(space_id);
@@ -346,5 +339,9 @@ CREATE INDEX IF NOT EXISTS idx_grades_student_name ON grades(space_id, student_n
 CREATE INDEX IF NOT EXISTS idx_grades_subject ON grades(space_id, subject_name);
 CREATE INDEX IF NOT EXISTS idx_grades_date ON grades(lesson_date DESC);
 CREATE INDEX IF NOT EXISTS idx_grades_teacher ON grades(teacher_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_grades_unique ON grades(space_id, student_name, subject_name, lesson_date, teacher_id);
 CREATE INDEX IF NOT EXISTS idx_teacher_subjects ON teacher_subjects(space_id, teacher_id);
 CREATE INDEX IF NOT EXISTS idx_space_announcements ON space_announcements(space_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_prr_status ON password_reset_requests(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_prr_code ON password_reset_requests(code) WHERE code IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_prr_token ON password_reset_requests(token) WHERE token IS NOT NULL;
