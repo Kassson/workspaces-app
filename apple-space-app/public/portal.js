@@ -388,7 +388,6 @@ async function openHomeworkStats(homeworkId) {
 async function setGradeFromStats(studentUserId, studentName, value, homeworkId) {
     if (!currentSpace) return;
     try {
-        // Загружаем stats чтобы узнать subjectName
         const s = await apiGet(`/api/homework/${homeworkId}/stats`);
         const subjectName = s.subjectName || 'Предмет';
 
@@ -408,187 +407,251 @@ async function setGradeFromStats(studentUserId, studentName, value, homeworkId) 
     }
 }
 
-// ===================== ЖУРНАЛ — НОВАЯ ЛОГИКА =====================
+// ============================================================================
+//  ЖУРНАЛ — месяцы, слайдеры, экспорт/импорт
+// ============================================================================
+
+const MONTH_NAMES = ['', 'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+
+function formatMonthName(m) {
+    if (!m) return '';
+    const parts = m.split('-');
+    const year = parseInt(parts[0]);
+    const month = parseInt(parts[1]);
+    return `${MONTH_NAMES[month]} ${year}`;
+}
+
+function getDaysOfMonth(monthStr) {
+    const parts = monthStr.split('-');
+    const year = parseInt(parts[0]);
+    const month = parseInt(parts[1]);
+    const lastDay = new Date(year, month, 0).getDate();
+    const days = [];
+    for (let d = 1; d <= lastDay; d++) {
+        days.push(`${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
+    }
+    return days;
+}
+
+function monthKeyOf(dateStr) {
+    const d = new Date(dateStr);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// Глобальное состояние журнала
+window.__journal = {
+    spaceId: null,
+    subject: null,
+    month: null,
+    subjects: [],
+    months: [],
+    students: [],
+    allGrades: [],
+    subjGrades: []
+};
 
 async function renderGradesTab(container, spaceId, isAdmin) {
     if (!spaceId) { container.innerHTML = emptySpaceState(); return; }
-    const isTeacher = currentUser?.isTeacher;
-    if (isTeacher) {
-        renderTeacherJournal(container, spaceId);
+    if (currentUser?.isTeacher) {
+        await renderTeacherJournal(container, spaceId);
     } else {
-        renderStudentGrades(container, spaceId);
+        await renderStudentGrades(container, spaceId);
     }
 }
 
-/* ---------- ЖУРНАЛ УЧИТЕЛЯ ---------- */
+// ============================================================================
+//  ЖУРНАЛ УЧИТЕЛЯ
+// ============================================================================
 async function renderTeacherJournal(container, spaceId) {
     container.innerHTML = '<p class="empty-state">Загрузка…</p>';
 
     try {
-        // Получаем все оценки в пространстве (для определения доступных предметов и дат)
         const allGrades = await apiGet(`/api/grades/${spaceId}`);
+        const subjectsFromGrades = [...new Set(allGrades.map(g => g.subject_name).filter(Boolean))];
 
-        // Уникальные предметы — из оценок + из предметов учителя
-        let subjectsFromGrades = [...new Set(allGrades.map(g => g.subject_name).filter(Boolean))].sort();
         let mySubjects = [];
         try {
-            mySubjects = (await apiGet(`/api/teacher-subjects/${spaceId}`)).map(s => s.subject_name);
-        } catch (e) { /* возможно учитель не ведёт */ }
+            const ts = await apiGet(`/api/teacher-subjects/${spaceId}`);
+            mySubjects = ts.map(s => s.subject_name);
+        } catch (e) {}
 
-        let subjects = [...new Set([...mySubjects, ...subjectsFromGrades])].sort();
-        if (!subjects.length) subjects = ['Предмет'];
+        const subjects = [...new Set([...mySubjects, ...subjectsFromGrades])].sort();
 
-        let currentSubject = window.__journalSubject;
-        if (!subjects.includes(currentSubject)) currentSubject = subjects[0];
-        window.__journalSubject = currentSubject;
+        window.__journal.spaceId = spaceId;
+        window.__journal.allGrades = allGrades;
+        window.__journal.subjects = subjects;
 
-        // Данные по текущему предмету
-        window.__journalData = {
-            spaceId,
-            subject: currentSubject,
-            subjects,
-            allGrades: allGrades.filter(g => g.subject_name === currentSubject)
-        };
+        if (!subjects.length) {
+            container.innerHTML = `
+                <h1 class="page-title">Журнал</h1>
+                <div class="settings-card" style="text-align:center;">
+                    <p style="color:var(--text-secondary);margin-top:0;">Нет ни одного предмета. Добавьте первый, чтобы начать вести журнал.</p>
+                    <button class="btn-primary" onclick="addJournalSubject('${spaceId}')">+ Добавить предмет</button>
+                </div>
+            `;
+            return;
+        }
+
+        if (!window.__journal.subject || !subjects.includes(window.__journal.subject)) {
+            window.__journal.subject = subjects[0];
+        }
+
+        const subjGrades = allGrades.filter(g => g.subject_name === window.__journal.subject);
+        window.__journal.subjGrades = subjGrades;
+
+        const monthsFromGrades = [...new Set(subjGrades.map(g => monthKeyOf(g.lesson_date)))].sort();
+        const now = new Date();
+        const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        if (!monthsFromGrades.includes(currentMonth)) monthsFromGrades.push(currentMonth);
+        monthsFromGrades.sort();
+
+        if (!window.__journal.month || !monthsFromGrades.includes(window.__journal.month)) {
+            window.__journal.month = monthsFromGrades[monthsFromGrades.length - 1];
+        }
+        window.__journal.months = monthsFromGrades;
 
         container.innerHTML = renderTeacherJournalHtml();
-        attachTeacherJournalHandlers();
-        await loadJournalTable(spaceId, currentSubject);
+        attachJournalHandlers();
+        await loadJournalStudents(spaceId);
+        renderJournalTable();
     } catch (e) {
-        container.innerHTML = `<p class="empty-state">Ошибка: ${escapeHtml(e.error || '')}</p>`;
+        container.innerHTML = `<p class="empty-state">Ошибка: ${escapeHtml(e.error || e.message)}</p>`;
     }
 }
 
 function renderTeacherJournalHtml() {
-    const { subjects, subject } = window.__journalData;
+    const subjects = window.__journal.subjects || [];
+    const subject = window.__journal.subject;
+    const months = window.__journal.months || [];
+    const month = window.__journal.month;
+
     let html = `<h1 class="page-title">Журнал</h1>`;
 
-    // Слайдер предметов
-    html += `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:12px;">`;
+    // Предметы
+    html += `<div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">Предмет</div>`;
+    html += `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:12px;">`;
     for (const s of subjects) {
-        html += `<button class="day-tab ${s === subject ? 'active' : ''}" data-subject="${escapeHtml(s)}" style="flex-shrink:0;">${escapeHtml(s)}</button>`;
+        html += `<button class="day-tab ${s === subject ? 'active' : ''}" data-subj="${escapeHtml(s)}" style="flex-shrink:0;">${escapeHtml(s)}</button>`;
     }
-    html += `<button class="day-tab" data-subject="__add__" style="flex-shrink:0;background:var(--accent-blue-light);color:var(--accent-blue);">+ предмет</button>`;
+    html += `<button class="day-tab" data-subj="__add__" style="flex-shrink:0;">+ предмет</button>`;
     html += `</div>`;
 
-    // Кнопки действий
+    // Месяцы
+    html += `<div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">Месяц</div>`;
+    html += `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:12px;">`;
+    for (const m of months) {
+        html += `<button class="day-tab ${m === month ? 'active' : ''}" data-month="${m}" style="flex-shrink:0;">${formatMonthName(m)}</button>`;
+    }
+    html += `</div>`;
+
+    // Кнопки
     html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
-        <button class="btn-small" onclick="addJournalLesson()">+ урок</button>
-        <button class="btn-small" onclick="addJournalStudent()">+ ученик</button>
-        <button class="btn-small" onclick="exportJournalExcel('${window.__journalData.spaceId}')">Экспорт Excel</button>
-        <button class="btn-small" onclick="importJournalExcel('${window.__journalData.spaceId}')">Импорт Excel</button>
+        <button class="btn-small" onclick="journalAddLesson()">+ урок</button>
+        <button class="btn-small" onclick="journalAddStudent()">+ ученик</button>
+        <button class="btn-small" onclick="exportJournalExcel(window.__journal.spaceId)">Экспорт Excel</button>
+        <button class="btn-small" onclick="importJournalExcel(window.__journal.spaceId)">Импорт Excel</button>
     </div>`;
 
-    // Контейнер таблицы
-    html += `<div id="journalTableWrap" style="overflow-x:auto;"></div>`;
+    html += `<div id="journalTableWrap" class="journal-table-wrap"></div>`;
 
     return html;
 }
 
-function attachTeacherJournalHandlers() {
-    document.querySelectorAll('[data-subject]').forEach(btn => {
-        btn.addEventListener('click', async () => {
-            const subj = btn.dataset.subject;
-            if (subj === '__add__') {
-                const newSubj = await showPrompt('Название предмета', 'Например: Математика');
-                if (!newSubj) return;
-                try {
-                    await apiPost('/api/teacher-subjects', {
-                        spaceId: window.__journalData.spaceId,
-                        subjectName: newSubj.trim()
-                    });
-                    window.__journalSubject = newSubj.trim();
-                    renderTeacherJournal(document.getElementById('tab-grades'), window.__journalData.spaceId);
-                } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
-                return;
-            }
-            window.__journalSubject = subj;
-            renderTeacherJournal(document.getElementById('tab-grades'), window.__journalData.spaceId);
+function attachJournalHandlers() {
+    document.querySelectorAll('[data-subj]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const s = btn.dataset.subj;
+            if (s === '__add__') { addJournalSubject(window.__journal.spaceId); return; }
+            window.__journal.subject = s;
+            window.__journal.month = null;
+            renderTeacherJournal(document.getElementById('tab-grades'), window.__journal.spaceId);
+        });
+    });
+    document.querySelectorAll('[data-month]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            window.__journal.month = btn.dataset.month;
+            renderTeacherJournal(document.getElementById('tab-grades'), window.__journal.spaceId);
         });
     });
 }
 
-async function loadJournalTable(spaceId, subject) {
-    const wrap = document.getElementById('journalTableWrap');
-    if (!wrap) return;
-    wrap.innerHTML = '<p class="empty-state">Загрузка…</p>';
-
+async function addJournalSubject(spaceId) {
+    const name = await showPrompt('Название предмета', 'Например: Математика');
+    if (!name) return;
     try {
-        // Ученики из пространства
+        await apiPost('/api/teacher-subjects', { spaceId, subjectName: name.trim() });
+        window.__journal.subject = name.trim();
+        window.__journal.month = null;
+        await renderTeacherJournal(document.getElementById('tab-grades'), spaceId);
+    } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
+}
+
+async function loadJournalStudents(spaceId) {
+    try {
         const members = await apiGet(`/api/spaces/${spaceId}/members`);
-        const studentNames = members.map(m => m.full_name);
+        const namesFromMembers = members.map(m => m.full_name);
+        const namesFromGrades = [...new Set(window.__journal.subjGrades.map(g => g.student_name))];
 
-        // Все оценки по предмету
-        const grades = await apiGet(`/api/grades/${spaceId}?subject=${encodeURIComponent(subject)}`);
+        let extra = [];
+        try {
+            const extraResp = await apiGet(`/api/journal-students/${spaceId}?subject=${encodeURIComponent(window.__journal.subject || '')}`);
+            extra = extraResp.map(s => s.student_name);
+        } catch (e) {}
 
-        // Уникальные даты имена из оценок
-        const datesFromGrades = [...new Set(grades.map(g => new Date(g.lesson_date).toISOString().slice(0, 10)))].sort();
-        const namesFromGrades = [...new Set(grades.map(g => g.student_name))];
-
-        // Объединённый список учеников: из пространства + те, кто есть в оценках
-        const allStudents = [...new Set([...studentNames, ...namesFromGrades])].sort();
-
-        if (!allStudents.length) {
-            wrap.innerHTML = '<p class="empty-state">В пространстве пока нет учеников</p>';
-            return;
-        }
-
-        // Собираем все даты (максимум 15 последних)
-        let allDates = datesFromGrades.slice(-15);
-        if (!allDates.length) {
-            // показываем последние 7 дней по умолчанию
-            const today = new Date();
-            for (let i = 6; i >= 0; i--) {
-                const d = new Date(today); d.setDate(d.getDate() - i);
-                allDates.push(ymd(d));
-            }
-        }
-
-        window.__journalData.dates = allDates;
-        window.__journalData.students = allStudents;
-        window.__journalData.grades = grades;
-
-        renderJournalTable();
+        window.__journal.students = [...new Set([...namesFromMembers, ...namesFromGrades, ...extra])].sort();
     } catch (e) {
-        wrap.innerHTML = `<p class="empty-state">Ошибка: ${escapeHtml(e.error || '')}</p>`;
+        window.__journal.students = [];
     }
 }
 
 function renderJournalTable() {
     const wrap = document.getElementById('journalTableWrap');
-    const { dates, students, grades, subject } = window.__journalData;
+    if (!wrap) return;
 
-    let html = `<table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
-        <thead><tr>
-            <th style="text-align:left;padding:8px;background:var(--input-bg);position:sticky;left:0;z-index:2;min-width:180px;border-radius:8px 0 0 0;">Ученик</th>`;
-    for (const d of dates) {
-        const shortD = d.slice(5); // MM-DD
-        html += `<th style="padding:6px 8px;background:var(--input-bg);text-align:center;white-space:nowrap;min-width:70px;">${shortD}</th>`;
+    const students = window.__journal.students || [];
+    const subjGrades = window.__journal.subjGrades || [];
+    const month = window.__journal.month;
+
+    if (!month) {
+        wrap.innerHTML = '<p class="empty-state" style="padding:24px;">Выберите месяц</p>';
+        return;
     }
-    html += `<th style="padding:6px 8px;background:var(--input-bg);text-align:center;border-radius:0 8px 0 0;">Ср. балл</th>`;
-    html += `</tr></thead><tbody>`;
+
+    const days = getDaysOfMonth(month);
+
+    if (!students.length) {
+        wrap.innerHTML = '<p class="empty-state" style="padding:24px;">Нет учеников. Нажмите «+ ученик», чтобы добавить.</p>';
+        return;
+    }
+
+    let html = `<table><thead><tr><th style="min-width:180px;">Ученик</th>`;
+    for (const d of days) {
+        const dayNum = parseInt(d.slice(8, 10));
+        html += `<th style="min-width:38px;">${dayNum}</th>`;
+    }
+    html += `<th>Ср.</th></tr></thead><tbody>`;
 
     for (const st of students) {
-        html += `<tr>`;
-        html += `<td style="padding:6px 8px;border-top:1px solid var(--card-border);position:sticky;left:0;background:var(--bg-card);z-index:1;font-weight:600;">${escapeHtml(st)}</td>`;
+        html += `<tr><td>${escapeHtml(st)}</td>`;
+        const studentGrades = subjGrades.filter(g => g.student_name === st && g.grade_value);
 
-        const studentGrades = grades.filter(g => g.student_name === st && g.grade_value);
+        for (const d of days) {
+            const cell = subjGrades.find(g => g.student_name === st && g.lesson_date && String(g.lesson_date).slice(0, 10) === d);
+            let txt = '';
+            let bg = '';
+            if (cell) {
+                if (cell.grade_value) txt = String(cell.grade_value);
+                if (cell.attendance === 'absent') { txt = txt ? txt + '·Н' : 'Н'; bg = 'background:rgba(255,69,58,0.12)'; }
+                else if (cell.attendance === 'late') { txt = txt ? txt + '·О' : 'О'; bg = 'background:rgba(255,159,10,0.12)'; }
+            }
+            const stEsc = escapeHtml(st).replace(/'/g, '&#39;');
+            html += `<td style="${bg};cursor:pointer;" onclick="openGradeCell('${stEsc}', '${d}')">${txt || '·'}</td>`;
+        }
+
         const avg = studentGrades.length
             ? (studentGrades.reduce((s, g) => s + g.grade_value, 0) / studentGrades.length).toFixed(2)
-            : '';
-
-        for (const d of dates) {
-            const cell = grades.find(g => g.student_name === st && new Date(g.lesson_date).toISOString().slice(0, 10) === d);
-            let cellText = '';
-            let cellColor = 'transparent';
-            if (cell) {
-                if (cell.grade_value) cellText = String(cell.grade_value);
-                if (cell.attendance === 'absent') { cellText = cellText ? cellText + ' Н' : 'Н'; cellColor = 'rgba(255,69,58,0.15)'; }
-                else if (cell.attendance === 'late') { cellText = cellText ? cellText + ' О' : 'О'; cellColor = 'rgba(255,159,10,0.15)'; }
-            }
-            html += `<td onclick="openGradeCell('${escapeHtml(st).replace(/'/g, "\\'")}', '${d}')" style="padding:8px;border-top:1px solid var(--card-border);text-align:center;cursor:pointer;background:${cellColor};transition:background 0.15s;" onmouseover="this.style.background='var(--accent-blue-light)'" onmouseout="this.style.background='${cellColor}'">${cellText || '—'}</td>`;
-        }
-        html += `<td style="padding:8px;border-top:1px solid var(--card-border);text-align:center;font-weight:700;color:#0088cc;">${avg || '—'}</td>`;
-        html += `</tr>`;
+            : '—';
+        html += `<td style="font-weight:700;color:#0088cc;">${avg}</td></tr>`;
     }
 
     html += `</tbody></table>`;
@@ -596,22 +659,27 @@ function renderJournalTable() {
 }
 
 async function openGradeCell(studentName, date) {
-    const { spaceId, subject, grades } = window.__journalData;
-    const existing = grades.find(g => g.student_name === studentName && new Date(g.lesson_date).toISOString().slice(0, 10) === date);
+    const spaceId = window.__journal.spaceId;
+    const subject = window.__journal.subject;
+    const subjGrades = window.__journal.subjGrades || [];
+    const existing = subjGrades.find(g => g.student_name === studentName && g.lesson_date && String(g.lesson_date).slice(0, 10) === date);
 
     const currentGrade = existing?.grade_value || '';
     const currentAttendance = existing?.attendance || 'present';
+
+    const d = new Date(date);
+    const dateLabel = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
 
     const root = document.getElementById('dynamicSheetRoot');
     root.innerHTML = `
         <div class="sheet show" id="dynamicSheet">
             <div class="sheet-handle"></div>
             <h2 class="app-title" style="font-size:1.15rem;margin-bottom:6px;">${escapeHtml(studentName)}</h2>
-            <p style="color:var(--text-secondary);font-size:0.85rem;margin:0 0 16px 0;">${escapeHtml(subject)} · ${date}</p>
+            <p style="color:var(--text-secondary);font-size:0.85rem;margin:0 0 16px 0;">${escapeHtml(subject)} · ${dateLabel}</p>
 
             <div style="margin-bottom:16px;">
                 <div style="font-weight:600;margin-bottom:8px;">Оценка</div>
-                <div style="display:flex;gap:8px;">
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
                     <button class="grade-btn ${currentGrade === '' ? 'active' : ''}" data-grade="">—</button>
                     <button class="grade-btn ${currentGrade === 2 ? 'active' : ''}" data-grade="2">2</button>
                     <button class="grade-btn ${currentGrade === 3 ? 'active' : ''}" data-grade="3">3</button>
@@ -622,119 +690,104 @@ async function openGradeCell(studentName, date) {
 
             <div style="margin-bottom:16px;">
                 <div style="font-weight:600;margin-bottom:8px;">Посещаемость</div>
-                <div style="display:flex;gap:8px;">
-                    <button class="att-btn ${currentAttendance === 'present' ? 'active' : ''}" data-att="present">Присутствовал</button>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <button class="att-btn ${currentAttendance === 'present' ? 'active' : ''}" data-att="present">Был</button>
                     <button class="att-btn ${currentAttendance === 'late' ? 'active' : ''}" data-att="late">Опоздал</button>
-                    <button class="att-btn ${currentAttendance === 'absent' ? 'active' : ''}" data-att="absent">Отсутствовал</button>
+                    <button class="att-btn ${currentAttendance === 'absent' ? 'active' : ''}" data-att="absent">Нет</button>
                 </div>
             </div>
 
-            <div style="display:flex;gap:8px;">
-                <button class="btn-primary" id="gradeSaveBtn" style="flex:1;">Сохранить</button>
-                ${existing ? `<button class="btn-danger" id="gradeDeleteBtn" style="flex:1;">Удалить</button>` : ''}
-            </div>
+            <button class="btn-primary" id="gradeSaveBtn">Сохранить</button>
+            ${existing ? `<button class="btn-danger" id="gradeDeleteBtn" style="margin-top:8px;">Удалить запись</button>` : ''}
             <button class="btn-secondary" style="margin-top:8px;" onclick="closeDynamicSheet()">Отмена</button>
-        </div>
-    `;
+        </div>`;
     document.getElementById('sheetOverlay').classList.add('show');
 
-    // Стили для кнопок
-    if (!document.getElementById('journalStyles')) {
-        const s = document.createElement('style');
-        s.id = 'journalStyles';
-        s.textContent = `
-            .grade-btn, .att-btn { padding: 10px 14px; border-radius: 10px; border: 1px solid var(--card-border); background: var(--input-bg); color: var(--text); font-weight: 600; cursor: pointer; transition: all 0.15s; }
-            .grade-btn.active { background: #0088cc; color: #fff; border-color: #0088cc; }
-            .att-btn.active { background: #30d158; color: #fff; border-color: #30d158; }
-        `;
-        document.head.appendChild(s);
-    }
-
-    let selectedGrade = currentGrade;
-    let selectedAtt = currentAttendance;
+    let selGrade = currentGrade;
+    let selAtt = currentAttendance;
 
     root.querySelectorAll('.grade-btn').forEach(b => {
         b.addEventListener('click', () => {
             root.querySelectorAll('.grade-btn').forEach(x => x.classList.remove('active'));
             b.classList.add('active');
-            selectedGrade = b.dataset.grade;
+            selGrade = b.dataset.grade;
         });
     });
     root.querySelectorAll('.att-btn').forEach(b => {
         b.addEventListener('click', () => {
             root.querySelectorAll('.att-btn').forEach(x => x.classList.remove('active'));
             b.classList.add('active');
-            selectedAtt = b.dataset.att;
+            selAtt = b.dataset.att;
         });
     });
 
     root.querySelector('#gradeSaveBtn').addEventListener('click', async () => {
         try {
-            // Ищем student_user_id по ФИ
             const members = await apiGet(`/api/spaces/${spaceId}/members`);
             const match = members.find(m => m.full_name === studentName);
-            const studentUserId = match?.id || null;
-
             await apiPost('/api/grades', {
                 spaceId,
                 studentName,
-                studentUserId,
+                studentUserId: match?.id || null,
                 subjectName: subject,
-                gradeValue: selectedGrade ? parseInt(selectedGrade) : null,
-                attendance: selectedAtt,
+                gradeValue: selGrade ? parseInt(selGrade) : null,
+                attendance: selAtt,
                 lessonDate: date
             });
             showToast('Сохранено', 'success');
             closeDynamicSheet();
-            await loadJournalTable(spaceId, subject);
+            await renderTeacherJournal(document.getElementById('tab-grades'), spaceId);
         } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
     });
 
     const delBtn = root.querySelector('#gradeDeleteBtn');
-    if (delBtn) {
+    if (delBtn && existing) {
         delBtn.addEventListener('click', async () => {
-            if (!existing) return;
             try {
                 await apiDelete(`/api/grades/${existing.id}`);
-                showToast('Запись удалена', 'success');
+                showToast('Удалено', 'success');
                 closeDynamicSheet();
-                await loadJournalTable(spaceId, subject);
+                await renderTeacherJournal(document.getElementById('tab-grades'), spaceId);
             } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
         });
     }
 }
 
-async function addJournalLesson() {
-    const { spaceId, subject } = window.__journalData;
-    if (!subject) { showToast('Выберите предмет', 'error'); return; }
-    const date = await showPrompt('Дата урока (YYYY-MM-DD)', ymd(new Date()));
-    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-        if (date) showToast('Неверный формат даты', 'error');
-        return;
+async function journalAddLesson() {
+    const dateStr = await showPrompt('Дата урока (ДД.ММ.ГГГГ)', '01.09.2025');
+    if (!dateStr) return;
+    const m = dateStr.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+    if (!m) { showToast('Формат: ДД.ММ.ГГГГ', 'error'); return; }
+    const day = m[1].padStart(2, '0');
+    const mon = m[2].padStart(2, '0');
+    const year = m[3];
+    const mk = `${year}-${mon}`;
+
+    if (!window.__journal.months.includes(mk)) {
+        window.__journal.months.push(mk);
+        window.__journal.months.sort();
     }
-    if (!window.__journalData.dates.includes(date)) {
-        window.__journalData.dates.push(date);
-        window.__journalData.dates.sort();
-    }
-    renderJournalTable();
-    showToast('Дата добавлена. Кликните по ячейке, чтобы поставить оценку.', 'info', 4000);
+    window.__journal.month = mk;
+    showToast(`Открыт ${formatMonthName(mk)}. Кликните по дню ${day}, чтобы поставить оценку.`, 'success', 4000);
+    renderTeacherJournal(document.getElementById('tab-grades'), window.__journal.spaceId);
 }
 
-async function addJournalStudent() {
-    const { spaceId } = window.__journalData;
+async function journalAddStudent() {
+    const spaceId = window.__journal.spaceId;
+    const subject = window.__journal.subject;
     const name = await showPrompt('ФИО ученика', 'Иванов Иван');
     if (!name) return;
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    if (!window.__journalData.students.includes(trimmed)) {
-        window.__journalData.students.push(trimmed);
-        window.__journalData.students.sort();
-    }
-    renderJournalTable();
-    showToast('Ученик добавлен. Кликните по ячейке, чтобы поставить оценку.', 'info', 4000);
+    try {
+        await apiPost('/api/journal-students', { spaceId, subjectName: subject, studentName: name.trim() });
+        await loadJournalStudents(spaceId);
+        renderJournalTable();
+        showToast('Ученик добавлен', 'success');
+    } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
 }
 
-/* ---------- ЖУРНАЛ УЧЕНИКА ---------- */
+// ============================================================================
+//  ЖУРНАЛ УЧЕНИКА
+// ============================================================================
 async function renderStudentGrades(container, spaceId) {
     container.innerHTML = '<p class="empty-state">Загрузка…</p>';
     try {
@@ -745,7 +798,6 @@ async function renderStudentGrades(container, spaceId) {
             return;
         }
 
-        // Группируем по предмету
         const bySubject = {};
         for (const g of grades) {
             if (!bySubject[g.subject_name]) bySubject[g.subject_name] = [];
@@ -754,18 +806,16 @@ async function renderStudentGrades(container, spaceId) {
 
         let html = `<h1 class="page-title">Мои оценки</h1>`;
 
-        for (const [subject, list] of Object.entries(bySubject)) {
+        for (const subj of Object.keys(bySubject).sort()) {
+            const list = bySubject[subj];
             const numeric = list.filter(g => g.grade_value).map(g => g.grade_value);
-            const avg = numeric.length
-                ? (numeric.reduce((s, v) => s + v, 0) / numeric.length).toFixed(2)
-                : '—';
-
+            const avg = numeric.length ? (numeric.reduce((s, v) => s + v, 0) / numeric.length).toFixed(2) : '—';
             const absent = list.filter(g => g.attendance === 'absent').length;
             const late = list.filter(g => g.attendance === 'late').length;
 
             html += `<div class="settings-card">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                    <div style="font-weight:700;font-size:1.05rem;">${escapeHtml(subject)}</div>
+                    <div style="font-weight:700;font-size:1.05rem;">${escapeHtml(subj)}</div>
                     <div style="font-size:1.4rem;font-weight:800;color:#0088cc;">${avg}</div>
                 </div>
                 <div style="color:var(--text-secondary);font-size:0.8rem;margin-bottom:10px;">
@@ -773,17 +823,17 @@ async function renderStudentGrades(container, spaceId) {
                 </div>
                 <div style="display:flex;flex-direction:column;gap:6px;">`;
 
-            // Сортируем по дате убыв.
             const sorted = [...list].sort((a, b) => new Date(b.lesson_date) - new Date(a.lesson_date));
             for (const g of sorted) {
-                const d = new Date(g.lesson_date).toLocaleDateString('ru-RU');
+                const d = new Date(g.lesson_date);
+                const dateStr = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
                 let marks = [];
                 if (g.grade_value) marks.push(`<b style="color:#30d158;">${g.grade_value}</b>`);
                 if (g.attendance === 'absent') marks.push('<span style="color:#ff453a;">Н</span>');
                 else if (g.attendance === 'late') marks.push('<span style="color:#ff9f0a;">О</span>');
                 if (!marks.length) marks.push('—');
                 html += `<div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--divider);">
-                    <span style="color:var(--text-secondary);font-size:0.85rem;">${d}</span>
+                    <span style="color:var(--text-secondary);font-size:0.85rem;">${dateStr}</span>
                     <span>${marks.join(' · ')}</span>
                 </div>`;
             }
@@ -797,26 +847,30 @@ async function renderStudentGrades(container, spaceId) {
     }
 }
 
-/* ---------- EXCEL ---------- */
+// ============================================================================
+//  EXCEL
+// ============================================================================
 async function exportJournalExcel(spaceId) {
-    const subject = window.__journalData?.subject || '';
+    const subject = window.__journal?.subject || '';
+    const month = window.__journal?.month || '';
+    if (!subject || !month) { showToast('Выберите предмет и месяц', 'error'); return; }
+
     try {
-        const res = await fetch(`/api/grades/${spaceId}/export${subject ? '?subject=' + encodeURIComponent(subject) : ''}`, {
-            headers: authHeaders()
-        });
+        const url = `/api/grades/${spaceId}/export?subject=${encodeURIComponent(subject)}&month=${month}`;
+        const res = await fetch(url, { headers: authHeaders() });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || 'Ошибка выгрузки');
         }
         const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
+        const objUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url;
-        a.download = `journal-${subject || 'all'}.xlsx`;
+        a.href = objUrl;
+        a.download = `journal-${subject}-${month}.xlsx`;
         document.body.appendChild(a);
         a.click();
         a.remove();
-        URL.revokeObjectURL(url);
+        URL.revokeObjectURL(objUrl);
         showToast('Файл выгружен', 'success');
     } catch (e) {
         showToast(e.message || 'Ошибка', 'error');
@@ -830,12 +884,9 @@ function importJournalExcel(spaceId) {
     input.addEventListener('change', async () => {
         const file = input.files[0];
         if (!file) return;
-        const subject = window.__journalData?.subject || await showPrompt('Предмет для импорта');
-        if (!subject) return;
 
         const formData = new FormData();
         formData.append('file', file);
-        formData.append('subject', subject);
 
         try {
             const res = await fetch(`/api/grades/${spaceId}/import`, {
@@ -846,8 +897,10 @@ function importJournalExcel(spaceId) {
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Ошибка импорта');
             showToast(`Импорт: +${data.inserted} новых, ${data.updated} обновлено`, 'success', 5000);
-            window.__journalSubject = subject;
-            renderTeacherJournal(document.getElementById('tab-grades'), spaceId);
+            // Переключаем на импортированный предмет и месяц
+            if (data.subject) window.__journal.subject = data.subject;
+            if (data.month) window.__journal.month = data.month;
+            await renderTeacherJournal(document.getElementById('tab-grades'), spaceId);
         } catch (e) {
             showToast(e.message || 'Ошибка', 'error');
         }
@@ -855,7 +908,9 @@ function importJournalExcel(spaceId) {
     input.click();
 }
 
-// ===================== ЧАТ =====================
+// ============================================================================
+//  ЧАТ
+// ============================================================================
 let chatJoinedSpace = null;
 let chatIsAdmin = false;
 let chatCurrentUserId = null;
@@ -943,8 +998,8 @@ function renderChatTab(container, spaceId, isAdmin, currentUserId) {
     socket.on('new_message', (msg) => { if (msg.space_id === spaceId) appendChatMessage(msg, isAdmin, currentUserId); });
     socket.on('message_deleted', ({ messageId }) => { document.getElementById('msg-' + messageId)?.remove(); });
     socket.on('reaction_updated', ({ messageId }) => { reloadMessageReactions(messageId); });
-    socket.on('user_typing', ({ userId, nickname, fullName }) => {
-        typingUsers.set(userId, { nickname, fullName });
+    socket.on('user_typing', ({ userId, nickname }) => {
+        typingUsers.set(userId, { nickname });
         renderTypingIndicator();
     });
     socket.on('user_stopped_typing', ({ userId }) => {
@@ -1043,9 +1098,8 @@ function renderReactions(reactions, messageId) {
     if (!reactions.length) return '';
     const counts = {};
     for (const r of reactions) {
-        if (!counts[r.emoji]) counts[r.emoji] = { count: 0, users: [] };
+        if (!counts[r.emoji]) counts[r.emoji] = { count: 0 };
         counts[r.emoji].count++;
-        counts[r.emoji].users.push(r.user_id);
     }
     return Object.entries(counts).map(([emoji, data]) =>
         `<span class="reaction-chip" style="display:inline-block;padding:2px 8px;margin:2px;background:var(--input-bg);border-radius:12px;font-size:13px;cursor:pointer;" onclick="toggleReaction('${messageId}', '${emoji}')">
@@ -1119,7 +1173,6 @@ async function sendChatMessage(spaceId) {
             fileIds = uploaded.filter(f => f.id).map(f => f.id);
         }
 
-        // Упоминания
         const mentions = [];
         const mentionRegex = /@([a-zA-Z0-9_]+)/g;
         let match;
@@ -1135,12 +1188,7 @@ async function sendChatMessage(spaceId) {
             } catch (e) {}
         }
 
-        socket.emit('send_message', {
-            message: text,
-            replyToId: _replyToId,
-            fileIds,
-            mentions: mentionIds
-        });
+        socket.emit('send_message', { message: text, replyToId: _replyToId, fileIds, mentions: mentionIds });
         input.value = '';
         cancelReply();
         if (window.__clearPendingFiles) window.__clearPendingFiles();
@@ -1149,9 +1197,7 @@ async function sendChatMessage(spaceId) {
         showToast(e.error || 'Ошибка отправки', 'error');
     }
 }
-function deleteChatMessage(id) {
-    socket.emit('delete_message', { messageId: id });
-}
+function deleteChatMessage(id) { socket.emit('delete_message', { messageId: id }); }
 
 // ===================== МУТЫ ЧАТА =====================
 function formatMuteLabel(m) {
@@ -1174,9 +1220,7 @@ async function refreshChatMuteBtn(spaceId) {
 }
 
 let _chatMutePanel = null;
-function closeChatMutePanel() {
-    if (_chatMutePanel) { _chatMutePanel.remove(); _chatMutePanel = null; }
-}
+function closeChatMutePanel() { if (_chatMutePanel) { _chatMutePanel.remove(); _chatMutePanel = null; } }
 
 function openChatMutePanel(spaceId) {
     if (_chatMutePanel) { closeChatMutePanel(); return; }
@@ -1224,10 +1268,7 @@ function openChatMutePanel(spaceId) {
 
 // ===================== УЧАСТНИКИ =====================
 const ROLE_LABELS = { admin: 'Админ', starosta: 'Староста', member: 'Участник' };
-
-function getMemberDisplayStatus(m) {
-    return m.custom_status || ROLE_LABELS[m.role] || m.role;
-}
+function getMemberDisplayStatus(m) { return m.custom_status || ROLE_LABELS[m.role] || m.role; }
 
 async function renderMembersTab(container, spaceId, isAdmin) {
     if (!spaceId) { container.innerHTML = emptySpaceState(); return; }
@@ -1257,7 +1298,6 @@ async function openMemberProfile(member) {
     if (!isSelf && !isAdminViewer) return showToast('Нет доступа', 'error');
 
     _memberForStatusEdit = member;
-
     const muted = member.muted_until && new Date(member.muted_until) > new Date();
     const manageable = isAdminViewer && !isSelf;
     const displayStatus = getMemberDisplayStatus(member);
@@ -1454,7 +1494,6 @@ function openEmojiPicker() {
         </div>`;
     document.getElementById('sheetOverlay').classList.add('show');
 }
-
 function pickEmoji(e) { _selectedEmoji = e; openEditProfile(true); }
 
 // ===================== УНИВЕРСАЛЬНАЯ ФОРМА =====================
@@ -1577,7 +1616,6 @@ function refreshCurrentTab() {
 }
 
 /* ===================== PUSH: КАРТОЧКА НАСТРОЕК ===================== */
-
 async function renderPushSettingsCard() {
     const box = document.getElementById('pushSettingsContainer');
     if (!box) return;
@@ -1585,7 +1623,6 @@ async function renderPushSettingsCard() {
         box.innerHTML = '<h3>Уведомления</h3><p style="color:var(--text-secondary); margin:0;">Этот браузер не поддерживает пуши.</p>';
         return;
     }
-
     const enabled = await isPushEnabled().catch(() => false);
     const mute = await getPushMute();
     const prefs = await getNotificationPrefs();
@@ -1612,7 +1649,7 @@ async function renderPushSettingsCard() {
     box.innerHTML = `
         <h3>Уведомления</h3>
         <p style="color:var(--text-secondary); font-size:0.9rem; margin-top:0;">${statusText}</p>
-        <div id="pushPrefs" style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
             ${prefRows.map(r => `
                 <div style="display:flex;justify-content:space-between;align-items:center;">
                     <span>${r.label}</span>
@@ -1628,13 +1665,10 @@ async function renderPushSettingsCard() {
         input.addEventListener('change', async () => {
             const newPrefs = { ...prefs };
             newPrefs[input.dataset.pref] = input.checked;
-            try {
-                await saveNotificationPrefs(newPrefs);
-                showToast('Настройки сохранены', 'success');
-            } catch (e) { showToast('Ошибка', 'error'); }
+            try { await saveNotificationPrefs(newPrefs); showToast('Настройки сохранены', 'success'); }
+            catch (e) { showToast('Ошибка', 'error'); }
         });
     });
-
     box.querySelector('#pushSettingsBtn').addEventListener('click', openPushSettingsModal);
 }
 
