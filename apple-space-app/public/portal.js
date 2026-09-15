@@ -390,7 +390,7 @@ async function setGradeFromStats(studentUserId, studentName, value, homeworkId) 
     try {
         const s = await apiGet(`/api/homework/${homeworkId}/stats`);
         const subjectName = s.subjectName || 'Предмет';
-        const dueDate = s.dueDate || ymd(new Date()); // ← оценка идёт на дату сдачи ДЗ
+        const dueDate = s.dueDate || ymd(new Date());
 
         await apiPost('/api/grades', {
             spaceId: currentSpace.id,
@@ -631,7 +631,7 @@ function renderJournalTable() {
     html += `<th>Ср.</th></tr></thead><tbody>`;
 
     for (const st of students) {
-        html += `<tr><td>${escapeHtml(st)}</td>`;
+        html += `<tr><td class="journal-student-cell" data-student="${escapeHtml(st)}" style="cursor:pointer;" title="Нажмите, чтобы редактировать">${escapeHtml(st)}</td>`;
         const studentGrades = subjGrades.filter(g => g.student_name === st && g.grade_value);
 
         for (const d of days) {
@@ -663,6 +663,91 @@ function renderJournalTable() {
 
     html += `</tbody></table>`;
     wrap.innerHTML = html;
+
+    wrap.querySelectorAll('.journal-student-cell').forEach(cell => {
+        cell.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openStudentMenu(cell.dataset.student);
+        });
+    });
+}
+
+// ============================================================================
+//  МЕНЮ УЧЕНИКА В ЖУРНАЛЕ — переименовать / удалить
+// ============================================================================
+
+function openStudentMenu(studentName) {
+    const subject = window.__journal.subject;
+    const root = document.getElementById('dynamicSheetRoot');
+    root.innerHTML = `
+        <div class="sheet show" id="dynamicSheet">
+            <div class="sheet-handle"></div>
+            <h2 class="app-title" style="font-size:1.15rem;margin-bottom:4px;">${escapeHtml(studentName)}</h2>
+            <p style="color:var(--text-secondary);font-size:0.85rem;margin:0 0 18px 0;">${escapeHtml(subject || '')}</p>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                <button class="btn-secondary" id="journalRenameBtn">Переименовать ученика</button>
+                <button class="btn-danger" id="journalDeleteBtn">Удалить из журнала</button>
+                <button class="btn-secondary" onclick="closeDynamicSheet()">Отмена</button>
+            </div>
+            <p style="color:var(--text-secondary);font-size:0.75rem;margin-top:14px;line-height:1.4;">
+                Переименование обновит ФИО во всех оценках этого ученика в пространстве.<br>
+                Удаление уберёт все его оценки по предмету «${escapeHtml(subject || '')}» и запись из журнала.
+            </p>
+        </div>
+    `;
+    document.getElementById('sheetOverlay').classList.add('show');
+
+    document.getElementById('journalRenameBtn').addEventListener('click', () => {
+        renameJournalStudent(studentName);
+    });
+    document.getElementById('journalDeleteBtn').addEventListener('click', () => {
+        deleteJournalStudent(studentName);
+    });
+}
+
+async function renameJournalStudent(oldName) {
+    const newName = await showPrompt('Новое ФИО ученика', oldName);
+    if (!newName) return;
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName) return;
+
+    try {
+        await apiPost('/api/journal-students/rename', {
+            spaceId: window.__journal.spaceId,
+            oldName: oldName,
+            newName: trimmed
+        });
+        showToast('ФИО обновлено', 'success');
+        closeDynamicSheet();
+        await renderTeacherJournal(document.getElementById('tab-grades'), window.__journal.spaceId);
+    } catch (e) {
+        showToast(e.error || 'Ошибка переименования', 'error');
+    }
+}
+
+async function deleteJournalStudent(studentName) {
+    const subject = window.__journal.subject || '';
+    const ok = await showConfirm(
+        `Удалить «${studentName}»?`,
+        `Все оценки по предмету «${subject}» будут удалены. Действие необратимо.`,
+        'Удалить',
+        'Отмена',
+        true
+    );
+    if (!ok) return;
+
+    try {
+        await apiPost('/api/journal-students/delete', {
+            spaceId: window.__journal.spaceId,
+            studentName: studentName,
+            subjectName: subject
+        });
+        showToast('Ученик удалён', 'success');
+        closeDynamicSheet();
+        await renderTeacherJournal(document.getElementById('tab-grades'), window.__journal.spaceId);
+    } catch (e) {
+        showToast(e.error || 'Ошибка удаления', 'error');
+    }
 }
 
 async function openGradeCell(studentName, date) {
