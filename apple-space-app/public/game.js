@@ -186,7 +186,7 @@ function startRpgClicker(area) {
 
         if (monsterHp <= 0) {
             state.coins += monsterTypes[monsterIdx].reward * (1 + state.level * 0.3);
-            monsterIdx = Math.min(monsterIdx + 1, monsterTypes.length - 1);
+            monsterIdx = pickRandomMonster();
             state.monsterIdx = monsterIdx;
             maxMonsterHp = monsterTypes[monsterIdx].hp * (1 + state.level * 0.5);
             monsterHp = maxMonsterHp;
@@ -272,7 +272,7 @@ function startRpgClicker(area) {
             monsterHp -= dps / 10;
             if (monsterHp <= 0) {
                 state.coins += monsterTypes[monsterIdx].reward * (1 + state.level * 0.3);
-                monsterIdx = Math.min(monsterIdx + 1, monsterTypes.length - 1);
+                monsterIdx = pickRandomMonster();
                 state.monsterIdx = monsterIdx;
                 maxMonsterHp = monsterTypes[monsterIdx].hp * (1 + state.level * 0.5);
                 monsterHp = maxMonsterHp;
