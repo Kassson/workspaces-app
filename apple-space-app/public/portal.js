@@ -347,6 +347,7 @@ function monthKeyOf(dateStr) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
+// Дедуп-ключ (первые 2 слова, ё→е, сорт первых двух слов)
 function nameKey(fullName) {
     if (!fullName) return '';
     const parts = String(fullName)
@@ -359,6 +360,16 @@ function nameKey(fullName) {
     if (parts.length < 2) return parts.join(' ');
     const firstTwo = [parts[0], parts[1]].sort();
     return firstTwo.join(' ');
+}
+
+// Ключ для сортировки A→Я по фамилии — БЕЗ перестановки первых двух слов
+function surnameSortKey(fullName) {
+    if (!fullName) return '';
+    return String(fullName)
+        .trim()
+        .toLowerCase()
+        .replace(/ё/g, 'е')
+        .replace(/\s+/g, ' ');
 }
 
 function pickCanonicalName(names) {
@@ -552,7 +563,7 @@ async function loadJournalStudents(spaceId) {
         // Ученики из оценок
         const fromGrades = window.__journal.subjGrades.map(g => g.student_name);
 
-        // Группируем по ключу (фамилия + имя), чтобы не было дублей
+        // Группируем по дедуп-ключу (первые 2 слова, ё→е, сорт)
         const groups = {};
         const addToGroup = (name) => {
             if (!name || !name.trim()) return;
@@ -581,8 +592,13 @@ async function loadJournalStudents(spaceId) {
             order.push(canonicalByKey[key]);
         }
 
-        // ===== АВТОСОРТИРОВКА ПО АЛФАВИТУ (по name_key) =====
-        order.sort((a, b) => nameKey(a).localeCompare(nameKey(b), 'ru'));
+        // ===== АВТОСОРТИРОВКА A→Я ПО ФАМИЛИИ =====
+        // surnameSortKey НЕ переставляет первые два слова — ФИО в русской
+        // школе хранится как «Фамилия Имя Отчество», поэтому сортировка
+        // по строке = сортировка по фамилии. Совпадает с backend (excel.js).
+        order.sort((a, b) =>
+            surnameSortKey(a).localeCompare(surnameSortKey(b), 'ru')
+        );
 
         window.__journal.students = order;
         window.__journal.nameGroups = groups;
