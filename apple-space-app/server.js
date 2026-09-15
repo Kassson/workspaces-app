@@ -16,6 +16,7 @@ const storage = require('./storage');
 const { registerFileRoutes } = require('./routes/files');
 const { registerExcelRoutes } = require('./routes/excel');
 const { registerJournalRoutes } = require('./routes/journal');
+const { registerHiddenRoutes } = require('./routes/hidden');
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
     console.error('❌ JWT_SECRET не задан или короче 32 символов');
@@ -35,6 +36,7 @@ const io = new Server(server, {
     }
 });
 
+app.set('io', io);
 app.set('trust proxy', 1);
 
 app.use(helmet({
@@ -74,7 +76,6 @@ storage.initStorage();
 push.initWebPush();
 setInterval(() => push.checkLessonReminders(pool), 60 * 1000);
 
-// ================= РАСПИСАНИЕ ЗВОНКОВ =================
 const LESSON_TIMES = {
     1: { start: '09:00', end: '09:45' },
     2: { start: '10:00', end: '10:45' },
@@ -355,11 +356,9 @@ app.post('/api/settings/update', verifyJWT, async (req, res) => {
 });
 
 // ================= ВОССТАНОВЛЕНИЕ ПАРОЛЯ =================
-
 app.post('/api/auth/request-password-reset', authLimiter, async (req, res) => {
     const { login } = req.body;
     if (!login) return res.status(400).json({ error: 'Введите логин или email' });
-
     try {
         const userQ = await pool.query('SELECT * FROM users WHERE email = $1 OR username = $1', [login]);
         if (!userQ.rows.length) {
@@ -378,9 +377,7 @@ app.post('/api/auth/request-password-reset', authLimiter, async (req, res) => {
         } else {
             const code = user.is_teacher ? null : generateCode(4);
             const token = user.is_teacher ? crypto.randomBytes(32).toString('hex') : null;
-            const displayName = user.is_teacher
-                ? `Преподаватель: ${user.full_name}`
-                : user.full_name;
+            const displayName = user.is_teacher ? `Преподаватель: ${user.full_name}` : user.full_name;
             const r = await pool.query(
                 `INSERT INTO password_reset_requests (user_id, user_type, display_name, username, code, token)
                  VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
@@ -494,7 +491,6 @@ app.post('/api/auth/reset-password-with-code', authLimiter, async (req, res) => 
         );
 
         io.to('teachers').emit('password_reset_updated', { id: r.rows[0].id, status: 'resolved' });
-
         res.json({ ok: true });
     } catch (e) {
         console.error('reset-with-code:', e.message);
@@ -525,7 +521,6 @@ app.post('/api/auth/reset-password-with-token', authLimiter, async (req, res) =>
         );
 
         io.to('teachers').emit('password_reset_updated', { id: r.rows[0].id, status: 'resolved' });
-
         res.json({ ok: true });
     } catch (e) {
         console.error('reset-with-token:', e.message);
@@ -610,7 +605,8 @@ app.post('/api/spaces/:spaceId/rotate-invite-code', verifyJWT, requireSpaceAdmin
 // ================= УЧАСТНИКИ =================
 app.get('/api/spaces/:spaceId/members', verifyJWT, requireSpaceAccess, async (req, res) => {
     const r = await pool.query(
-        `SELECT u.id, u.username, u.full_name, u.is_teacher, u.avatar_emoji, sm.role, sm.custom_status, sm.joined_at, sm.muted_until
+        `SELECT u.id, u.username, u.full_name, u.is_teacher, u.avatar_emoji, sm.role, sm.custom_status, sm.joined_at, sm.muted_until,
+                COALESCE(sm.hidden_from_journal, FALSE) AS hidden_from_journal
          FROM space_members sm
          JOIN users u ON u.id = sm.user_id
          WHERE sm.space_id = $1 AND u.is_teacher = FALSE
@@ -977,26 +973,48 @@ app.get('/api/grades/:spaceId', verifyJWT, requireSpaceAccess, async (req, res) 
     const user = req.currentUser;
     const spaceId = req.params.spaceId;
     const subject = req.query.subject;
+    const ownerUserId = req.query.ownerUserId;
 
-    let query, params;
-    if (isSuperAdmin(user)) {
-        if (subject) {
-            query = `SELECT g.*, u.full_name AS teacher_name FROM grades g LEFT JOIN users u ON u.id = g.teacher_id WHERE g.space_id = $1 AND g.subject_name = $2 ORDER BY g.lesson_date DESC`;
-            params = [spaceId, subject];
-        } else {
-            query = `SELECT g.*, u.full_name AS teacher_name FROM grades g LEFT JOIN users u ON u.id = g.teacher_id WHERE g.space_id = $1 ORDER BY g.lesson_date DESC`;
-            params = [spaceId];
+    // ============ СТУДЕНТ ============
+    if (!user.is_teacher) {
+        // Просмотр чужих оценок (через шейр)
+        if (ownerUserId && ownerUserId !== user.id) {
+            const share = await pool.query(
+                'SELECT 1 FROM grade_shares WHERE space_id = $1 AND owner_user_id = $2 AND shared_with_user_id = $3',
+                [spaceId, ownerUserId, user.id]
+            );
+            if (!share.rows.length) return res.status(403).json({ error: 'Нет доступа к оценкам' });
+
+            const r = await pool.query(
+                `SELECT g.*, u.full_name AS teacher_name FROM grades g
+                 LEFT JOIN users u ON u.id = g.teacher_id
+                 WHERE g.space_id = $1 AND g.student_user_id = $2
+                 ORDER BY g.lesson_date DESC`,
+                [spaceId, ownerUserId]
+            );
+            return res.json(r.rows);
         }
-    } else if (user.is_teacher) {
-        if (subject) {
-            query = `SELECT g.*, u.full_name AS teacher_name FROM grades g LEFT JOIN users u ON u.id = g.teacher_id WHERE g.space_id = $1 AND g.teacher_id = $2 AND g.subject_name = $3 ORDER BY g.lesson_date DESC`;
-            params = [spaceId, user.id, subject];
-        } else {
-            query = `SELECT g.*, u.full_name AS teacher_name FROM grades g LEFT JOIN users u ON u.id = g.teacher_id WHERE g.space_id = $1 AND g.teacher_id = $2 ORDER BY g.lesson_date DESC`;
-            params = [spaceId, user.id];
+
+        // Свои оценки — проверяем, не скрыт ли
+        const member = await pool.query(
+            'SELECT hidden_from_journal FROM space_members WHERE space_id = $1 AND user_id = $2',
+            [spaceId, user.id]
+        );
+        const isHidden = member.rows[0]?.hidden_from_journal;
+
+        if (isHidden) {
+            const hasShare = await pool.query(
+                'SELECT 1 FROM grade_shares WHERE space_id = $1 AND owner_user_id = $2 LIMIT 1',
+                [spaceId, user.id]
+            );
+            if (!hasShare.rows.length) {
+                return res.status(403).json({
+                    error: 'hidden',
+                    message: 'Вы скрыты. Нажмите «Начать делиться», чтобы восстановить доступ к своим оценкам.'
+                });
+            }
         }
-    } else {
-        // Студент: авто-привязка старых оценок по ФИО + выборка
+
         try {
             await pool.query(
                 `UPDATE grades SET student_user_id = $1, updated_at = NOW()
@@ -1004,20 +1022,59 @@ app.get('/api/grades/:spaceId', verifyJWT, requireSpaceAccess, async (req, res) 
                    AND LOWER(TRIM(student_name)) = LOWER(TRIM($3))`,
                 [user.id, spaceId, user.full_name]
             );
-        } catch (e) {
-            console.warn('auto-link grades:', e.message);
-        }
+        } catch (e) {}
 
-        query = `SELECT g.*, u.full_name AS teacher_name
-                 FROM grades g
-                 LEFT JOIN users u ON u.id = g.teacher_id
-                 WHERE g.space_id = $1
-                   AND (
-                       g.student_user_id = $2
-                       OR (g.student_user_id IS NULL AND LOWER(TRIM(g.student_name)) = LOWER(TRIM($3)))
-                   )
-                 ORDER BY g.lesson_date DESC`;
-        params = [spaceId, user.id, user.full_name];
+        const r = await pool.query(
+            `SELECT g.*, u.full_name AS teacher_name FROM grades g
+             LEFT JOIN users u ON u.id = g.teacher_id
+             WHERE g.space_id = $1
+               AND (
+                   g.student_user_id = $2
+                   OR (g.student_user_id IS NULL AND LOWER(TRIM(g.student_name)) = LOWER(TRIM($3)))
+               )
+             ORDER BY g.lesson_date DESC`,
+            [spaceId, user.id, user.full_name]
+        );
+        return res.json(r.rows);
+    }
+
+    // ============ УЧИТЕЛЬ ============
+    const isRoot = user.username === 'root_teacher';
+    const hiddenFilter = isRoot ? '' : `AND (sm.hidden_from_journal = FALSE OR sm.hidden_from_journal IS NULL)`;
+
+    let query, params;
+    if (isSuperAdmin(user)) {
+        if (subject) {
+            query = `SELECT g.*, u.full_name AS teacher_name FROM grades g
+                     LEFT JOIN users u ON u.id = g.teacher_id
+                     LEFT JOIN space_members sm ON sm.space_id = g.space_id AND sm.user_id = g.student_user_id
+                     WHERE g.space_id = $1 AND g.subject_name = $2 ${hiddenFilter}
+                     ORDER BY g.lesson_date DESC`;
+            params = [spaceId, subject];
+        } else {
+            query = `SELECT g.*, u.full_name AS teacher_name FROM grades g
+                     LEFT JOIN users u ON u.id = g.teacher_id
+                     LEFT JOIN space_members sm ON sm.space_id = g.space_id AND sm.user_id = g.student_user_id
+                     WHERE g.space_id = $1 ${hiddenFilter}
+                     ORDER BY g.lesson_date DESC`;
+            params = [spaceId];
+        }
+    } else if (user.is_teacher) {
+        if (subject) {
+            query = `SELECT g.*, u.full_name AS teacher_name FROM grades g
+                     LEFT JOIN users u ON u.id = g.teacher_id
+                     LEFT JOIN space_members sm ON sm.space_id = g.space_id AND sm.user_id = g.student_user_id
+                     WHERE g.space_id = $1 AND g.teacher_id = $2 AND g.subject_name = $3 ${hiddenFilter}
+                     ORDER BY g.lesson_date DESC`;
+            params = [spaceId, user.id, subject];
+        } else {
+            query = `SELECT g.*, u.full_name AS teacher_name FROM grades g
+                     LEFT JOIN users u ON u.id = g.teacher_id
+                     LEFT JOIN space_members sm ON sm.space_id = g.space_id AND sm.user_id = g.student_user_id
+                     WHERE g.space_id = $1 AND g.teacher_id = $2 ${hiddenFilter}
+                     ORDER BY g.lesson_date DESC`;
+            params = [spaceId, user.id];
+        }
     }
 
     const r = await pool.query(query, params);
@@ -1033,7 +1090,6 @@ app.post('/api/grades', verifyJWT, async (req, res) => {
         return res.status(400).json({ error: 'Заполните поля' });
     }
 
-    // Авто-поиск student_user_id по ФИО, если не передан
     let finalStudentUserId = studentUserId || null;
     if (!finalStudentUserId) {
         try {
@@ -1289,10 +1345,11 @@ app.post('/api/presence/inactive', verifyJWT, async (req, res) => {
     res.json({ ok: true });
 });
 
-// ================= ФАЙЛЫ / EXCEL / ЖУРНАЛ =================
+// ================= ФАЙЛЫ / EXCEL / ЖУРНАЛ / СКРЫТИЕ =================
 registerFileRoutes(app, pool, verifyJWT, requireSpaceAccess);
 registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin);
 registerJournalRoutes(app, pool, verifyJWT, requireSpaceAccess);
+registerHiddenRoutes(app, pool, verifyJWT, requireSpaceAccess, requireSpaceAdmin);
 
 // ================= ИГРЫ =================
 const VALID_GAMES = ['2048', 'snake-arena', 'rpg-clicker', 'memory', 'reaction'];
@@ -1345,9 +1402,7 @@ io.on('connection', async (socket) => {
             if (user) {
                 socket.userId = user.id;
                 socket.gameUser = user;
-                if (isSuperAdmin(user)) {
-                    socket.join('teachers');
-                }
+                if (isSuperAdmin(user)) socket.join('teachers');
             }
         }
     } catch (e) { }
@@ -1369,9 +1424,7 @@ io.on('connection', async (socket) => {
         const user = await getUserById(socket.userId);
         if (!user) return;
         socket.to(`space:${socket.spaceId}`).emit('user_typing', {
-            userId: user.id,
-            nickname: user.username,
-            fullName: user.full_name
+            userId: user.id, nickname: user.username, fullName: user.full_name
         });
     });
 
@@ -1437,21 +1490,15 @@ io.on('connection', async (socket) => {
 
         const fullMessage = {
             ...r.rows[0],
-            full_name: user.full_name,
-            username: user.username,
-            is_teacher: user.is_teacher,
-            avatar_emoji: user.avatar_emoji,
-            reactions: [],
-            files: filesWithUrls,
-            reply_to: replyTo
+            full_name: user.full_name, username: user.username,
+            is_teacher: user.is_teacher, avatar_emoji: user.avatar_emoji,
+            reactions: [], files: filesWithUrls, reply_to: replyTo
         };
 
         io.to(`space:${socket.spaceId}`).emit('new_message', fullMessage);
 
         push.notifyChatMessage(pool, socket.spaceId, user, text, {
-            replyToId,
-            mentionedIds,
-            messageId
+            replyToId, mentionedIds, messageId
         }).catch(e => console.error('push chat:', e.message));
     });
 
@@ -1477,12 +1524,8 @@ app.get('/api/health', async (req, res) => {
         await pool.query('SELECT 1');
         const mem = process.memoryUsage();
         res.json({
-            ok: true,
-            db: 'ok',
-            memory: {
-                rss: Math.round(mem.rss / 1024 / 1024) + ' MB',
-                heap: Math.round(mem.heapUsed / 1024 / 1024) + ' MB'
-            },
+            ok: true, db: 'ok',
+            memory: { rss: Math.round(mem.rss / 1024 / 1024) + ' MB', heap: Math.round(mem.heapUsed / 1024 / 1024) + ' MB' },
             uptime: Math.round(process.uptime()) + ' s'
         });
     } catch (e) {
@@ -1501,7 +1544,7 @@ setInterval(cleanupOldMessages, 24 * 60 * 60 * 1000);
 async function cleanupOldResetRequests() {
     try {
         await pool.query("DELETE FROM password_reset_requests WHERE created_at < NOW() - INTERVAL '24 hours' AND status != 'resolved'");
-    } catch (e) { /* тихо */ }
+    } catch (e) {}
 }
 setInterval(cleanupOldResetRequests, 60 * 60 * 1000);
 
@@ -1531,6 +1574,7 @@ async function ensureSchema() {
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_emoji VARCHAR(50) DEFAULT '👤'`,
         `ALTER TABLE space_members ADD COLUMN IF NOT EXISTS muted_until TIMESTAMP WITH TIME ZONE`,
         `ALTER TABLE space_members ADD COLUMN IF NOT EXISTS custom_status VARCHAR(50) DEFAULT NULL`,
+        `ALTER TABLE space_members ADD COLUMN IF NOT EXISTS hidden_from_journal BOOLEAN DEFAULT FALSE`,
         `ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES chat_messages(id) ON DELETE SET NULL`
     ];
     for (const sql of migrations) {
