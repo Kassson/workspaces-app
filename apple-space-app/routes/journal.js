@@ -11,10 +11,14 @@ function registerJournalRoutes(app, pool, verifyJWT, requireSpaceAccess) {
             const { subject } = req.query;
             let query, params;
             if (subject) {
-                query = 'SELECT * FROM journal_students WHERE space_id = $1 AND subject_name = $2 ORDER BY student_name';
+                query = `SELECT * FROM journal_students
+                         WHERE space_id = $1 AND subject_name = $2
+                         ORDER BY sort_order ASC, student_name ASC`;
                 params = [spaceId, subject];
             } else {
-                query = 'SELECT * FROM journal_students WHERE space_id = $1 ORDER BY student_name';
+                query = `SELECT * FROM journal_students
+                         WHERE space_id = $1
+                         ORDER BY sort_order ASC, student_name ASC`;
                 params = [spaceId];
             }
             const r = await pool.query(query, params);
@@ -46,12 +50,20 @@ function registerJournalRoutes(app, pool, verifyJWT, requireSpaceAccess) {
                 return res.status(403).json({ error: 'Нет доступа к пространству' });
             }
 
+            // Максимальный sort_order для этого пространства и предмета
+            const maxQ = await pool.query(
+                'SELECT COALESCE(MAX(sort_order), 0) AS m FROM journal_students WHERE space_id = $1 AND subject_name = $2',
+                [spaceId, subjectName.trim()]
+            );
+            const nextOrder = (maxQ.rows[0].m || 0) + 1;
+
             const r = await pool.query(
-                `INSERT INTO journal_students (space_id, subject_name, student_name)
-                 VALUES ($1, $2, $3)
-                 ON CONFLICT (space_id, subject_name, student_name) DO NOTHING
+                `INSERT INTO journal_students (space_id, subject_name, student_name, sort_order)
+                 VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (space_id, subject_name, student_name) DO UPDATE
+                 SET sort_order = EXCLUDED.sort_order
                  RETURNING *`,
-                [spaceId, subjectName.trim(), studentName.trim()]
+                [spaceId, subjectName.trim(), studentName.trim(), nextOrder]
             );
             res.json(r.rows[0] || { ok: true });
         } catch (e) {
@@ -76,8 +88,6 @@ function registerJournalRoutes(app, pool, verifyJWT, requireSpaceAccess) {
 
     // ========================================================================
     //  POST /api/journal-students/rename
-    //  Переименовать ученика (обновляет и оценки, и записи в journal_students)
-    //  Body: { spaceId, oldName, newName }
     // ========================================================================
     app.post('/api/journal-students/rename', verifyJWT, async (req, res) => {
         try {
@@ -93,7 +103,6 @@ function registerJournalRoutes(app, pool, verifyJWT, requireSpaceAccess) {
                 return res.json({ ok: true, gradesUpdated: 0, studentsUpdated: 0 });
             }
 
-            // Проверка доступа к пространству
             const isMember = await pool.query(
                 'SELECT 1 FROM space_members WHERE space_id = $1 AND user_id = $2',
                 [spaceId, req.userId]
@@ -102,24 +111,40 @@ function registerJournalRoutes(app, pool, verifyJWT, requireSpaceAccess) {
                 return res.status(403).json({ error: 'Нет доступа' });
             }
 
-            // Обновляем все оценки этого ученика в этом пространстве
+            const oldKeyParts = String(oldName).trim().toLowerCase().replace(/\s+/g, ' ').split(' ').slice(0, 2);
+            const oldKey = oldKeyParts.join(' ');
+
+            const allNamesQ = await pool.query(
+                `SELECT DISTINCT student_name FROM grades WHERE space_id = $1`,
+                [spaceId]
+            );
+            const matchingNames = allNamesQ.rows
+                .map(r => r.student_name)
+                .filter(n => {
+                    const parts = String(n).trim().toLowerCase().replace(/\s+/g, ' ').split(' ').slice(0, 2);
+                    return parts.join(' ') === oldKey;
+                });
+
+            if (!matchingNames.length) matchingNames.push(oldName);
+
             const r1 = await pool.query(
                 `UPDATE grades SET student_name = $1, updated_at = NOW()
-                 WHERE space_id = $2 AND student_name = $3`,
-                [trimmed, spaceId, oldName]
+                 WHERE space_id = $2 AND student_name = ANY($3::text[])`,
+                [trimmed, spaceId, matchingNames]
             );
-            // Обновляем записи в journal_students
+
             const r2 = await pool.query(
                 `UPDATE journal_students SET student_name = $1
-                 WHERE space_id = $2 AND student_name = $3`,
-                [trimmed, spaceId, oldName]
+                 WHERE space_id = $2 AND student_name = ANY($3::text[])`,
+                [trimmed, spaceId, matchingNames]
             );
 
             res.json({
                 ok: true,
                 newName: trimmed,
                 gradesUpdated: r1.rowCount,
-                studentsUpdated: r2.rowCount
+                studentsUpdated: r2.rowCount,
+                renamedVariants: matchingNames
             });
         } catch (e) {
             console.error('journal-students rename:', e.message);
@@ -129,8 +154,6 @@ function registerJournalRoutes(app, pool, verifyJWT, requireSpaceAccess) {
 
     // ========================================================================
     //  POST /api/journal-students/delete
-    //  Удалить ученика из журнала (по предмету либо полностью)
-    //  Body: { spaceId, studentName, subjectName? }
     // ========================================================================
     app.post('/api/journal-students/delete', verifyJWT, async (req, res) => {
         try {
@@ -149,32 +172,56 @@ function registerJournalRoutes(app, pool, verifyJWT, requireSpaceAccess) {
                 return res.status(403).json({ error: 'Нет доступа' });
             }
 
-            // Удаляем оценки (в текущем предмете или во всех)
-            let q1, p1;
-            if (subjectName) {
-                q1 = 'DELETE FROM grades WHERE space_id = $1 AND student_name = $2 AND subject_name = $3';
-                p1 = [spaceId, studentName, subjectName];
-            } else {
-                q1 = 'DELETE FROM grades WHERE space_id = $1 AND student_name = $2';
-                p1 = [spaceId, studentName];
-            }
-            const r1 = await pool.query(q1, p1);
+            const keyParts = String(studentName).trim().toLowerCase().replace(/\s+/g, ' ').split(' ').slice(0, 2);
+            const key = keyParts.join(' ');
 
-            // Удаляем записи в journal_students
-            let q2, p2;
+            let namesQ;
             if (subjectName) {
-                q2 = 'DELETE FROM journal_students WHERE space_id = $1 AND student_name = $2 AND subject_name = $3';
-                p2 = [spaceId, studentName, subjectName];
+                namesQ = await pool.query(
+                    `SELECT DISTINCT student_name FROM grades WHERE space_id = $1 AND subject_name = $2`,
+                    [spaceId, subjectName]
+                );
             } else {
-                q2 = 'DELETE FROM journal_students WHERE space_id = $1 AND student_name = $2';
-                p2 = [spaceId, studentName];
+                namesQ = await pool.query(
+                    `SELECT DISTINCT student_name FROM grades WHERE space_id = $1`,
+                    [spaceId]
+                );
             }
-            const r2 = await pool.query(q2, p2);
+            const matchingNames = namesQ.rows
+                .map(r => r.student_name)
+                .filter(n => {
+                    const parts = String(n).trim().toLowerCase().replace(/\s+/g, ' ').split(' ').slice(0, 2);
+                    return parts.join(' ') === key;
+                });
+
+            if (!matchingNames.length) matchingNames.push(studentName);
+
+            let r1, r2;
+            if (subjectName) {
+                r1 = await pool.query(
+                    `DELETE FROM grades WHERE space_id = $1 AND student_name = ANY($2::text[]) AND subject_name = $3`,
+                    [spaceId, matchingNames, subjectName]
+                );
+                r2 = await pool.query(
+                    `DELETE FROM journal_students WHERE space_id = $1 AND student_name = ANY($2::text[]) AND subject_name = $3`,
+                    [spaceId, matchingNames, subjectName]
+                );
+            } else {
+                r1 = await pool.query(
+                    `DELETE FROM grades WHERE space_id = $1 AND student_name = ANY($2::text[])`,
+                    [spaceId, matchingNames]
+                );
+                r2 = await pool.query(
+                    `DELETE FROM journal_students WHERE space_id = $1 AND student_name = ANY($2::text[])`,
+                    [spaceId, matchingNames]
+                );
+            }
 
             res.json({
                 ok: true,
                 gradesDeleted: r1.rowCount,
-                studentsDeleted: r2.rowCount
+                studentsDeleted: r2.rowCount,
+                deletedVariants: matchingNames
             });
         } catch (e) {
             console.error('journal-students delete:', e.message);
