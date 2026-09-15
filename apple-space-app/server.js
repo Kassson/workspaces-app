@@ -79,10 +79,47 @@ const DAY_MAP = {
     'ЧЕТВЕРГ': 4, 'ЧТ': 4, 'ПЯТНИЦА': 5, 'ПТ': 5, 'СУББОТА': 6, 'СБ': 6,
     'ВОСКРЕСЕНЬЕ': 7, 'ВС': 7
 };
-const DEFAULT_SCHEDULE_TEMPLATE = `День\t№ урока\tПредмет\tКабинет\n` + Array.from({length:5}, (_,i) => {
-    const d = ['ПОНЕДЕЛЬНИК','ВТОРНИК','СРЕДА','ЧЕТВЕРГ','ПЯТНИЦА'][i];
-    return Array.from({length:8}, (_,j) => `${d}\t${j+1}\t\t`).join('\n');
-}).join('\n');
+const DEFAULT_SCHEDULE_TEMPLATE = `День\t№ урока\tПредмет\tКабинет
+ПОНЕДЕЛЬНИК\t1\t\t
+ПОНЕДЕЛЬНИК\t2\t\t
+ПОНЕДЕЛЬНИК\t3\t\t
+ПОНЕДЕЛЬНИК\t4\t\t
+ПОНЕДЕЛЬНИК\t5\t\t
+ПОНЕДЕЛЬНИК\t6\t\t
+ПОНЕДЕЛЬНИК\t7\t\t
+ПОНЕДЕЛЬНИК\t8\t\t
+ВТОРНИК\t1\t\t
+ВТОРНИК\t2\t\t
+ВТОРНИК\t3\t\t
+ВТОРНИК\t4\t\t
+ВТОРНИК\t5\t\t
+ВТОРНИК\t6\t\t
+ВТОРНИК\t7\t\t
+ВТОРНИК\t8\t\t
+СРЕДА\t1\t\t
+СРЕДА\t2\t\t
+СРЕДА\t3\t\t
+СРЕДА\t4\t\t
+СРЕДА\t5\t\t
+СРЕДА\t6\t\t
+СРЕДА\t7\t\t
+СРЕДА\t8\t\t
+ЧЕТВЕРГ\t1\t\t
+ЧЕТВЕРГ\t2\t\t
+ЧЕТВЕРГ\t3\t\t
+ЧЕТВЕРГ\t4\t\t
+ЧЕТВЕРГ\t5\t\t
+ЧЕТВЕРГ\t6\t\t
+ЧЕТВЕРГ\t7\t\t
+ЧЕТВЕРГ\t8\t\t
+ПЯТНИЦА\t1\t\t
+ПЯТНИЦА\t2\t\t
+ПЯТНИЦА\t3\t\t
+ПЯТНИЦА\t4\t\t
+ПЯТНИЦА\t5\t\t
+ПЯТНИЦА\t6\t\t
+ПЯТНИЦА\t7\t\t
+ПЯТНИЦА\t8\t\t`;
 
 const ALLOWED_DOMAINS = ['gmail.com', 'mail.ru', 'yandex.ru', 'rambler.ru', 'bk.ru', 'list.ru', 'inbox.ru', 'ya.ru', 'outlook.com', 'yahoo.com'];
 function isValidEmailDomain(email) {
@@ -173,7 +210,8 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
     try {
         const hash = await bcrypt.hash(password, 10);
         await pool.query(
-            `INSERT INTO users (username, full_name, email, password_hash, is_teacher, is_teacher_verified, email_verified) VALUES ($1, $2, $3, $4, false, false, true)`,
+            `INSERT INTO users (username, full_name, email, password_hash, is_teacher, is_teacher_verified, email_verified)
+             VALUES ($1, $2, $3, $4, false, false, true)`,
             [nickName, `${firstName} ${lastName}`, userEmail, hash]
         );
         res.json({ message: 'Успех' });
@@ -191,7 +229,8 @@ app.post('/api/teach/register', authLimiter, async (req, res) => {
         const code = 'T-' + generateCode(4);
         const username = userEmail.split('@')[0] + '_' + generateCode(3);
         await pool.query(
-            `INSERT INTO users (username, full_name, email, password_hash, is_teacher, is_teacher_verified, verification_code, email_verified) VALUES ($1, $2, $3, $4, true, false, $5, true)`,
+            `INSERT INTO users (username, full_name, email, password_hash, is_teacher, is_teacher_verified, verification_code, email_verified)
+             VALUES ($1, $2, $3, $4, true, false, $5, true)`,
             [username, fullName, userEmail, hash, code]
         );
         res.json({ code });
@@ -451,7 +490,6 @@ app.post('/api/spaces/:spaceId/rotate-invite-code', verifyJWT, requireSpaceAdmin
 });
 
 // ================= УЧАСТНИКИ =================
-// Скрытые видны: Root (все), сам скрытый (себя). Остальные — нет.
 app.get('/api/spaces/:spaceId/members', verifyJWT, requireSpaceAccess, async (req, res) => {
     const user = req.currentUser;
     const root = isRoot(user);
@@ -462,8 +500,8 @@ app.get('/api/spaces/:spaceId/members', verifyJWT, requireSpaceAccess, async (re
          JOIN users u ON u.id = sm.user_id
          WHERE sm.space_id = $1 AND u.is_teacher = FALSE
            AND (
-               $2::boolean = TRUE           -- Root видит всех
-               OR sm.user_id = $3            -- сам себя видит
+               $2::boolean = TRUE
+               OR sm.user_id = $3
                OR COALESCE(sm.hidden_from_journal, FALSE) = FALSE
            )
          ORDER BY CASE sm.role WHEN 'admin' THEN 0 WHEN 'starosta' THEN 1 ELSE 2 END, u.full_name`,
@@ -698,7 +736,6 @@ app.get('/api/homework/:spaceId', verifyJWT, requireSpaceAccess, async (req, res
     res.json(hw.rows);
 });
 
-// Статистика ДЗ — фильтруем скрытых для не-Root
 app.get('/api/homework/:id/stats', verifyJWT, async (req, res) => {
     const user = await getUserById(req.userId);
     const hw = await pool.query('SELECT * FROM homeworks WHERE id = $1', [req.params.id]);
@@ -707,14 +744,12 @@ app.get('/api/homework/:id/stats', verifyJWT, async (req, res) => {
     if (!(await isSpaceMember(user, spaceId))) return res.status(403).json({ error: 'Нет доступа' });
     const isAdmin = await isSpaceAdmin(user, spaceId);
     if (!isAdmin) return res.status(403).json({ error: 'Только преподаватель/админ' });
-
     const root = isRoot(user);
     const dueDate = hw.rows[0].due_date;
     const now = new Date();
     const dueDateObj = new Date(dueDate);
     dueDateObj.setHours(23, 59, 59, 999);
     const isOverdue = dueDateObj < now;
-
     const r = await pool.query(
         `SELECT u.id, u.full_name, u.username, u.avatar_emoji,
                 hc.completed_at, hc.attachment_url,
@@ -729,7 +764,6 @@ app.get('/api/homework/:id/stats', verifyJWT, async (req, res) => {
          ORDER BY (hc.id IS NULL) ASC, u.full_name ASC`,
         [req.params.id, spaceId, root]
     );
-
     const students = r.rows.map(s => ({
         id: s.id, fullName: s.full_name, username: s.username,
         avatarEmoji: s.avatar_emoji || '👤',
@@ -737,7 +771,6 @@ app.get('/api/homework/:id/stats', verifyJWT, async (req, res) => {
         gradeValue: s.grade_value,
         status: s.is_done ? 'done' : (isOverdue ? 'overdue' : 'pending')
     }));
-
     const totalCount = students.length;
     const completedCount = students.filter(s => s.isDone).length;
     const percentage = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
@@ -783,7 +816,6 @@ app.get('/api/grades/:spaceId', verifyJWT, requireSpaceAccess, async (req, res) 
 
     // ============ СТУДЕНТ ============
     if (!user.is_teacher) {
-        // Просмотр чужих оценок (через шейр)
         if (ownerUserId && ownerUserId !== user.id) {
             const share = await pool.query(
                 'SELECT 1 FROM grade_shares WHERE space_id = $1 AND owner_user_id = $2 AND shared_with_user_id = $3',
@@ -797,7 +829,6 @@ app.get('/api/grades/:spaceId', verifyJWT, requireSpaceAccess, async (req, res) 
             return res.json(r.rows);
         }
 
-        // Свои оценки — проверяем, не скрыт ли
         const member = await pool.query('SELECT hidden_from_journal FROM space_members WHERE space_id = $1 AND user_id = $2', [spaceId, user.id]);
         const isHidden = member.rows[0]?.hidden_from_journal;
         if (isHidden) {
@@ -805,19 +836,29 @@ app.get('/api/grades/:spaceId', verifyJWT, requireSpaceAccess, async (req, res) 
             if (!hasShare.rows.length) return res.status(403).json({ error: 'hidden', message: 'Вы скрыты. Нажмите «Начать делиться», чтобы восстановить доступ к своим оценкам.' });
         }
 
+        // Авто-привязка через SQL-функцию name_key
         try {
             await pool.query(
-                `UPDATE grades SET student_user_id = $1, updated_at = NOW() WHERE space_id = $2 AND student_user_id IS NULL AND LOWER(TRIM(student_name)) = LOWER(TRIM($3))`,
+                `UPDATE grades SET student_user_id = $1, updated_at = NOW()
+                 WHERE space_id = $2 AND student_user_id IS NULL
+                   AND name_key(student_name) = name_key($3)`,
                 [user.id, spaceId, user.full_name]
             );
-        } catch (e) {}
+        } catch (e) {
+            console.warn('auto-link grades:', e.message);
+        }
 
         const r = await pool.query(
-            `SELECT g.*, u.full_name AS teacher_name FROM grades g LEFT JOIN users u ON u.id = g.teacher_id
-             WHERE g.space_id = $1 AND (
-                 g.student_user_id = $2
-                 OR (g.student_user_id IS NULL AND LOWER(TRIM(g.student_name)) = LOWER(TRIM($3)))
-             )
+            `SELECT g.*, u.full_name AS teacher_name
+             FROM grades g LEFT JOIN users u ON u.id = g.teacher_id
+             WHERE g.space_id = $1
+               AND (
+                   g.student_user_id = $2
+                   OR (
+                       g.student_user_id IS NULL
+                       AND name_key(g.student_name) = name_key($3)
+                   )
+               )
              ORDER BY g.lesson_date DESC`,
             [spaceId, user.id, user.full_name]
         );
@@ -873,7 +914,6 @@ app.post('/api/grades', verifyJWT, async (req, res) => {
     const { spaceId, studentName, studentUserId, subjectName, gradeValue, attendance, lessonDate, homeworkId, comment } = req.body;
     if (!spaceId || !studentName || !subjectName || !lessonDate) return res.status(400).json({ error: 'Заполните поля' });
 
-    // Проверяем, не скрыт ли ученик (для не-Root)
     if (!isRoot(user)) {
         let checkUserId = studentUserId;
         if (!checkUserId) {
@@ -897,7 +937,17 @@ app.post('/api/grades', verifyJWT, async (req, res) => {
     let finalStudentUserId = studentUserId || null;
     if (!finalStudentUserId) {
         try {
-            const match = await pool.query(`SELECT id FROM users WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1)) AND is_teacher = FALSE LIMIT 1`, [studentName]);
+            const match = await pool.query(
+                `SELECT u.id FROM users u
+                 WHERE u.is_teacher = FALSE
+                   AND EXISTS (
+                       SELECT 1 FROM space_members sm
+                       WHERE sm.space_id = $1 AND sm.user_id = u.id
+                         AND name_key(u.full_name) = name_key($2)
+                   )
+                 LIMIT 1`,
+                [spaceId, studentName]
+            );
             if (match.rows.length) finalStudentUserId = match.rows[0].id;
         } catch (e) {}
     }
@@ -1084,19 +1134,16 @@ registerHiddenRoutes(app, pool, verifyJWT, requireSpaceAccess, requireSpaceAdmin
 
 // ================= ИГРЫ =================
 const VALID_GAMES = ['2048', 'snake-arena', 'rpg-clicker', 'memory', 'reaction'];
-
 app.get('/api/games-global/:gameId/leaderboard', verifyJWT, async (req, res) => {
     if (!VALID_GAMES.includes(req.params.gameId)) return res.json([]);
     const r = await pool.query(`SELECT u.id, u.full_name, u.username, MAX(gs.score)::int AS score FROM game_scores gs JOIN users u ON u.id = gs.user_id WHERE gs.game_id = $1 GROUP BY u.id, u.full_name, u.username ORDER BY score DESC LIMIT 20`, [req.params.gameId]);
     res.json(r.rows);
 });
-
 app.get('/api/games/:spaceId/:gameId/leaderboard', verifyJWT, requireSpaceAccess, async (req, res) => {
     if (!VALID_GAMES.includes(req.params.gameId)) return res.json([]);
     const r = await pool.query(`SELECT gs.score, gs.updated_at, u.full_name, u.username FROM game_scores gs JOIN users u ON u.id = gs.user_id WHERE gs.space_id = $1 AND gs.game_id = $2 ORDER BY gs.score DESC LIMIT 20`, [req.params.spaceId, req.params.gameId]);
     res.json(r.rows);
 });
-
 app.post('/api/games/:spaceId/:gameId/score', verifyJWT, requireSpaceAccess, async (req, res) => {
     const { score } = req.body;
     if (!VALID_GAMES.includes(req.params.gameId)) return res.status(400).json({ error: 'Неизвестная игра' });
@@ -1104,7 +1151,6 @@ app.post('/api/games/:spaceId/:gameId/score', verifyJWT, requireSpaceAccess, asy
     await pool.query(`INSERT INTO game_scores (space_id, user_id, game_id, score) VALUES ($1,$2,$3,$4) ON CONFLICT (space_id, user_id, game_id) DO UPDATE SET score = GREATEST(game_scores.score, EXCLUDED.score), updated_at = NOW()`, [req.params.spaceId, req.currentUser.id, req.params.gameId, Math.floor(score)]);
     res.json({ message: 'Сохранено' });
 });
-
 app.post('/api/games/:spaceId/:gameId/reset', verifyJWT, requireSpaceAdmin, async (req, res) => {
     await pool.query('DELETE FROM game_scores WHERE space_id = $1 AND game_id = $2', [req.params.spaceId, req.params.gameId]);
     res.json({ message: 'Рекорды сброшены' });
@@ -1252,7 +1298,9 @@ async function ensureSchema() {
         `ALTER TABLE space_members ADD COLUMN IF NOT EXISTS muted_until TIMESTAMP WITH TIME ZONE`,
         `ALTER TABLE space_members ADD COLUMN IF NOT EXISTS custom_status VARCHAR(50) DEFAULT NULL`,
         `ALTER TABLE space_members ADD COLUMN IF NOT EXISTS hidden_from_journal BOOLEAN DEFAULT FALSE`,
-        `ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES chat_messages(id) ON DELETE SET NULL`
+        `ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES chat_messages(id) ON DELETE SET NULL`,
+        `ALTER TABLE journal_students ADD COLUMN IF NOT EXISTS sort_order INT DEFAULT 0`,
+        `CREATE INDEX IF NOT EXISTS idx_journal_students_order ON journal_students(space_id, subject_name, sort_order)`
     ];
     for (const sql of migrations) {
         try { await pool.query(sql); } catch (e) { console.warn('Миграция:', e.message); }
