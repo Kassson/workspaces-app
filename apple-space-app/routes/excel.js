@@ -1,6 +1,5 @@
 // ============================================================================
 //  routes/excel.js — импорт и экспорт журнала оценок в Excel
-//  Формат: Предмет + Месяц + строки учеников × дни 1–31
 // ============================================================================
 const express = require('express');
 const ExcelJS = require('exceljs');
@@ -19,9 +18,7 @@ function getDaysInMonth(year, month) {
 
 function parseMonthKey(mk) {
     const parts = String(mk).split('-');
-    const y = parseInt(parts[0]);
-    const m = parseInt(parts[1]);
-    return { year: y, month: m };
+    return { year: parseInt(parts[0]), month: parseInt(parts[1]) };
 }
 
 function formatMonthLabel(mk) {
@@ -29,7 +26,6 @@ function formatMonthLabel(mk) {
     return `${MONTH_NAMES_RU[month]} ${year}`;
 }
 
-// Парсит содержимое ячейки: "5", "Н", "О", "5Н", "5О", пусто
 function parseCellValue(raw) {
     if (raw === null || raw === undefined || raw === '') return null;
     const s = String(raw).trim().toUpperCase();
@@ -40,15 +36,6 @@ function parseCellValue(raw) {
     const att = m[2] === 'Н' ? 'absent' : m[2] === 'О' ? 'late' : 'present';
     if (!grade && att === 'present') return null;
     return { grade, attendance: att };
-}
-
-// Формат ячейки для экспорта: "5", "Н", "О", "5Н", "5О", ""
-function formatCellValue(grade, attendance) {
-    const parts = [];
-    if (grade) parts.push(String(grade));
-    if (attendance === 'absent') parts.push('Н');
-    else if (attendance === 'late') parts.push('О');
-    return parts.join('');
 }
 
 function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
@@ -81,7 +68,6 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
             const monthStart = `${year}-${String(m).padStart(2, '0')}-01`;
             const monthEnd = `${year}-${String(m).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
 
-            // Оценки за месяц
             const grades = (await pool.query(
                 `SELECT * FROM grades
                  WHERE space_id = $1 AND subject_name = $2
@@ -90,7 +76,6 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                 [spaceId, subject, monthStart, monthEnd]
             )).rows;
 
-            // Ученики: из пространства + из виртуальных + из оценок
             const members = (await pool.query(
                 `SELECT u.full_name FROM space_members sm
                  JOIN users u ON u.id = sm.user_id
@@ -111,23 +96,18 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
             wb.creator = 'Workspaces';
             const ws = wb.addWorksheet('Журнал');
 
-            // Строка 1: Предмет
             ws.getCell('A1').value = 'Предмет';
             ws.getCell('B1').value = subject;
             ws.getCell('A1').font = { bold: true };
             ws.getCell('B1').font = { bold: true, color: { argb: 'FF0088CC' } };
 
-            // Строка 2: Месяц
             ws.getCell('A2').value = 'Месяц';
-            ws.getCell('B2').value = month; // YYYY-MM
+            ws.getCell('B2').value = month;
             ws.getCell('A2').font = { bold: true };
             ws.getCell('B2').font = { bold: true, color: { argb: 'FF0088CC' } };
-
-            // Строка 2: подпись месяца (для читаемости)
             ws.getCell('C2').value = formatMonthLabel(month);
             ws.getCell('C2').font = { italic: true, color: { argb: 'FF707579' } };
 
-            // Строка 3: заголовки
             const headerRow = 3;
             ws.getCell(headerRow, 1).value = 'ФИО';
             ws.getCell(headerRow, 1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -148,14 +128,11 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
             ws.getCell(headerRow, avgCellCol).alignment = { horizontal: 'center', vertical: 'middle' };
 
             ws.getRow(headerRow).height = 26;
-
-            // Ширина колонок
             ws.getColumn(1).width = 28;
             for (let d = 1; d <= daysInMonth + 1; d++) {
                 ws.getColumn(1 + d).width = 5;
             }
 
-            // Строки учеников
             let row = headerRow + 1;
             for (const st of allStudents) {
                 ws.getCell(row, 1).value = st;
@@ -167,13 +144,26 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                     const dateStr = `${year}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
                     const g = studentGrades.find(x => String(x.lesson_date).slice(0, 10) === dateStr);
                     const cell = ws.getCell(row, 1 + d);
+
                     if (g) {
-                        cell.value = formatCellValue(g.grade_value, g.attendance);
-                        if (g.attendance === 'absent') cell.font = { color: { argb: 'FFFF453A' }, bold: true };
-                        else if (g.attendance === 'late') cell.font = { color: { argb: 'FFFF9F0A' }, bold: true };
-                        else if (g.grade_value) cell.font = { bold: true };
+                        // Определяем содержимое и цвет
+                        if (g.attendance === 'absent') {
+                            // Красный фон, буква Н или "5"
+                            cell.value = g.grade_value ? String(g.grade_value) : 'Н';
+                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF453A' } };
+                            cell.font = { color: { argb: 'FFFFFFFF' }, bold: true };
+                        } else if (g.attendance === 'late') {
+                            // Жёлтый фон, "О" или оценка
+                            cell.value = g.grade_value ? String(g.grade_value) : 'О';
+                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF9F0A' } };
+                            cell.font = { color: { argb: 'FFFFFFFF' }, bold: true };
+                        } else if (g.grade_value) {
+                            // Обычная оценка
+                            cell.value = String(g.grade_value);
+                            cell.font = { bold: true };
+                        }
                     }
-                    cell.alignment = { horizontal: 'center' };
+                    cell.alignment = { horizontal: 'center', vertical: 'middle' };
                 }
 
                 const numeric = studentGrades.filter(g => g.grade_value);
@@ -187,7 +177,6 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                 row++;
             }
 
-            // Границы
             for (let r = headerRow; r < row; r++) {
                 for (let c = 1; c <= avgCellCol; c++) {
                     ws.getCell(r, c).border = {
@@ -212,9 +201,6 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
 
     // ========================================================================
     //  POST /api/grades/:spaceId/import
-    //  Формат: A1="Предмет", B1=название; A2="Месяц", B2=YYYY-MM;
-    //  Строка 3: "ФИО", 1, 2, ... N (дни месяца);
-    //  Строки 4+: ФИО + оценки
     // ========================================================================
     app.post('/api/grades/:spaceId/import',
         verifyJWT,
@@ -240,9 +226,7 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                 if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'Неверный месяц (B2), ожидается YYYY-MM' });
 
                 const { year, month: m } = parseMonthKey(month);
-                const daysInMonth = getDaysInMonth(year, m);
 
-                // Читаем заголовки дней начиная со столбца 2 строки 3
                 const headerRow = 3;
                 const dayColumns = [];
                 for (let c = 2; c <= 40; c++) {
@@ -253,7 +237,6 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                 }
                 if (!dayColumns.length) return res.status(400).json({ error: 'Не найдены дни месяца в строке 3' });
 
-                // Учитель: проверяем, что он ведёт этот предмет (или verified)
                 const isSuperAdmin = user.rows[0].is_teacher_verified;
                 if (!isSuperAdmin) {
                     const subjCheck = await pool.query(
@@ -261,7 +244,6 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                         [spaceId, req.userId, subject]
                     );
                     if (!subjCheck.rows.length) {
-                        // Создаём привязку — считаем, что учитель хочет вести этот предмет
                         await pool.query(
                             'INSERT INTO teacher_subjects (space_id, teacher_id, subject_name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
                             [spaceId, req.userId, subject]
@@ -272,19 +254,16 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                 let inserted = 0, updated = 0, skipped = 0, studentsAdded = 0;
                 const errors = [];
 
-                // Строки с учениками начинаются с headerRow + 1
                 for (let r = headerRow + 1; r <= ws.rowCount; r++) {
                     const studentName = String(ws.getCell(r, 1).value || '').trim();
                     if (!studentName) continue;
 
-                    // Ищем user_id по ФИ
                     const userMatch = await pool.query(
                         `SELECT id FROM users WHERE LOWER(full_name) = LOWER($1) AND is_teacher = FALSE LIMIT 1`,
                         [studentName]
                     );
                     const studentUserId = userMatch.rows[0]?.id || null;
 
-                    // Если ученика нет в пространстве — добавляем в journal_students
                     const exists = await pool.query(
                         'SELECT 1 FROM journal_students WHERE space_id = $1 AND subject_name = $2 AND student_name = $3',
                         [spaceId, subject, studentName]
@@ -341,16 +320,7 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                     }
                 }
 
-                res.json({
-                    ok: true,
-                    subject,
-                    month,
-                    inserted,
-                    updated,
-                    skipped,
-                    studentsAdded,
-                    errors: errors.slice(0, 20)
-                });
+                res.json({ ok: true, subject, month, inserted, updated, skipped, studentsAdded, errors: errors.slice(0, 20) });
             } catch (e) {
                 console.error('excel import:', e.message);
                 res.status(500).json({ error: 'Ошибка импорта: ' + e.message });
