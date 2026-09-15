@@ -1,5 +1,4 @@
 require('dotenv').config();
-const { registerJournalRoutes } = require('./routes/journal');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -16,6 +15,7 @@ const push = require('./push');
 const storage = require('./storage');
 const { registerFileRoutes } = require('./routes/files');
 const { registerExcelRoutes } = require('./routes/excel');
+const { registerJournalRoutes } = require('./routes/journal');
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
     console.error('❌ JWT_SECRET не задан или короче 32 символов');
@@ -354,9 +354,8 @@ app.post('/api/settings/update', verifyJWT, async (req, res) => {
     res.json(r.rows[0]);
 });
 
-// ================= ВОССТАНОВЛЕНИЕ ПАРОЛЯ (локально) =================
+// ================= ВОССТАНОВЛЕНИЕ ПАРОЛЯ =================
 
-// Запрос на восстановление — со страницы входа
 app.post('/api/auth/request-password-reset', authLimiter, async (req, res) => {
     const { login } = req.body;
     if (!login) return res.status(400).json({ error: 'Введите логин или email' });
@@ -364,12 +363,10 @@ app.post('/api/auth/request-password-reset', authLimiter, async (req, res) => {
     try {
         const userQ = await pool.query('SELECT * FROM users WHERE email = $1 OR username = $1', [login]);
         if (!userQ.rows.length) {
-            // Не раскрываем, есть ли такой пользователь
             return res.json({ ok: true, message: 'Запрос отправлен. Обратитесь к преподавателю.' });
         }
         const user = userQ.rows[0];
 
-        // Уже есть активный запрос?
         const existing = await pool.query(
             `SELECT * FROM password_reset_requests WHERE user_id = $1 AND status IN ('pending','approved') ORDER BY created_at DESC LIMIT 1`,
             [user.id]
@@ -391,7 +388,6 @@ app.post('/api/auth/request-password-reset', authLimiter, async (req, res) => {
             );
             request = r.rows[0];
 
-            // Оповещаем всех подтверждённых учителей через Socket.IO
             io.to('teachers').emit('password_reset_request', {
                 id: request.id,
                 displayName: request.display_name,
@@ -409,7 +405,6 @@ app.post('/api/auth/request-password-reset', authLimiter, async (req, res) => {
     }
 });
 
-// Проверка статуса запроса (для страницы ввода кода — polling)
 app.get('/api/auth/password-reset-status/:login', authLimiter, async (req, res) => {
     try {
         const userQ = await pool.query('SELECT id FROM users WHERE email = $1 OR username = $1', [req.params.login]);
@@ -423,7 +418,6 @@ app.get('/api/auth/password-reset-status/:login', authLimiter, async (req, res) 
     } catch (e) { res.json({ status: 'none' }); }
 });
 
-// Учитель получает список pending-запросов
 app.get('/api/password-reset-requests', verifyJWT, async (req, res) => {
     const user = await getUserById(req.userId);
     if (!isSuperAdmin(user)) return res.status(403).json({ error: 'Только для учителей' });
@@ -438,7 +432,6 @@ app.get('/api/password-reset-requests', verifyJWT, async (req, res) => {
     res.json(r.rows);
 });
 
-// Учитель подтверждает запрос учителя → возвращает magic-токен
 app.post('/api/password-reset-requests/:id/approve', verifyJWT, async (req, res) => {
     const approver = await getUserById(req.userId);
     if (!isSuperAdmin(approver)) return res.status(403).json({ error: 'Только для учителей' });
@@ -448,7 +441,6 @@ app.post('/api/password-reset-requests/:id/approve', verifyJWT, async (req, res)
     const request = r.rows[0];
     if (request.status === 'resolved') return res.status(400).json({ error: 'Запрос уже выполнен' });
 
-    // Если запрос от самого себя — нельзя
     if (request.user_id === approver.id) {
         return res.status(400).json({ error: 'Нельзя подтвердить свой запрос' });
     }
@@ -467,7 +459,6 @@ app.post('/api/password-reset-requests/:id/approve', verifyJWT, async (req, res)
     });
 });
 
-// Учитель отклоняет запрос
 app.delete('/api/password-reset-requests/:id', verifyJWT, async (req, res) => {
     const user = await getUserById(req.userId);
     if (!isSuperAdmin(user)) return res.status(403).json({ error: 'Только для учителей' });
@@ -476,7 +467,6 @@ app.delete('/api/password-reset-requests/:id', verifyJWT, async (req, res) => {
     res.json({ ok: true });
 });
 
-// Ученик сбрасывает пароль по коду
 app.post('/api/auth/reset-password-with-code', authLimiter, async (req, res) => {
     const { login, code, newPassword } = req.body;
     if (!login || !code || !newPassword) return res.status(400).json({ error: 'Заполните все поля' });
@@ -512,7 +502,6 @@ app.post('/api/auth/reset-password-with-code', authLimiter, async (req, res) => 
     }
 });
 
-// Учитель сбрасывает пароль по токену (magic-link)
 app.post('/api/auth/reset-password-with-token', authLimiter, async (req, res) => {
     const { token, newPassword } = req.body;
     if (!token || !newPassword) return res.status(400).json({ error: 'Заполните поля' });
@@ -544,7 +533,6 @@ app.post('/api/auth/reset-password-with-token', authLimiter, async (req, res) =>
     }
 });
 
-// Проверка токена (для страницы reset — узнать, валиден ли)
 app.get('/api/auth/check-reset-token/:token', authLimiter, async (req, res) => {
     const r = await pool.query(
         `SELECT id, status FROM password_reset_requests WHERE token = $1 AND status = 'approved' AND created_at > NOW() - INTERVAL '24 hours' LIMIT 1`,
@@ -984,7 +972,7 @@ app.delete('/api/homework/:id/complete', verifyJWT, async (req, res) => {
     res.json({ message: 'Снято' });
 });
 
-// ================= ЖУРНАЛ =================
+// ================= ЖУРНАЛ ОЦЕНОК =================
 app.get('/api/grades/:spaceId', verifyJWT, requireSpaceAccess, async (req, res) => {
     const user = req.currentUser;
     const spaceId = req.params.spaceId;
@@ -1008,8 +996,28 @@ app.get('/api/grades/:spaceId', verifyJWT, requireSpaceAccess, async (req, res) 
             params = [spaceId, user.id];
         }
     } else {
-        query = `SELECT g.*, u.full_name AS teacher_name FROM grades g LEFT JOIN users u ON u.id = g.teacher_id WHERE g.space_id = $1 AND g.student_user_id = $2 ORDER BY g.lesson_date DESC`;
-        params = [spaceId, user.id];
+        // Студент: авто-привязка старых оценок по ФИО + выборка
+        try {
+            await pool.query(
+                `UPDATE grades SET student_user_id = $1, updated_at = NOW()
+                 WHERE space_id = $2 AND student_user_id IS NULL
+                   AND LOWER(TRIM(student_name)) = LOWER(TRIM($3))`,
+                [user.id, spaceId, user.full_name]
+            );
+        } catch (e) {
+            console.warn('auto-link grades:', e.message);
+        }
+
+        query = `SELECT g.*, u.full_name AS teacher_name
+                 FROM grades g
+                 LEFT JOIN users u ON u.id = g.teacher_id
+                 WHERE g.space_id = $1
+                   AND (
+                       g.student_user_id = $2
+                       OR (g.student_user_id IS NULL AND LOWER(TRIM(g.student_name)) = LOWER(TRIM($3)))
+                   )
+                 ORDER BY g.lesson_date DESC`;
+        params = [spaceId, user.id, user.full_name];
     }
 
     const r = await pool.query(query, params);
@@ -1025,6 +1033,18 @@ app.post('/api/grades', verifyJWT, async (req, res) => {
         return res.status(400).json({ error: 'Заполните поля' });
     }
 
+    // Авто-поиск student_user_id по ФИО, если не передан
+    let finalStudentUserId = studentUserId || null;
+    if (!finalStudentUserId) {
+        try {
+            const match = await pool.query(
+                `SELECT id FROM users WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1)) AND is_teacher = FALSE LIMIT 1`,
+                [studentName]
+            );
+            if (match.rows.length) finalStudentUserId = match.rows[0].id;
+        } catch (e) {}
+    }
+
     try {
         const r = await pool.query(
             `INSERT INTO grades (space_id, student_user_id, student_name, subject_name, teacher_id, grade_value, attendance, lesson_date, homework_id, comment)
@@ -1032,11 +1052,11 @@ app.post('/api/grades', verifyJWT, async (req, res) => {
              ON CONFLICT (space_id, student_name, subject_name, lesson_date, teacher_id)
              DO UPDATE SET grade_value = EXCLUDED.grade_value, attendance = EXCLUDED.attendance, homework_id = EXCLUDED.homework_id, comment = EXCLUDED.comment, updated_at = NOW()
              RETURNING *`,
-            [spaceId, studentUserId || null, studentName, subjectName, user.id, gradeValue || null, attendance || 'present', lessonDate, homeworkId || null, comment || null]
+            [spaceId, finalStudentUserId, studentName, subjectName, user.id, gradeValue || null, attendance || 'present', lessonDate, homeworkId || null, comment || null]
         );
 
-        if (gradeValue && studentUserId) {
-            push.notifyGrade(pool, studentUserId, subjectName, gradeValue).catch(() => {});
+        if (gradeValue && finalStudentUserId) {
+            push.notifyGrade(pool, finalStudentUserId, subjectName, gradeValue).catch(() => {});
         }
 
         res.json(r.rows[0]);
@@ -1269,7 +1289,7 @@ app.post('/api/presence/inactive', verifyJWT, async (req, res) => {
     res.json({ ok: true });
 });
 
-// ================= ФАЙЛЫ И EXCEL =================
+// ================= ФАЙЛЫ / EXCEL / ЖУРНАЛ =================
 registerFileRoutes(app, pool, verifyJWT, requireSpaceAccess);
 registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin);
 registerJournalRoutes(app, pool, verifyJWT, requireSpaceAccess);
@@ -1478,7 +1498,6 @@ async function cleanupOldMessages() {
 }
 setInterval(cleanupOldMessages, 24 * 60 * 60 * 1000);
 
-// Чистим старые запросы восстановления пароля
 async function cleanupOldResetRequests() {
     try {
         await pool.query("DELETE FROM password_reset_requests WHERE created_at < NOW() - INTERVAL '24 hours' AND status != 'resolved'");
