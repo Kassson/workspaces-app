@@ -1,5 +1,5 @@
 // ============================================================================
-//  routes/excel.js — импорт и экспорт журнала оценок в Excel
+//  routes/excel.js — экспорт, шаблон и импорт журнала оценок в Excel
 // ============================================================================
 const express = require('express');
 const ExcelJS = require('exceljs');
@@ -39,14 +39,7 @@ function parseCellValue(raw) {
     return { grade, attendance: att };
 }
 
-// ============================================================================
-//  Загрузка Excel с защитой от багов ExcelJS
-//  1) пробуем обычный load
-//  2) если упало — чистим буфер через jszip (удаляем comments/persons)
-//     и пробуем снова с ignoreNodes
-// ============================================================================
 async function safeLoadWorkbook(buffer) {
-    // Попытка 1: обычная загрузка
     try {
         const wb = new ExcelJS.Workbook();
         await wb.xlsx.load(buffer);
@@ -54,55 +47,150 @@ async function safeLoadWorkbook(buffer) {
     } catch (e) {
         console.warn('ExcelJS load attempt 1 failed:', e.message);
     }
-
-    // Попытка 2: с ignoreNodes
     try {
         const wb = new ExcelJS.Workbook();
-        await wb.xlsx.load(buffer, {
-            ignoreNodes: ['extLst', 'dataValidations']
-        });
+        await wb.xlsx.load(buffer, { ignoreNodes: ['extLst', 'dataValidations'] });
         return wb;
     } catch (e) {
         console.warn('ExcelJS load attempt 2 failed:', e.message);
     }
-
-    // Попытка 3: чистим xlsx через jszip
     try {
         const zip = await JSZip.loadAsync(buffer);
-        const problematicParts = [
-            'xl/persons/person.xml',
-            'xl/threadedComments/threadedComment1.xml',
-            'xl/threadedComments/threadedComment2.xml'
-        ];
         for (const path of Object.keys(zip.files)) {
-            // Удаляем всё, что связано с комментариями и persons
-            if (
-                path.includes('persons') ||
-                path.includes('threadedComment') ||
-                path.includes('comments') ||
-                path === 'xl/persons/person.xml'
-            ) {
+            if (path.includes('persons') || path.includes('threadedComment') || path.includes('comments')) {
                 zip.remove(path);
             }
         }
-        // Также удалим ссылки на них из [Content_Types].xml и workbook
         const cleanedBuffer = await zip.generateAsync({ type: 'nodebuffer' });
         const wb = new ExcelJS.Workbook();
-        await wb.xlsx.load(cleanedBuffer, {
-            ignoreNodes: ['extLst', 'dataValidations']
-        });
+        await wb.xlsx.load(cleanedBuffer, { ignoreNodes: ['extLst', 'dataValidations'] });
         return wb;
     } catch (e) {
         console.warn('ExcelJS load attempt 3 failed:', e.message);
     }
+    throw new Error('Не удалось прочитать Excel-файл. Попробуйте сохранить его заново в формате .xlsx.');
+}
 
-    throw new Error('Не удалось прочитать Excel-файл. Попробуйте сохранить его заново в формате .xlsx через Excel или LibreOffice.');
+// Общая функция: строит workbook с шапкой + (опционально) список учеников и оценки
+function buildJournalWorkbook({ subject, month, students = [], grades = [], includeGrades = true, includeStudents = true }) {
+    const { year, month: m } = parseMonthKey(month);
+    const daysInMonth = getDaysInMonth(year, m);
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Workspaces';
+    const ws = wb.addWorksheet('Журнал');
+
+    ws.getCell('A1').value = 'Предмет';
+    ws.getCell('B1').value = subject;
+    ws.getCell('A1').font = { bold: true };
+    ws.getCell('B1').font = { bold: true, color: { argb: 'FF0088CC' } };
+
+    ws.getCell('A2').value = 'Месяц';
+    ws.getCell('B2').value = month;
+    ws.getCell('A2').font = { bold: true };
+    ws.getCell('B2').font = { bold: true, color: { argb: 'FF0088CC' } };
+    ws.getCell('C2').value = formatMonthLabel(month);
+    ws.getCell('C2').font = { italic: true, color: { argb: 'FF707579' } };
+
+    const headerRow = 3;
+    ws.getCell(headerRow, 1).value = 'ФИО';
+    ws.getCell(headerRow, 1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    ws.getCell(headerRow, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0088CC' } };
+    ws.getCell(headerRow, 1).alignment = { horizontal: 'center', vertical: 'middle' };
+
+    for (let d = 1; d <= daysInMonth; d++) {
+        const cell = ws.getCell(headerRow, 1 + d);
+        cell.value = d;
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0088CC' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    }
+    const avgCellCol = 2 + daysInMonth;
+    ws.getCell(headerRow, avgCellCol).value = 'Ср.';
+    ws.getCell(headerRow, avgCellCol).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    ws.getCell(headerRow, avgCellCol).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0088CC' } };
+    ws.getCell(headerRow, avgCellCol).alignment = { horizontal: 'center', vertical: 'middle' };
+
+    ws.getRow(headerRow).height = 26;
+    ws.getColumn(1).width = 28;
+    for (let d = 1; d <= daysInMonth + 1; d++) {
+        ws.getColumn(1 + d).width = 5;
+    }
+
+    // Пустой шаблон — на этом останавливаемся, учеников не пишем
+    if (!includeStudents) {
+        // Границы только для шапки
+        for (let c = 1; c <= avgCellCol; c++) {
+            ws.getCell(headerRow, c).border = {
+                top: { style: 'thin', color: { argb: 'FFDDDDDD' } },
+                bottom: { style: 'thin', color: { argb: 'FFDDDDDD' } },
+                left: { style: 'thin', color: { argb: 'FFDDDDDD' } },
+                right: { style: 'thin', color: { argb: 'FFDDDDDD' } }
+            };
+        }
+        return wb;
+    }
+
+    const gradesList = grades || [];
+    let row = headerRow + 1;
+
+    for (const st of students) {
+        ws.getCell(row, 1).value = st;
+        ws.getCell(row, 1).font = { bold: true };
+
+        const studentGrades = gradesList.filter(g => g.student_name === st);
+
+        for (let d = 1; d <= daysInMonth; d++) {
+            const dateStr = `${year}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+            const g = studentGrades.find(x => x.lesson_date_str === dateStr);
+            const cell = ws.getCell(row, 1 + d);
+
+            if (includeGrades && g) {
+                if (g.attendance === 'absent') {
+                    cell.value = g.grade_value ? String(g.grade_value) : 'Н';
+                    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF453A' } };
+                    cell.font = { color: { argb: 'FFFFFFFF' }, bold: true };
+                } else if (g.attendance === 'late') {
+                    cell.value = g.grade_value ? String(g.grade_value) : 'О';
+                    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF9F0A' } };
+                    cell.font = { color: { argb: 'FFFFFFFF' }, bold: true };
+                } else if (g.grade_value) {
+                    cell.value = String(g.grade_value);
+                    cell.font = { bold: true };
+                }
+            }
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        }
+
+        const numeric = studentGrades.filter(g => g.grade_value);
+        const avg = (includeGrades && numeric.length)
+            ? Number((numeric.reduce((s, g) => s + g.grade_value, 0) / numeric.length).toFixed(2))
+            : '';
+        const avgC = ws.getCell(row, avgCellCol);
+        avgC.value = avg;
+        avgC.font = { bold: true, color: { argb: 'FF0088CC' } };
+        avgC.alignment = { horizontal: 'center' };
+        row++;
+    }
+
+    for (let r = headerRow; r < row; r++) {
+        for (let c = 1; c <= avgCellCol; c++) {
+            ws.getCell(r, c).border = {
+                top: { style: 'thin', color: { argb: 'FFDDDDDD' } },
+                bottom: { style: 'thin', color: { argb: 'FFDDDDDD' } },
+                left: { style: 'thin', color: { argb: 'FFDDDDDD' } },
+                right: { style: 'thin', color: { argb: 'FFDDDDDD' } }
+            };
+        }
+    }
+
+    return wb;
 }
 
 function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
 
     // ========================================================================
-    //  GET /api/grades/:spaceId/export?subject=X&month=YYYY-MM
+    //  GET /api/grades/:spaceId/export — выгрузка журнала с учениками и оценками
     // ========================================================================
     app.get('/api/grades/:spaceId/export', verifyJWT, async (req, res) => {
         try {
@@ -112,7 +200,6 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
             }
 
             const isRoot = user.rows[0].username === 'root_teacher';
-
             const { spaceId } = req.params;
             const { subject, month } = req.query;
             if (!subject || !month) return res.status(400).json({ error: 'Нужны subject и month' });
@@ -131,7 +218,6 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
             const monthStart = `${year}-${String(m).padStart(2, '0')}-01`;
             const monthEnd = `${year}-${String(m).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
 
-            // Даты приходят строками без сдвигов
             const grades = (await pool.query(
                 `SELECT id, space_id, student_user_id, student_name, subject_name, teacher_id,
                         grade_value, attendance,
@@ -142,27 +228,6 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                  ORDER BY student_name, lesson_date`,
                 [spaceId, subject, monthStart, monthEnd]
             )).rows;
-
-            console.log('excel export:', { spaceId, subject, month, gradesFound: grades.length });
-            if (grades.length) {
-                console.log('sample dates:', grades.slice(0, 3).map(g => g.lesson_date_str));
-            }
-
-            const membersQuery = isRoot
-                ? `SELECT u.full_name FROM space_members sm
-                   JOIN users u ON u.id = sm.user_id
-                   WHERE sm.space_id = $1 AND u.is_teacher = FALSE`
-                : `SELECT u.full_name FROM space_members sm
-                   JOIN users u ON u.id = sm.user_id
-                   WHERE sm.space_id = $1 AND u.is_teacher = FALSE
-                     AND COALESCE(sm.hidden_from_journal, FALSE) = FALSE`;
-            const members = (await pool.query(membersQuery, [spaceId])).rows.map(r => r.full_name);
-
-            const virtualStudents = (await pool.query(
-                `SELECT student_name FROM journal_students
-                 WHERE space_id = $1 AND subject_name = $2`,
-                [spaceId, subject]
-            )).rows.map(r => r.student_name);
 
             let filteredGrades = grades;
             if (!isRoot) {
@@ -176,100 +241,38 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                 filteredGrades = grades.filter(g => !hiddenSet.has(g.student_name.toLowerCase().trim()));
             }
 
+            const virtualStudents = (await pool.query(
+                `SELECT student_name FROM journal_students
+                 WHERE space_id = $1 AND subject_name = $2
+                 ORDER BY sort_order ASC, student_name ASC`,
+                [spaceId, subject]
+            )).rows.map(r => r.student_name);
+
             const gradesStudents = [...new Set(filteredGrades.map(g => g.student_name))];
-            const allStudents = [...new Set([...members, ...virtualStudents, ...gradesStudents])].sort();
 
-            const wb = new ExcelJS.Workbook();
-            wb.creator = 'Workspaces';
-            const ws = wb.addWorksheet('Журнал');
-
-            ws.getCell('A1').value = 'Предмет';
-            ws.getCell('B1').value = subject;
-            ws.getCell('A1').font = { bold: true };
-            ws.getCell('B1').font = { bold: true, color: { argb: 'FF0088CC' } };
-
-            ws.getCell('A2').value = 'Месяц';
-            ws.getCell('B2').value = month;
-            ws.getCell('A2').font = { bold: true };
-            ws.getCell('B2').font = { bold: true, color: { argb: 'FF0088CC' } };
-            ws.getCell('C2').value = formatMonthLabel(month);
-            ws.getCell('C2').font = { italic: true, color: { argb: 'FF707579' } };
-
-            const headerRow = 3;
-            ws.getCell(headerRow, 1).value = 'ФИО';
-            ws.getCell(headerRow, 1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-            ws.getCell(headerRow, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0088CC' } };
-            ws.getCell(headerRow, 1).alignment = { horizontal: 'center', vertical: 'middle' };
-
-            for (let d = 1; d <= daysInMonth; d++) {
-                const cell = ws.getCell(headerRow, 1 + d);
-                cell.value = d;
-                cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0088CC' } };
-                cell.alignment = { horizontal: 'center', vertical: 'middle' };
+            const seenLower = new Set();
+            const orderedStudents = [];
+            for (const n of virtualStudents) {
+                const low = n.toLowerCase();
+                if (seenLower.has(low)) continue;
+                seenLower.add(low);
+                orderedStudents.push(n);
             }
-            const avgCellCol = 2 + daysInMonth;
-            ws.getCell(headerRow, avgCellCol).value = 'Ср.';
-            ws.getCell(headerRow, avgCellCol).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-            ws.getCell(headerRow, avgCellCol).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0088CC' } };
-            ws.getCell(headerRow, avgCellCol).alignment = { horizontal: 'center', vertical: 'middle' };
-
-            ws.getRow(headerRow).height = 26;
-            ws.getColumn(1).width = 28;
-            for (let d = 1; d <= daysInMonth + 1; d++) {
-                ws.getColumn(1 + d).width = 5;
+            for (const n of gradesStudents) {
+                const low = n.toLowerCase();
+                if (seenLower.has(low)) continue;
+                seenLower.add(low);
+                orderedStudents.push(n);
             }
 
-            let row = headerRow + 1;
-            for (const st of allStudents) {
-                ws.getCell(row, 1).value = st;
-                ws.getCell(row, 1).font = { bold: true };
-
-                const studentGrades = filteredGrades.filter(g => g.student_name === st);
-
-                for (let d = 1; d <= daysInMonth; d++) {
-                    const dateStr = `${year}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-                    const g = studentGrades.find(x => x.lesson_date_str === dateStr);
-                    const cell = ws.getCell(row, 1 + d);
-
-                    if (g) {
-                        if (g.attendance === 'absent') {
-                            cell.value = g.grade_value ? String(g.grade_value) : 'Н';
-                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF453A' } };
-                            cell.font = { color: { argb: 'FFFFFFFF' }, bold: true };
-                        } else if (g.attendance === 'late') {
-                            cell.value = g.grade_value ? String(g.grade_value) : 'О';
-                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF9F0A' } };
-                            cell.font = { color: { argb: 'FFFFFFFF' }, bold: true };
-                        } else if (g.grade_value) {
-                            cell.value = String(g.grade_value);
-                            cell.font = { bold: true };
-                        }
-                    }
-                    cell.alignment = { horizontal: 'center', vertical: 'middle' };
-                }
-
-                const numeric = studentGrades.filter(g => g.grade_value);
-                const avg = numeric.length
-                    ? Number((numeric.reduce((s, g) => s + g.grade_value, 0) / numeric.length).toFixed(2))
-                    : '';
-                const avgC = ws.getCell(row, avgCellCol);
-                avgC.value = avg;
-                avgC.font = { bold: true, color: { argb: 'FF0088CC' } };
-                avgC.alignment = { horizontal: 'center' };
-                row++;
-            }
-
-            for (let r = headerRow; r < row; r++) {
-                for (let c = 1; c <= avgCellCol; c++) {
-                    ws.getCell(r, c).border = {
-                        top: { style: 'thin', color: { argb: 'FFDDDDDD' } },
-                        bottom: { style: 'thin', color: { argb: 'FFDDDDDD' } },
-                        left: { style: 'thin', color: { argb: 'FFDDDDDD' } },
-                        right: { style: 'thin', color: { argb: 'FFDDDDDD' } }
-                    };
-                }
-            }
+            const wb = buildJournalWorkbook({
+                subject,
+                month,
+                students: orderedStudents,
+                grades: filteredGrades,
+                includeGrades: true,
+                includeStudents: true
+            });
 
             const fileName = `journal-${subject}-${month}.xlsx`;
             res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -279,6 +282,50 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
         } catch (e) {
             console.error('excel export:', e.message);
             res.status(500).json({ error: 'Ошибка выгрузки: ' + e.message });
+        }
+    });
+
+    // ========================================================================
+    //  GET /api/grades/:spaceId/template — пустой шаблон (только шапка)
+    // ========================================================================
+    app.get('/api/grades/:spaceId/template', verifyJWT, async (req, res) => {
+        try {
+            const user = await pool.query('SELECT * FROM users WHERE id = $1', [req.userId]);
+            if (!user.rows.length || !user.rows[0].is_teacher) {
+                return res.status(403).json({ error: 'Только для учителей' });
+            }
+
+            const { spaceId } = req.params;
+            const { subject, month } = req.query;
+            if (!subject || !month) return res.status(400).json({ error: 'Нужны subject и month' });
+
+            const isMember = await pool.query(
+                'SELECT 1 FROM space_members WHERE space_id = $1 AND user_id = $2',
+                [spaceId, req.userId]
+            );
+            const isVerifiedTeacher = user.rows[0].is_teacher_verified;
+            if (!isMember.rows.length && !isVerifiedTeacher) {
+                return res.status(403).json({ error: 'Нет доступа' });
+            }
+
+            // Шаблон строго пустой: только шапка, без учеников
+            const wb = buildJournalWorkbook({
+                subject,
+                month,
+                students: [],
+                grades: [],
+                includeGrades: false,
+                includeStudents: false
+            });
+
+            const fileName = `template-${subject}-${month}.xlsx`;
+            res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+            res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
+            await wb.xlsx.write(res);
+            res.end();
+        } catch (e) {
+            console.error('excel template:', e.message);
+            res.status(500).json({ error: 'Ошибка шаблона: ' + e.message });
         }
     });
 
@@ -297,8 +344,6 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                 if (!req.file) return res.status(400).json({ error: 'Файл не получен' });
 
                 const { spaceId } = req.params;
-
-                // === Безопасная загрузка с fallback ===
                 const wb = await safeLoadWorkbook(req.file.buffer);
                 const ws = wb.worksheets[0];
                 if (!ws) return res.status(400).json({ error: 'Пустой файл' });
@@ -306,7 +351,7 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                 const subject = String(ws.getCell('B1').value || '').trim();
                 const month = String(ws.getCell('B2').value || '').trim();
                 if (!subject) return res.status(400).json({ error: 'Не указан предмет (B1)' });
-                if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'Неверный месяц (B2), ожидается YYYY-MM' });
+                if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'Неверный месяц (B2)' });
 
                 const { year, month: m } = parseMonthKey(month);
 
@@ -334,28 +379,67 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                     }
                 }
 
+                // Участники пространства — для привязки user_id
+                const spaceMembers = (await pool.query(
+                    `SELECT u.id, u.full_name FROM space_members sm
+                     JOIN users u ON u.id = sm.user_id
+                     WHERE sm.space_id = $1 AND u.is_teacher = FALSE`,
+                    [spaceId]
+                )).rows;
+
+                function findMemberByKey(name) {
+                    const keyParts = String(name || '').trim().toLowerCase().replace(/\s+/g, ' ').split(' ').slice(0, 2);
+                    const key = keyParts.join(' ');
+                    if (!key) return null;
+                    for (const mm of spaceMembers) {
+                        const mp = String(mm.full_name || '').trim().toLowerCase().replace(/\s+/g, ' ').split(' ').slice(0, 2);
+                        if (mp.join(' ') === key) return mm;
+                    }
+                    return null;
+                }
+
                 let inserted = 0, updated = 0, skipped = 0, studentsAdded = 0;
                 const errors = [];
 
+                const maxOrderQ = await pool.query(
+                    'SELECT COALESCE(MAX(sort_order), 0) AS m FROM journal_students WHERE space_id = $1 AND subject_name = $2',
+                    [spaceId, subject]
+                );
+                let nextOrder = (maxOrderQ.rows[0].m || 0);
+
                 for (let r = headerRow + 1; r <= ws.rowCount; r++) {
-                    const studentName = String(ws.getCell(r, 1).value || '').trim();
+                    let studentName = String(ws.getCell(r, 1).value || '').trim();
                     if (!studentName) continue;
 
-                    const userMatch = await pool.query(
-                        `SELECT id FROM users WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1)) AND is_teacher = FALSE LIMIT 1`,
-                        [studentName]
+                    const keyParts = studentName.toLowerCase().replace(/\s+/g, ' ').split(' ').slice(0, 2);
+                    const existingJournalName = await pool.query(
+                        `SELECT student_name,
+                                LENGTH(student_name) - LENGTH(REPLACE(student_name, ' ', '')) AS word_count
+                         FROM journal_students
+                         WHERE space_id = $1 AND subject_name = $2
+                           AND LOWER(SPLIT_PART(TRIM(student_name), ' ', 1)) = $3
+                           AND LOWER(SPLIT_PART(TRIM(student_name), ' ', 2)) = $4
+                         ORDER BY word_count DESC, student_name
+                         LIMIT 1`,
+                        [spaceId, subject, keyParts[0], keyParts[1] || '']
                     );
-                    const studentUserId = userMatch.rows[0]?.id || null;
+                    if (existingJournalName.rows.length) {
+                        studentName = existingJournalName.rows[0].student_name;
+                    }
+
+                    const member = findMemberByKey(studentName);
+                    const studentUserId = member?.id || null;
 
                     const exists = await pool.query(
-                        'SELECT 1 FROM journal_students WHERE space_id = $1 AND subject_name = $2 AND student_name = $3',
+                        'SELECT id FROM journal_students WHERE space_id = $1 AND subject_name = $2 AND student_name = $3',
                         [spaceId, subject, studentName]
                     );
                     if (!exists.rows.length) {
+                        nextOrder++;
                         try {
                             await pool.query(
-                                'INSERT INTO journal_students (space_id, subject_name, student_name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
-                                [spaceId, subject, studentName]
+                                'INSERT INTO journal_students (space_id, subject_name, student_name, sort_order) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
+                                [spaceId, subject, studentName, nextOrder]
                             );
                             studentsAdded++;
                         } catch (e) {}
@@ -378,8 +462,8 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
 
                             if (existing.rows.length) {
                                 await pool.query(
-                                    `UPDATE grades SET grade_value = $1, attendance = $2, updated_at = NOW() WHERE id = $3`,
-                                    [parsed.grade, parsed.attendance, existing.rows[0].id]
+                                    `UPDATE grades SET grade_value = $1, attendance = $2, student_user_id = COALESCE(student_user_id, $4), updated_at = NOW() WHERE id = $3`,
+                                    [parsed.grade, parsed.attendance, existing.rows[0].id, studentUserId]
                                 );
                                 updated++;
                             } else {
