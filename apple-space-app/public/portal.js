@@ -347,6 +347,36 @@ function monthKeyOf(dateStr) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
+function nameKey(fullName) {
+    const parts = String(fullName || '').trim().toLowerCase().replace(/\s+/g, ' ').split(' ').filter(Boolean);
+    return parts.slice(0, 2).join(' ');
+}
+
+function pickCanonicalName(names) {
+    const unique = [...new Set(names.filter(n => n && n.trim()))];
+    if (!unique.length) return '';
+    return unique.sort((a, b) => {
+        const aWords = a.trim().split(/\s+/).length;
+        const bWords = b.trim().split(/\s+/).length;
+        if (aWords !== bWords) return bWords - aWords;
+        return a.localeCompare(b, 'ru');
+    })[0];
+}
+
+// Строит массив месяцев между minMonth и maxMonth включительно
+function buildMonthRange(minMonth, maxMonth) {
+    const months = [];
+    let [y, m] = minMonth.split('-').map(Number);
+    const [maxY, maxM] = maxMonth.split('-').map(Number);
+    while (y < maxY || (y === maxY && m <= maxM)) {
+        months.push(`${y}-${String(m).padStart(2, '0')}`);
+        m++;
+        if (m > 12) { m = 1; y++; }
+        if (months.length > 240) break;
+    }
+    return months;
+}
+
 window.__journal = { spaceId: null, subject: null, month: null, subjects: [], months: [], students: [], allGrades: [], subjGrades: [] };
 window.__studentJournal = {};
 
@@ -381,13 +411,24 @@ async function renderTeacherJournal(container, spaceId) {
         const subjGrades = allGrades.filter(g => g.subject_name === window.__journal.subject);
         window.__journal.subjGrades = subjGrades;
 
-        const monthsFromGrades = [...new Set(subjGrades.map(g => monthKeyOf(g.lesson_date)))].sort();
+        // Диапазон месяцев: от самого старого с оценками до текущего + 1
+        const monthsWithData = [...new Set(subjGrades.map(g => monthKeyOf(g.lesson_date)))].sort();
         const now = new Date();
         const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-        if (!monthsFromGrades.includes(currentMonth)) monthsFromGrades.push(currentMonth);
-        monthsFromGrades.sort();
-        if (!window.__journal.month || !monthsFromGrades.includes(window.__journal.month)) window.__journal.month = monthsFromGrades[monthsFromGrades.length - 1];
-        window.__journal.months = monthsFromGrades;
+        const nextDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+        const nextMonth = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
+
+        const minMonth = monthsWithData.length ? monthsWithData[0] : currentMonth;
+        const maxMonth = (monthsWithData.length && monthsWithData[monthsWithData.length - 1] > nextMonth)
+            ? monthsWithData[monthsWithData.length - 1]
+            : nextMonth;
+
+        const monthsRange = buildMonthRange(minMonth, maxMonth);
+        window.__journal.months = monthsRange;
+
+        if (!window.__journal.month || !monthsRange.includes(window.__journal.month)) {
+            window.__journal.month = currentMonth;
+        }
 
         container.innerHTML = renderTeacherJournalHtml();
         attachJournalHandlers();
@@ -403,22 +444,35 @@ function renderTeacherJournalHtml() {
     const subject = window.__journal.subject;
     const months = window.__journal.months || [];
     const month = window.__journal.month;
+    const monthIdx = months.indexOf(month);
 
     let html = `<h1 class="page-title">Журнал</h1>`;
+
+    // === Предметы ===
     html += `<div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">Предмет</div>`;
-    html += `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:12px;">`;
+    html += `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:14px;">`;
     for (const s of subjects) html += `<button class="day-tab ${s === subject ? 'active' : ''}" data-subj="${escapeHtml(s)}" style="flex-shrink:0;">${escapeHtml(s)}</button>`;
     html += `<button class="day-tab" data-subj="__add__" style="flex-shrink:0;">+ предмет</button>`;
     html += `</div>`;
 
+    // === Месяц со стрелками ===
     html += `<div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">Месяц</div>`;
-    html += `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:12px;">`;
-    for (const m of months) html += `<button class="day-tab ${m === month ? 'active' : ''}" data-month="${m}" style="flex-shrink:0;">${formatMonthName(m)}</button>`;
+    html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+        <button id="prevMonthBtn" class="btn-small" style="flex-shrink:0;" ${monthIdx <= 0 ? 'disabled' : ''}>←</button>
+        <div id="currentMonthLabel" style="flex:1;text-align:center;font-weight:600;font-size:0.95rem;">${formatMonthName(month)}</div>
+        <button id="nextMonthBtn" class="btn-small" style="flex-shrink:0;" ${monthIdx >= months.length - 1 ? 'disabled' : ''}>→</button>
+    </div>`;
+
+    // Скрытый список месяцев
+    html += `<div id="monthList" style="display:none;">`;
+    for (const m of months) html += `<button data-month="${m}"></button>`;
     html += `</div>`;
 
+    // === Кнопки ===
     html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
         <button class="btn-small" onclick="journalAddStudent()">+ ученик</button>
         <button class="btn-small" onclick="exportJournalExcel(window.__journal.spaceId)">Экспорт Excel</button>
+        <button class="btn-small" onclick="downloadJournalTemplate(window.__journal.spaceId)">Скачать шаблон</button>
         <button class="btn-small" onclick="importJournalExcel(window.__journal.spaceId)">Импорт Excel</button>
     </div>`;
     html += `<div id="journalTableWrap" class="journal-table-wrap"></div>`;
@@ -435,12 +489,37 @@ function attachJournalHandlers() {
             renderTeacherJournal(document.getElementById('tab-grades'), window.__journal.spaceId);
         });
     });
+
     document.querySelectorAll('[data-month]').forEach(btn => {
         btn.addEventListener('click', () => {
             window.__journal.month = btn.dataset.month;
             renderTeacherJournal(document.getElementById('tab-grades'), window.__journal.spaceId);
         });
     });
+
+    const prevBtn = document.getElementById('prevMonthBtn');
+    if (prevBtn) {
+        prevBtn.addEventListener('click', () => {
+            const months = window.__journal.months || [];
+            const idx = months.indexOf(window.__journal.month);
+            if (idx > 0) {
+                window.__journal.month = months[idx - 1];
+                renderTeacherJournal(document.getElementById('tab-grades'), window.__journal.spaceId);
+            }
+        });
+    }
+
+    const nextBtn = document.getElementById('nextMonthBtn');
+    if (nextBtn) {
+        nextBtn.addEventListener('click', () => {
+            const months = window.__journal.months || [];
+            const idx = months.indexOf(window.__journal.month);
+            if (idx < months.length - 1) {
+                window.__journal.month = months[idx + 1];
+                renderTeacherJournal(document.getElementById('tab-grades'), window.__journal.spaceId);
+            }
+        });
+    }
 }
 
 async function addJournalSubject(spaceId) {
@@ -456,16 +535,60 @@ async function addJournalSubject(spaceId) {
 
 async function loadJournalStudents(spaceId) {
     try {
-        const members = await apiGet(`/api/spaces/${spaceId}/members`);
-        const namesFromMembers = members.map(m => m.full_name);
-        const namesFromGrades = [...new Set(window.__journal.subjGrades.map(g => g.student_name))];
-        let extra = [];
+        // Ученики из journal_students (уже в нужном порядке)
+        let fromJournal = [];
         try {
-            const extraResp = await apiGet(`/api/journal-students/${spaceId}?subject=${encodeURIComponent(window.__journal.subject || '')}`);
-            extra = extraResp.map(s => s.student_name);
+            const resp = await apiGet(`/api/journal-students/${spaceId}?subject=${encodeURIComponent(window.__journal.subject || '')}`);
+            fromJournal = resp.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)).map(s => s.student_name);
         } catch (e) {}
-        window.__journal.students = [...new Set([...namesFromMembers, ...namesFromGrades, ...extra])].sort();
-    } catch (e) { window.__journal.students = []; }
+
+        // Участники пространства
+        const members = await apiGet(`/api/spaces/${spaceId}/members`);
+        const memberNames = members.map(m => m.full_name);
+
+        // Ученики из оценок
+        const fromGrades = window.__journal.subjGrades.map(g => g.student_name);
+
+        // Группируем по ключу (фамилия + имя), чтобы не было дублей
+        const groups = {};
+        const addToGroup = (name) => {
+            if (!name || !name.trim()) return;
+            const key = nameKey(name);
+            if (!key) return;
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(name);
+        };
+
+        // Сначала journal_students в их порядке — им отдаём приоритет
+        for (const n of fromJournal) addToGroup(n);
+        for (const n of memberNames) addToGroup(n);
+        for (const n of fromGrades) addToGroup(n);
+
+        // Каноничное имя для каждой группы
+        const canonicalByKey = {};
+        const order = [];
+        // Сохраняем порядок из journal_students
+        for (const n of fromJournal) {
+            const key = nameKey(n);
+            if (!key || canonicalByKey[key]) continue;
+            canonicalByKey[key] = pickCanonicalName(groups[key]);
+            order.push(canonicalByKey[key]);
+        }
+        // Добавляем новые ключи, которых нет в journal_students
+        for (const key in groups) {
+            if (canonicalByKey[key]) continue;
+            canonicalByKey[key] = pickCanonicalName(groups[key]);
+            order.push(canonicalByKey[key]);
+        }
+
+        window.__journal.students = order;
+        window.__journal.nameGroups = groups;
+        window.__journal.canonicalByKey = canonicalByKey;
+    } catch (e) {
+        window.__journal.students = [];
+        window.__journal.nameGroups = {};
+        window.__journal.canonicalByKey = {};
+    }
 }
 
 function renderJournalTable() {
@@ -492,10 +615,17 @@ function renderJournalTable() {
     html += `<th>Ср.</th></tr></thead><tbody>`;
 
     for (const st of students) {
+        const key = nameKey(st);
+        const studentGrades = subjGrades.filter(g => nameKey(g.student_name) === key && g.grade_value);
+
         html += `<tr><td class="journal-student-cell" data-student="${escapeHtml(st)}" style="cursor:pointer;" title="Нажмите, чтобы редактировать">${escapeHtml(st)}</td>`;
-        const studentGrades = subjGrades.filter(g => g.student_name === st && g.grade_value);
+
         for (const d of days) {
-            const cell = subjGrades.find(g => g.student_name === st && g.lesson_date && String(g.lesson_date).slice(0, 10) === d.date);
+            const cell = subjGrades.find(g =>
+                nameKey(g.student_name) === key &&
+                g.lesson_date &&
+                String(g.lesson_date).slice(0, 10) === d.date
+            );
             let txt = '';
             let cellStyle = '';
             if (cell) {
@@ -506,7 +636,10 @@ function renderJournalTable() {
             const stEsc = escapeHtml(st).replace(/'/g, '&#39;');
             html += `<td style="${cellStyle}cursor:pointer;" onclick="openGradeCell('${stEsc}', '${d.date}')">${txt || '·'}</td>`;
         }
-        const avg = studentGrades.length ? (studentGrades.reduce((s, g) => s + g.grade_value, 0) / studentGrades.length).toFixed(2) : '—';
+
+        const avg = studentGrades.length
+            ? (studentGrades.reduce((s, g) => s + g.grade_value, 0) / studentGrades.length).toFixed(2)
+            : '—';
         html += `<td style="font-weight:700;color:#0088cc;">${avg}</td></tr>`;
     }
     html += `</tbody></table>`;
@@ -554,7 +687,7 @@ async function renameJournalStudent(oldName) {
 
 async function deleteJournalStudent(studentName) {
     const subject = window.__journal.subject || '';
-    const ok = await showConfirm(`Удалить «${studentName}»?`, `Все оценки по предмету «${subject}» будут удалены.`, 'Удалить', 'Отмена', true);
+    const ok = await showConfirm(`Удалить «${studentName}»?`, `Все оценки по предмету «${subject}» будут удалены (включая другие варианты написания имени).`, 'Удалить', 'Отмена', true);
     if (!ok) return;
     try {
         await apiPost('/api/journal-students/delete', { spaceId: window.__journal.spaceId, studentName, subjectName: subject });
@@ -568,7 +701,13 @@ async function openGradeCell(studentName, date) {
     const spaceId = window.__journal.spaceId;
     const subject = window.__journal.subject;
     const subjGrades = window.__journal.subjGrades || [];
-    const existing = subjGrades.find(g => g.student_name === studentName && g.lesson_date && String(g.lesson_date).slice(0, 10) === date);
+    const key = nameKey(studentName);
+
+    const existing = subjGrades.find(g =>
+        nameKey(g.student_name) === key &&
+        g.lesson_date &&
+        String(g.lesson_date).slice(0, 10) === date
+    );
 
     const currentGrade = existing?.grade_value || '';
     const currentAttendance = existing?.attendance || 'present';
@@ -624,8 +763,16 @@ async function openGradeCell(studentName, date) {
     root.querySelector('#gradeSaveBtn').addEventListener('click', async () => {
         try {
             const members = await apiGet(`/api/spaces/${spaceId}/members`);
-            const match = members.find(m => m.full_name === studentName);
-            await apiPost('/api/grades', { spaceId, studentName, studentUserId: match?.id || null, subjectName: subject, gradeValue: selGrade ? parseInt(selGrade) : null, attendance: selAtt, lessonDate: date });
+            const match = members.find(m => nameKey(m.full_name) === key);
+            await apiPost('/api/grades', {
+                spaceId,
+                studentName: studentName,
+                studentUserId: match?.id || null,
+                subjectName: subject,
+                gradeValue: selGrade ? parseInt(selGrade) : null,
+                attendance: selAtt,
+                lessonDate: date
+            });
             showToast('Сохранено', 'success');
             closeDynamicSheet();
             await renderTeacherJournal(document.getElementById('tab-grades'), spaceId);
@@ -687,10 +834,7 @@ async function renderStudentGrades(container, spaceId) {
     }
 
     window.__studentJournal = {
-        spaceId,
-        mode: 'own',
-        isHidden,
-        myJournalBlocked,
+        spaceId, mode: 'own', isHidden, myJournalBlocked,
         sharedWith: shares.asRecipient,
         myOwnShares: shares.asOwner,
         myGrades
@@ -720,7 +864,7 @@ function renderStudentJournalWithSlider() {
         </div>
     `;
 
-    // Плашка про скрытие — с читаемыми цветами
+    // Плашка про скрытие
     if (isHidden && myJournalBlocked) {
         html += `
             <div class="settings-card" style="background:var(--warning-bg, #fff3cd); border-left:3px solid var(--warning, #ff9f0a); color:var(--warning-text, #664d03);">
@@ -1005,6 +1149,27 @@ async function exportJournalExcel(spaceId) {
         a.remove();
         URL.revokeObjectURL(objUrl);
         showToast('Файл выгружен', 'success');
+    } catch (e) { showToast(e.message || 'Ошибка', 'error'); }
+}
+
+async function downloadJournalTemplate(spaceId) {
+    const subject = window.__journal?.subject || '';
+    const month = window.__journal?.month || '';
+    if (!subject || !month) { showToast('Выберите предмет и месяц', 'error'); return; }
+    try {
+        const url = `/api/grades/${spaceId}/template?subject=${encodeURIComponent(subject)}&month=${month}`;
+        const res = await fetch(url, { headers: authHeaders() });
+        if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || 'Ошибка загрузки шаблона'); }
+        const blob = await res.blob();
+        const objUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = objUrl;
+        a.download = `template-${subject}-${month}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(objUrl);
+        showToast('Шаблон скачан', 'success');
     } catch (e) { showToast(e.message || 'Ошибка', 'error'); }
 }
 
