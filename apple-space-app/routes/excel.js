@@ -70,10 +70,14 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
             const monthStart = `${year}-${String(m).padStart(2, '0')}-01`;
             const monthEnd = `${year}-${String(m).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
 
+            // ВАЖНО: TO_CHAR → дата приходит строкой "YYYY-MM-DD" без сдвигов
             const grades = (await pool.query(
-                `SELECT * FROM grades
+                `SELECT id, space_id, student_user_id, student_name, subject_name, teacher_id,
+                        grade_value, attendance,
+                        TO_CHAR(lesson_date, 'YYYY-MM-DD') AS lesson_date_str
+                 FROM grades
                  WHERE space_id = $1 AND subject_name = $2
-                   AND lesson_date >= $3 AND lesson_date <= $4
+                   AND lesson_date >= $3::date AND lesson_date <= $4::date
                  ORDER BY student_name, lesson_date`,
                 [spaceId, subject, monthStart, monthEnd]
             )).rows;
@@ -161,7 +165,7 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
 
                 for (let d = 1; d <= daysInMonth; d++) {
                     const dateStr = `${year}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-                    const g = studentGrades.find(x => String(x.lesson_date).slice(0, 10) === dateStr);
+                    const g = studentGrades.find(x => x.lesson_date_str === dateStr);
                     const cell = ws.getCell(row, 1 + d);
 
                     if (g) {
@@ -215,7 +219,7 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
     });
 
     // ========================================================================
-    //  POST /api/grades/:spaceId/import
+    //  POST /api/grades/:spaceId/import — без изменений
     // ========================================================================
     app.post('/api/grades/:spaceId/import',
         verifyJWT,
@@ -304,7 +308,7 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                             const existing = await pool.query(
                                 `SELECT id FROM grades
                                  WHERE space_id = $1 AND student_name = $2 AND subject_name = $3
-                                   AND lesson_date = $4 AND teacher_id = $5`,
+                                   AND lesson_date = $4::date AND teacher_id = $5`,
                                 [spaceId, studentName, subject, dateStr, req.userId]
                             );
 
@@ -317,7 +321,7 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                             } else {
                                 await pool.query(
                                     `INSERT INTO grades (space_id, student_user_id, student_name, subject_name, teacher_id, grade_value, attendance, lesson_date)
-                                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date)`,
                                     [spaceId, studentUserId, studentName, subject, req.userId, parsed.grade, parsed.attendance, dateStr]
                                 );
                                 inserted++;
