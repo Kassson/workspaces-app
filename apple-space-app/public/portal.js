@@ -661,73 +661,44 @@ async function journalAddStudent() {
 // ============ ЖУРНАЛ УЧЕНИКА ============
 async function renderStudentGrades(container, spaceId) {
     container.innerHTML = '<p class="empty-state">Загрузка…</p>';
+
+    let shares = { asOwner: [], asRecipient: [] };
+    try { shares = await apiGet(`/api/grade-shares/${spaceId}`); } catch (e) {}
+
+    let myMember = null;
     try {
-        let shares = { asOwner: [], asRecipient: [] };
-        try { shares = await apiGet(`/api/grade-shares/${spaceId}`); } catch (e) {}
+        const members = await apiGet(`/api/spaces/${spaceId}/members`);
+        myMember = members.find(m => m.id === currentUser.id);
+    } catch (e) {}
 
-        let myMember = null;
-        try {
-            const members = await apiGet(`/api/spaces/${spaceId}/members`);
-            myMember = members.find(m => m.id === currentUser.id);
-        } catch (e) {}
+    const isHidden = !!myMember?.hidden_from_journal;
 
-        const isHidden = !!myMember?.hidden_from_journal;
-
-        if (isHidden && !shares.asOwner.length) {
-            renderHiddenBlock(container, shares);
+    // Пытаемся загрузить свой журнал
+    let myGrades = [];
+    let myJournalBlocked = false;
+    try {
+        myGrades = await apiGet(`/api/grades/${spaceId}`);
+    } catch (e) {
+        if (e.error === 'hidden') {
+            myJournalBlocked = true;
+        } else {
+            container.innerHTML = `<p class="empty-state">Ошибка: ${escapeHtml(e.error || e.message || '')}</p>`;
             return;
         }
-
-        let myGrades = [];
-        let myJournalBlocked = false;
-        try { myGrades = await apiGet(`/api/grades/${spaceId}`); }
-        catch (e) { if (e.error === 'hidden') myJournalBlocked = true; }
-
-        window.__studentJournal = {
-            spaceId, mode: 'own', isHidden, myJournalBlocked,
-            sharedWith: shares.asRecipient,
-            myOwnShares: shares.asOwner,
-            myGrades
-        };
-
-        container.innerHTML = renderStudentJournalWithSlider();
-        attachStudentJournalHandlers();
-    } catch (e) {
-        container.innerHTML = `<p class="empty-state">Ошибка: ${escapeHtml(e.error || '')}</p>`;
     }
-}
 
-function renderHiddenBlock(container, shares) {
-    let html = `<h1 class="page-title">Журнал</h1>`;
-    html += `
-        <div class="settings-card" style="text-align:center; padding:24px;">
-            <div style="font-size:3rem; margin-bottom:8px;">🔒</div>
-            <h3 style="margin:0 0 8px;">Журнал скрыт</h3>
-            <p style="color:var(--text-secondary); margin:0 0 16px; font-size:0.9rem;">
-                Администратор скрыл вас из журнала. Чтобы снова видеть свои оценки,
-                поделитесь ими с однокурсником — вы сразу получите доступ к своему журналу.
-            </p>
-            <button class="btn-primary" onclick="openStartSharing()">Начать делиться</button>
-        </div>
-    `;
-    if (shares.asRecipient && shares.asRecipient.length) {
-        html += `
-            <div class="settings-card" style="margin-top:14px;">
-                <h3 style="font-size:1rem;">Доступные вам журналы</h3>
-                ${shares.asRecipient.map(s => `
-                    <div class="member-row" onclick="viewSharedJournal('${s.owner_user_id}', '${escapeHtml(s.owner_username)}')">
-                        <div class="member-avatar">👤</div>
-                        <div class="member-info">
-                            <div class="member-name">${escapeHtml(s.owner_name)}</div>
-                            <div class="member-username">@${escapeHtml(s.owner_username)}</div>
-                        </div>
-                        <span class="code-pill">Открыть</span>
-                    </div>
-                `).join('')}
-            </div>
-        `;
-    }
-    container.innerHTML = html;
+    window.__studentJournal = {
+        spaceId,
+        mode: 'own',
+        isHidden,
+        myJournalBlocked,
+        sharedWith: shares.asRecipient,
+        myOwnShares: shares.asOwner,
+        myGrades
+    };
+
+    container.innerHTML = renderStudentJournalWithSlider();
+    attachStudentJournalHandlers();
 }
 
 function renderStudentJournalWithSlider() {
@@ -735,7 +706,7 @@ function renderStudentJournalWithSlider() {
 
     let html = `<h1 class="page-title">Мои оценки</h1>`;
 
-    // Карточка с кнопками шейринга — видна ВСЕМ ученикам
+    // Карточка шейринга — всегда сверху
     html += `
         <div class="settings-card" style="background:var(--accent-blue-light);">
             <p style="margin:0 0 10px; font-size:0.9rem;">
@@ -750,18 +721,20 @@ function renderStudentJournalWithSlider() {
         </div>
     `;
 
-    if (isHidden) {
+    // Плашка про скрытие
+    if (isHidden && myJournalBlocked) {
         html += `
             <div class="settings-card" style="background:#fff8e6; border-left:3px solid #ff9f0a;">
                 <p style="margin:0; font-size:0.85rem;">
-                    🔒 Администратор скрыл вас из общего журнала. Ваши оценки видны только тем, с кем вы поделились.
+                    🔒 Администратор скрыл вас из общего журнала. Ваш собственный журнал недоступен,
+                    пока вы не поделитесь оценками хотя бы с одним участником.
                 </p>
             </div>
         `;
     }
 
     // Слайдер чужих журналов
-    if (sharedWith.length) {
+    if (sharedWith && sharedWith.length) {
         html += `<div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">Просмотр</div>`;
         html += `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:12px;">`;
         html += `<button class="day-tab ${mode === 'own' ? 'active' : ''}" data-owner="__own__" style="flex-shrink:0;">Мои</button>`;
@@ -773,7 +746,12 @@ function renderStudentJournalWithSlider() {
 
     if (mode === 'own') {
         if (myJournalBlocked) {
-            html += `<p class="empty-state">Журнал скрыт. Поделитесь оценками, чтобы увидеть их.</p>`;
+            html += `<div class="settings-card" style="text-align:center; padding:20px;">
+                <p style="color:var(--text-secondary); margin:0; font-size:0.9rem;">
+                    Ваш журнал скрыт администратором.<br>
+                    ${sharedWith && sharedWith.length ? 'Выберите выше чужой журнал, чтобы посмотреть оценки.' : 'Поделитесь своими оценками с кем-нибудь, чтобы вернуть доступ.'}
+                </p>
+            </div>`;
         } else {
             html += renderStudentGradesHtml(myGrades);
         }
@@ -801,8 +779,8 @@ function attachStudentJournalHandlers() {
 
                 let html = `<h1 class="page-title">Оценки</h1>`;
 
-                // Карточка шейринга тоже должна остаться
-                const { myOwnShares, isHidden } = window.__studentJournal;
+                const { myOwnShares, isHidden, myJournalBlocked } = window.__studentJournal;
+
                 html += `
                     <div class="settings-card" style="background:var(--accent-blue-light);">
                         <p style="margin:0 0 10px; font-size:0.9rem;">
@@ -816,7 +794,7 @@ function attachStudentJournalHandlers() {
                         </div>
                     </div>
                 `;
-                if (isHidden) {
+                if (isHidden && myJournalBlocked) {
                     html += `<div class="settings-card" style="background:#fff8e6; border-left:3px solid #ff9f0a;">
                         <p style="margin:0; font-size:0.85rem;">🔒 Администратор скрыл вас из общего журнала.</p>
                     </div>`;
