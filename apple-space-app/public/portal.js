@@ -673,7 +673,6 @@ async function renderStudentGrades(container, spaceId) {
 
     const isHidden = !!myMember?.hidden_from_journal;
 
-    // Пытаемся загрузить свой журнал
     let myGrades = [];
     let myJournalBlocked = false;
     try {
@@ -721,11 +720,11 @@ function renderStudentJournalWithSlider() {
         </div>
     `;
 
-    // Плашка про скрытие
+    // Плашка про скрытие — с читаемыми цветами
     if (isHidden && myJournalBlocked) {
         html += `
-            <div class="settings-card" style="background:#fff8e6; border-left:3px solid #ff9f0a;">
-                <p style="margin:0; font-size:0.85rem;">
+            <div class="settings-card" style="background:var(--warning-bg, #fff3cd); border-left:3px solid var(--warning, #ff9f0a); color:var(--warning-text, #664d03);">
+                <p style="margin:0; font-size:0.85rem; font-weight:500;">
                     🔒 Администратор скрыл вас из общего журнала. Ваш собственный журнал недоступен,
                     пока вы не поделитесь оценками хотя бы с одним участником.
                 </p>
@@ -795,8 +794,8 @@ function attachStudentJournalHandlers() {
                     </div>
                 `;
                 if (isHidden && myJournalBlocked) {
-                    html += `<div class="settings-card" style="background:#fff8e6; border-left:3px solid #ff9f0a;">
-                        <p style="margin:0; font-size:0.85rem;">🔒 Администратор скрыл вас из общего журнала.</p>
+                    html += `<div class="settings-card" style="background:var(--warning-bg, #fff3cd); border-left:3px solid var(--warning, #ff9f0a); color:var(--warning-text, #664d03);">
+                        <p style="margin:0; font-size:0.85rem; font-weight:500;">🔒 Администратор скрыл вас из общего журнала.</p>
                     </div>`;
                 }
 
