@@ -390,6 +390,7 @@ async function setGradeFromStats(studentUserId, studentName, value, homeworkId) 
     try {
         const s = await apiGet(`/api/homework/${homeworkId}/stats`);
         const subjectName = s.subjectName || 'Предмет';
+        const dueDate = s.dueDate || ymd(new Date()); // ← оценка идёт на дату сдачи ДЗ
 
         await apiPost('/api/grades', {
             spaceId: currentSpace.id,
@@ -398,7 +399,7 @@ async function setGradeFromStats(studentUserId, studentName, value, homeworkId) 
             subjectName: subjectName,
             gradeValue: value ? parseInt(value) : null,
             attendance: 'present',
-            lessonDate: ymd(new Date()),
+            lessonDate: dueDate,
             homeworkId: homeworkId
         });
         showToast(value ? `Оценка ${value} выставлена` : 'Оценка снята', 'success');
@@ -408,7 +409,7 @@ async function setGradeFromStats(studentUserId, studentName, value, homeworkId) 
 }
 
 // ============================================================================
-//  ЖУРНАЛ — месяцы, слайдеры, экспорт/импорт
+//  ЖУРНАЛ
 // ============================================================================
 
 const MONTH_NAMES = ['', 'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
@@ -416,9 +417,7 @@ const MONTH_NAMES = ['', 'Январь', 'Февраль', 'Март', 'Апре
 function formatMonthName(m) {
     if (!m) return '';
     const parts = m.split('-');
-    const year = parseInt(parts[0]);
-    const month = parseInt(parts[1]);
-    return `${MONTH_NAMES[month]} ${year}`;
+    return `${MONTH_NAMES[parseInt(parts[1])]} ${parseInt(parts[0])}`;
 }
 
 function getDaysOfMonth(monthStr) {
@@ -428,7 +427,10 @@ function getDaysOfMonth(monthStr) {
     const lastDay = new Date(year, month, 0).getDate();
     const days = [];
     for (let d = 1; d <= lastDay; d++) {
-        days.push(`${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
+        days.push({
+            day: d,
+            date: `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+        });
     }
     return days;
 }
@@ -438,7 +440,6 @@ function monthKeyOf(dateStr) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-// Глобальное состояние журнала
 window.__journal = {
     spaceId: null,
     subject: null,
@@ -459,9 +460,6 @@ async function renderGradesTab(container, spaceId, isAdmin) {
     }
 }
 
-// ============================================================================
-//  ЖУРНАЛ УЧИТЕЛЯ
-// ============================================================================
 async function renderTeacherJournal(container, spaceId) {
     container.innerHTML = '<p class="empty-state">Загрузка…</p>';
 
@@ -527,7 +525,6 @@ function renderTeacherJournalHtml() {
 
     let html = `<h1 class="page-title">Журнал</h1>`;
 
-    // Предметы
     html += `<div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">Предмет</div>`;
     html += `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:12px;">`;
     for (const s of subjects) {
@@ -536,7 +533,6 @@ function renderTeacherJournalHtml() {
     html += `<button class="day-tab" data-subj="__add__" style="flex-shrink:0;">+ предмет</button>`;
     html += `</div>`;
 
-    // Месяцы
     html += `<div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">Месяц</div>`;
     html += `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:12px;">`;
     for (const m of months) {
@@ -544,9 +540,7 @@ function renderTeacherJournalHtml() {
     }
     html += `</div>`;
 
-    // Кнопки
     html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
-        <button class="btn-small" onclick="journalAddLesson()">+ урок</button>
         <button class="btn-small" onclick="journalAddStudent()">+ ученик</button>
         <button class="btn-small" onclick="exportJournalExcel(window.__journal.spaceId)">Экспорт Excel</button>
         <button class="btn-small" onclick="importJournalExcel(window.__journal.spaceId)">Импорт Excel</button>
@@ -618,6 +612,8 @@ function renderJournalTable() {
     }
 
     const days = getDaysOfMonth(month);
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
     if (!students.length) {
         wrap.innerHTML = '<p class="empty-state" style="padding:24px;">Нет учеников. Нажмите «+ ученик», чтобы добавить.</p>';
@@ -626,8 +622,11 @@ function renderJournalTable() {
 
     let html = `<table><thead><tr><th style="min-width:180px;">Ученик</th>`;
     for (const d of days) {
-        const dayNum = parseInt(d.slice(8, 10));
-        html += `<th style="min-width:38px;">${dayNum}</th>`;
+        let cls = 'day-header';
+        if (d.date < todayStr) cls += ' past';
+        else if (d.date === todayStr) cls += ' today';
+        else cls += ' future';
+        html += `<th class="${cls}" style="min-width:38px;">${d.day}</th>`;
     }
     html += `<th>Ср.</th></tr></thead><tbody>`;
 
@@ -636,16 +635,24 @@ function renderJournalTable() {
         const studentGrades = subjGrades.filter(g => g.student_name === st && g.grade_value);
 
         for (const d of days) {
-            const cell = subjGrades.find(g => g.student_name === st && g.lesson_date && String(g.lesson_date).slice(0, 10) === d);
+            const cell = subjGrades.find(g => g.student_name === st && g.lesson_date && String(g.lesson_date).slice(0, 10) === d.date);
             let txt = '';
-            let bg = '';
+            let cellStyle = '';
             if (cell) {
-                if (cell.grade_value) txt = String(cell.grade_value);
-                if (cell.attendance === 'absent') { txt = txt ? txt + '·Н' : 'Н'; bg = 'background:rgba(255,69,58,0.12)'; }
-                else if (cell.attendance === 'late') { txt = txt ? txt + '·О' : 'О'; bg = 'background:rgba(255,159,10,0.12)'; }
+                if (cell.attendance === 'absent') {
+                    txt = cell.grade_value ? String(cell.grade_value) : 'Н';
+                    cellStyle = 'background:#ff453a;color:#fff;font-weight:700;';
+                } else if (cell.attendance === 'late') {
+                    txt = cell.grade_value ? String(cell.grade_value) : 'О';
+                    cellStyle = 'background:#ff9f0a;color:#fff;font-weight:700;';
+                } else if (cell.grade_value) {
+                    txt = String(cell.grade_value);
+                    cellStyle = 'font-weight:700;color:#0088cc;';
+                }
             }
+
             const stEsc = escapeHtml(st).replace(/'/g, '&#39;');
-            html += `<td style="${bg};cursor:pointer;" onclick="openGradeCell('${stEsc}', '${d}')">${txt || '·'}</td>`;
+            html += `<td style="${cellStyle}cursor:pointer;" onclick="openGradeCell('${stEsc}', '${d.date}')">${txt || '·'}</td>`;
         }
 
         const avg = studentGrades.length
@@ -753,25 +760,6 @@ async function openGradeCell(studentName, date) {
     }
 }
 
-async function journalAddLesson() {
-    const dateStr = await showPrompt('Дата урока (ДД.ММ.ГГГГ)', '01.09.2025');
-    if (!dateStr) return;
-    const m = dateStr.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
-    if (!m) { showToast('Формат: ДД.ММ.ГГГГ', 'error'); return; }
-    const day = m[1].padStart(2, '0');
-    const mon = m[2].padStart(2, '0');
-    const year = m[3];
-    const mk = `${year}-${mon}`;
-
-    if (!window.__journal.months.includes(mk)) {
-        window.__journal.months.push(mk);
-        window.__journal.months.sort();
-    }
-    window.__journal.month = mk;
-    showToast(`Открыт ${formatMonthName(mk)}. Кликните по дню ${day}, чтобы поставить оценку.`, 'success', 4000);
-    renderTeacherJournal(document.getElementById('tab-grades'), window.__journal.spaceId);
-}
-
 async function journalAddStudent() {
     const spaceId = window.__journal.spaceId;
     const subject = window.__journal.subject;
@@ -785,9 +773,7 @@ async function journalAddStudent() {
     } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
 }
 
-// ============================================================================
-//  ЖУРНАЛ УЧЕНИКА
-// ============================================================================
+// ===================== ЖУРНАЛ УЧЕНИКА =====================
 async function renderStudentGrades(container, spaceId) {
     container.innerHTML = '<p class="empty-state">Загрузка…</p>';
     try {
@@ -847,9 +833,7 @@ async function renderStudentGrades(container, spaceId) {
     }
 }
 
-// ============================================================================
-//  EXCEL
-// ============================================================================
+// ===================== EXCEL =====================
 async function exportJournalExcel(spaceId) {
     const subject = window.__journal?.subject || '';
     const month = window.__journal?.month || '';
@@ -897,7 +881,6 @@ function importJournalExcel(spaceId) {
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Ошибка импорта');
             showToast(`Импорт: +${data.inserted} новых, ${data.updated} обновлено`, 'success', 5000);
-            // Переключаем на импортированный предмет и месяц
             if (data.subject) window.__journal.subject = data.subject;
             if (data.month) window.__journal.month = data.month;
             await renderTeacherJournal(document.getElementById('tab-grades'), spaceId);
@@ -908,9 +891,7 @@ function importJournalExcel(spaceId) {
     input.click();
 }
 
-// ============================================================================
-//  ЧАТ
-// ============================================================================
+// ===================== ЧАТ =====================
 let chatJoinedSpace = null;
 let chatIsAdmin = false;
 let chatCurrentUserId = null;
