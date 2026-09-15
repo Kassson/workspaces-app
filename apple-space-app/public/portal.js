@@ -1352,6 +1352,7 @@ async function renderMembersTab(container, spaceId, isAdmin) {
     try {
         const members = await apiGet(`/api/spaces/${spaceId}/members`);
         if (!members.length) { container.innerHTML = '<p class="empty-state">В группе пока никого</p>'; return; }
+        const isRoot = !!currentUser?.isRoot;
         let html = '<h1 class="page-title">Участники группы</h1><div class="settings-card">';
         html += members.map(m => `
             <div class="member-row" onclick='openMemberProfile(${JSON.stringify(m).replace(/'/g, "&#39;")})'>
@@ -1361,7 +1362,7 @@ async function renderMembersTab(container, spaceId, isAdmin) {
                     <div class="member-username">@${escapeHtml(m.username)}</div>
                 </div>
                 <span class="code-pill">${escapeHtml(getMemberDisplayStatus(m))}</span>
-                ${m.hidden_from_journal ? '<span class="code-pill" style="background:#707579;color:#fff;margin-left:4px;">Скрыт</span>' : ''}
+                ${isRoot && m.hidden_from_journal ? '<span class="code-pill" style="background:#707579;color:#fff;margin-left:4px;">Скрыт</span>' : ''}
             </div>
         `).join('');
         html += '</div>';
