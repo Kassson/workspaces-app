@@ -53,19 +53,16 @@ async function renderScheduleUnified(container, spaceId, isAdmin) {
         const { lessons, overrides } = await apiGet(`/api/schedule/${spaceId}`);
         const today = new Date();
         const todayDow = isoDowFromDate(today);
-
         window.__scheduleData = { lessons, overrides, spaceId, isAdmin, todayDow };
 
         let html = `<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
             <h1 class="page-title" style="margin:0;">Расписание</h1>
             <a class="btn-small" href="/api/schedule/${spaceId}/ics?token=${encodeURIComponent(localStorage.getItem('token'))}" target="_blank">Календарь .ics</a>
         </div>`;
-
         html += `<div class="segmented-control">
             <button class="seg-btn ${_scheduleViewMode === 'today' ? 'active' : ''}" data-mode="today">Сегодня</button>
             <button class="seg-btn ${_scheduleViewMode === 'week' ? 'active' : ''}" data-mode="week">Неделя</button>
         </div>`;
-
         if (isAdmin) {
             html += `<div class="schedule-actions" style="margin-top:12px;">
                 <button class="btn-small" onclick="openAddLessonSheet('${spaceId}')">Добавить урок</button>
@@ -73,10 +70,8 @@ async function renderScheduleUnified(container, spaceId, isAdmin) {
                 <button class="btn-small" onclick="exportSchedule()">Экспорт TXT</button>
             </div>`;
         }
-
         html += `<div id="scheduleBody" style="margin-top:14px;"></div>`;
         container.innerHTML = html;
-
         container.querySelectorAll('.seg-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 _scheduleViewMode = btn.dataset.mode;
@@ -85,11 +80,8 @@ async function renderScheduleUnified(container, spaceId, isAdmin) {
                 renderScheduleBody();
             });
         });
-
         renderScheduleBody();
-    } catch (e) {
-        container.innerHTML = `<p class="empty-state">${escapeHtml(e.error || 'Ошибка')}</p>`;
-    }
+    } catch (e) { container.innerHTML = `<p class="empty-state">${escapeHtml(e.error || 'Ошибка')}</p>`; }
 }
 
 function renderScheduleBody() {
@@ -97,7 +89,6 @@ function renderScheduleBody() {
     if (!box) return;
     const { lessons, overrides, todayDow, isAdmin, spaceId } = window.__scheduleData;
     const dateStrToday = ymd(new Date());
-
     if (_scheduleViewMode === 'today') {
         const todayLessons = lessons.filter(l => l.day_of_week === todayDow).sort((a, b) => a.start_time.localeCompare(b.start_time));
         if (!todayLessons.length) { box.innerHTML = '<p class="empty-state">Пар сегодня нет</p>'; return; }
@@ -110,10 +101,7 @@ function renderScheduleBody() {
         }
         html += `</div><div id="scheduleDayBody" style="margin-top:12px;"></div>`;
         box.innerHTML = html;
-
-        const targetDay = _scheduleWeekDay || todayDow;
-        renderWeekDay(targetDay);
-
+        renderWeekDay(_scheduleWeekDay || todayDow);
         box.querySelectorAll('.day-tab').forEach(tab => {
             tab.addEventListener('click', () => {
                 _scheduleWeekDay = parseInt(tab.dataset.day);
@@ -134,7 +122,6 @@ function renderWeekDay(dow) {
     const targetDate = new Date(today); targetDate.setDate(today.getDate() + diff);
     const dateStr = ymd(targetDate);
     const isPast = dow < todayDow;
-
     const dayLessons = lessons.filter(l => l.day_of_week === dow).sort((a, b) => a.start_time.localeCompare(b.start_time));
     if (!dayLessons.length) { box.innerHTML = '<p class="empty-state">Уроков нет</p>'; return; }
     box.innerHTML = dayLessons.map(l => lessonCardHtml(l, overrides, dateStr, isPast, isAdmin, spaceId)).join('');
@@ -148,7 +135,6 @@ function lessonCardHtml(l, overrides, dateStr, isPast, isAdmin, spaceId) {
     const subject = replaced ? ov.replacement_subject : l.subject_name;
     const room = replaced ? ov.replacement_classroom : l.classroom;
     const teacher = replaced ? ov.replacement_teacher : l.teacher_name;
-
     return `<div class="${cls}">
         <div class="lesson-row">
             <div class="lesson-time">${fmtTime(l.start_time)}<br>${fmtTime(l.end_time)}</div>
@@ -176,7 +162,6 @@ async function renderHomeworkTab(container, spaceId, isAdmin) {
         </div>`;
         html += `<div id="hwList"></div>`;
         container.innerHTML = html;
-
         const searchInput = document.getElementById('hwSearch');
         const renderList = (query = '') => {
             const filtered = query
@@ -195,7 +180,6 @@ function homeworkCardHtml(hw, isAdmin, spaceId) {
     const due = new Date(hw.due_date).toLocaleDateString('ru-RU');
     const remote = systemSettings.remote_mode;
     const gradeHtml = hw.grade_value ? `<span class="grade-badge" style="background:#30d158;color:#fff;padding:3px 10px;border-radius:8px;font-weight:700;">${hw.grade_value}</span>` : '';
-
     if (isAdmin) {
         return `<div class="hw-card ${hw.is_done ? 'done' : ''}">
             <div class="hw-top"><span class="hw-subject">${escapeHtml(hw.subject_name)}</span><span class="hw-due">до ${due}</span></div>
@@ -206,7 +190,6 @@ function homeworkCardHtml(hw, isAdmin, spaceId) {
             </div>
         </div>`;
     }
-
     let actionsHtml = '';
     if (hw.is_done) {
         actionsHtml = `
@@ -223,7 +206,6 @@ function homeworkCardHtml(hw, isAdmin, spaceId) {
             <label class="btn-small" style="cursor:pointer;">Прикрепить фото<input type="file" accept="image/*" style="display:none" onchange="submitHomeworkPhoto('${hw.id}','${spaceId}', this)"></label>
         `;
     }
-
     return `<div class="hw-card ${hw.is_done ? 'done' : ''}">
         <div class="hw-top"><span class="hw-subject">${escapeHtml(hw.subject_name)}</span><span class="hw-due">до ${due}</span></div>
         <div class="hw-title">${escapeHtml(hw.title)}</div>
@@ -267,11 +249,9 @@ async function openHomeworkStats(homeworkId) {
     const root = document.getElementById('dynamicSheetRoot');
     root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div><p class="empty-state">Загрузка…</p></div>`;
     document.getElementById('sheetOverlay').classList.add('show');
-
     try {
         const s = await apiGet(`/api/homework/${homeworkId}/stats`);
         window._hwStudents = s.students || [];
-
         const size = 140, stroke = 18, r = (size - stroke) / 2, c = 2 * Math.PI * r;
         const dash = (s.percentage / 100) * c;
 
@@ -289,7 +269,6 @@ async function openHomeworkStats(homeworkId) {
             <h3 style="margin-top:8px; font-size:1rem;">Ученики</h3>
             <div class="hw-students-list">
         `;
-
         if (!s.students.length) {
             html += `<p class="empty-state" style="padding:20px 0;">В группе нет учеников</p>`;
         } else {
@@ -307,7 +286,6 @@ async function openHomeworkStats(homeworkId) {
                 const photoPreview = st.attachmentUrl
                     ? `<img src="${st.attachmentUrl}" style="width:44px;height:44px;object-fit:cover;border-radius:8px;cursor:pointer;" onclick="event.stopPropagation();openImageViewer(${JSON.stringify(allPhotoUrls).replace(/"/g, '&quot;')}, ${photoIdx})">`
                     : '';
-
                 const gradeSelect = `
                     <select onchange="setGradeFromStats('${st.id}', '${escapeHtml(st.fullName).replace(/'/g, "\\'")}', this.value, '${homeworkId}')" style="padding:4px 8px;border-radius:8px;border:1px solid var(--card-border);background:var(--input-bg);color:var(--text);font-weight:700;">
                         <option value="">—</option>
@@ -317,7 +295,6 @@ async function openHomeworkStats(homeworkId) {
                         <option value="5" ${st.gradeValue === 5 ? 'selected' : ''}>5</option>
                     </select>
                 `;
-
                 html += `<div class="hw-student-item" style="border-color:${borderColor}; opacity:${opacity}; display:flex; align-items:center; gap:10px;">
                     <div class="member-avatar">${escapeHtml(st.avatarEmoji || '👤')}</div>
                     <div class="member-info" style="flex:1;"><div class="member-name">${escapeHtml(st.fullName)}</div><div class="member-username" style="color:${labelColor};">${label}</div></div>
@@ -400,9 +377,7 @@ async function renderTeacherJournal(container, spaceId) {
             container.innerHTML = `<h1 class="page-title">Журнал</h1><div class="settings-card" style="text-align:center;"><p style="color:var(--text-secondary);margin-top:0;">Нет ни одного предмета.</p><button class="btn-primary" onclick="addJournalSubject('${spaceId}')">+ Добавить предмет</button></div>`;
             return;
         }
-
         if (!window.__journal.subject || !subjects.includes(window.__journal.subject)) window.__journal.subject = subjects[0];
-
         const subjGrades = allGrades.filter(g => g.subject_name === window.__journal.subject);
         window.__journal.subjGrades = subjGrades;
 
@@ -504,7 +479,6 @@ function renderJournalTable() {
     const days = getDaysOfMonth(month);
     const today = new Date();
     const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-
     if (!students.length) { wrap.innerHTML = '<p class="empty-state" style="padding:24px;">Нет учеников. Нажмите «+ ученик», чтобы добавить.</p>'; return; }
 
     let html = `<table><thead><tr><th style="min-width:180px;">Ученик</th>`;
@@ -688,11 +662,9 @@ async function journalAddStudent() {
 async function renderStudentGrades(container, spaceId) {
     container.innerHTML = '<p class="empty-state">Загрузка…</p>';
     try {
-        // Загружаем шейры
         let shares = { asOwner: [], asRecipient: [] };
         try { shares = await apiGet(`/api/grade-shares/${spaceId}`); } catch (e) {}
 
-        // Проверяем — скрыт ли я
         let myMember = null;
         try {
             const members = await apiGet(`/api/spaces/${spaceId}/members`);
@@ -701,13 +673,11 @@ async function renderStudentGrades(container, spaceId) {
 
         const isHidden = !!myMember?.hidden_from_journal;
 
-        // Если скрыт и нет шейров — блокировка
         if (isHidden && !shares.asOwner.length) {
             renderHiddenBlock(container, shares);
             return;
         }
 
-        // Загружаем свои оценки
         let myGrades = [];
         let myJournalBlocked = false;
         try { myGrades = await apiGet(`/api/grades/${spaceId}`); }
@@ -735,13 +705,11 @@ function renderHiddenBlock(container, shares) {
             <h3 style="margin:0 0 8px;">Журнал скрыт</h3>
             <p style="color:var(--text-secondary); margin:0 0 16px; font-size:0.9rem;">
                 Администратор скрыл вас из журнала. Чтобы снова видеть свои оценки,
-                начните делиться ими с однокурсником — он сможет видеть ваши оценки,
-                а вы получите доступ к своему журналу.
+                поделитесь ими с однокурсником — вы сразу получите доступ к своему журналу.
             </p>
             <button class="btn-primary" onclick="openStartSharing()">Начать делиться</button>
         </div>
     `;
-
     if (shares.asRecipient && shares.asRecipient.length) {
         html += `
             <div class="settings-card" style="margin-top:14px;">
@@ -767,22 +735,32 @@ function renderStudentJournalWithSlider() {
 
     let html = `<h1 class="page-title">Мои оценки</h1>`;
 
-    // Блок для скрытого ученика, который уже начал делиться
+    // Карточка с кнопками шейринга — видна ВСЕМ ученикам
+    html += `
+        <div class="settings-card" style="background:var(--accent-blue-light);">
+            <p style="margin:0 0 10px; font-size:0.9rem;">
+                ${myOwnShares && myOwnShares.length
+                    ? `Вы делитесь оценками с: <b>${myOwnShares.map(s => '@' + escapeHtml(s.shared_with_username)).join(', ')}</b>`
+                    : 'Вы пока ни с кем не поделились.'}
+            </p>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button class="btn-primary" style="width:auto; margin:0;" onclick="openStartSharing()">Поделиться оценками</button>
+                <button class="btn-secondary" style="width:auto; margin:0;" onclick="openManageShares()">Управление доступом</button>
+            </div>
+        </div>
+    `;
+
     if (isHidden) {
         html += `
-            <div class="settings-card" style="background:var(--accent-blue-light);">
-                <p style="margin:0 0 8px; font-size:0.9rem;">
-                    ${myOwnShares.length
-                        ? `Вы делитесь оценками с: <b>${myOwnShares.map(s => '@' + escapeHtml(s.shared_with_username)).join(', ')}</b>`
-                        : 'Вы пока ни с кем не поделились.'}
+            <div class="settings-card" style="background:#fff8e6; border-left:3px solid #ff9f0a;">
+                <p style="margin:0; font-size:0.85rem;">
+                    🔒 Администратор скрыл вас из общего журнала. Ваши оценки видны только тем, с кем вы поделились.
                 </p>
-                <button class="btn-small" onclick="openStartSharing()">Поделиться ещё</button>
-                <button class="btn-small" onclick="openManageShares()" style="margin-left:6px;">Управление</button>
             </div>
         `;
     }
 
-    // Слайдер, если есть шейры от других
+    // Слайдер чужих журналов
     if (sharedWith.length) {
         html += `<div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">Просмотр</div>`;
         html += `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:12px;">`;
@@ -822,6 +800,28 @@ function attachStudentJournalHandlers() {
                 window.__studentJournal.mode = ownerId;
 
                 let html = `<h1 class="page-title">Оценки</h1>`;
+
+                // Карточка шейринга тоже должна остаться
+                const { myOwnShares, isHidden } = window.__studentJournal;
+                html += `
+                    <div class="settings-card" style="background:var(--accent-blue-light);">
+                        <p style="margin:0 0 10px; font-size:0.9rem;">
+                            ${myOwnShares && myOwnShares.length
+                                ? `Вы делитесь оценками с: <b>${myOwnShares.map(s => '@' + escapeHtml(s.shared_with_username)).join(', ')}</b>`
+                                : 'Вы пока ни с кем не поделились.'}
+                        </p>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                            <button class="btn-primary" style="width:auto; margin:0;" onclick="openStartSharing()">Поделиться оценками</button>
+                            <button class="btn-secondary" style="width:auto; margin:0;" onclick="openManageShares()">Управление доступом</button>
+                        </div>
+                    </div>
+                `;
+                if (isHidden) {
+                    html += `<div class="settings-card" style="background:#fff8e6; border-left:3px solid #ff9f0a;">
+                        <p style="margin:0; font-size:0.85rem;">🔒 Администратор скрыл вас из общего журнала.</p>
+                    </div>`;
+                }
+
                 if (window.__studentJournal.sharedWith.length) {
                     html += `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:12px;">`;
                     html += `<button class="day-tab" data-owner="__own__" style="flex-shrink:0;">Мои</button>`;
@@ -852,7 +852,6 @@ function renderStudentGradesHtml(grades) {
         const avg = numeric.length ? (numeric.reduce((s, v) => s + v, 0) / numeric.length).toFixed(2) : '—';
         const absent = list.filter(g => g.attendance === 'absent').length;
         const late = list.filter(g => g.attendance === 'late').length;
-
         html += `<div class="settings-card">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
                 <div style="font-weight:700;font-size:1.05rem;">${escapeHtml(subj)}</div>
@@ -860,7 +859,6 @@ function renderStudentGradesHtml(grades) {
             </div>
             <div style="color:var(--text-secondary);font-size:0.8rem;margin-bottom:10px;">Оценок: ${numeric.length} · Пропусков: ${absent} · Опозданий: ${late}</div>
             <div style="display:flex;flex-direction:column;gap:6px;">`;
-
         const sorted = [...list].sort((a, b) => new Date(b.lesson_date) - new Date(a.lesson_date));
         for (const g of sorted) {
             const d = new Date(g.lesson_date);
@@ -904,7 +902,12 @@ async function openStartSharing() {
     try { members = await apiGet(`/api/spaces/${spaceId}/members`); }
     catch (e) { return showToast('Ошибка загрузки', 'error'); }
 
-    const available = members.filter(m => m.id !== currentUser.id && !m.hidden_from_journal);
+    const existingShares = (window.__studentJournal?.myOwnShares || []).map(s => s.shared_with_user_id);
+    const available = members.filter(m =>
+        m.id !== currentUser.id &&
+        !m.hidden_from_journal &&
+        !existingShares.includes(m.id)
+    );
 
     const root = document.getElementById('dynamicSheetRoot');
     root.innerHTML = `
@@ -922,8 +925,8 @@ async function openStartSharing() {
                         </div>
                     </div>
                 `).join('')
-                : '<p class="empty-state">Нет доступных участников (все скрыты или никого нет)</p>'}
-            <button class="btn-secondary" style="margin-top:12px;" onclick="closeDynamicSheet()">Отмена</button>
+                : '<p class="empty-state">Нет доступных участников. Либо все скрыты, либо вы уже со всеми поделились.</p>'}
+            <button class="btn-secondary" style="margin-top:12px;" onclick="closeDynamicSheet()">Закрыть</button>
         </div>`;
     document.getElementById('sheetOverlay').classList.add('show');
 }
@@ -1081,7 +1084,6 @@ function renderChatTab(container, spaceId, isAdmin, currentUserId) {
 
     applyGlobalSettings(window.__currentUser);
     loadChatHistory(spaceId, isAdmin, currentUserId);
-
     if (chatJoinedSpace !== spaceId) {
         socket.emit('join_space', { spaceId, token: localStorage.getItem('token') });
         chatJoinedSpace = spaceId;
@@ -1176,7 +1178,6 @@ function appendChatMessage(m, isAdmin, currentUserId) {
     el.id = 'msg-' + m.id;
 
     const replyHtml = m.reply_to ? `<div class="chat-reply-quote" style="border-left:3px solid #0088cc; padding-left:8px; margin-bottom:6px; font-size:0.8rem; opacity:0.8;"><div style="font-weight:600;">${escapeHtml(m.reply_to.full_name || '')}</div><div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml((m.reply_to.message || '').slice(0, 60))}</div></div>` : '';
-
     const filesHtml = (m.files && m.files.length) ? m.files.map((f) => {
         if (f.mime.startsWith('image/')) {
             const allUrls = m.files.filter(x => x.mime.startsWith('image/')).map(x => x.url);
@@ -1185,7 +1186,6 @@ function appendChatMessage(m, isAdmin, currentUserId) {
         }
         return `<a href="${f.url}" target="_blank" style="display:inline-block;padding:6px 10px;background:rgba(0,0,0,0.05);border-radius:8px;margin-top:6px;text-decoration:none;color:inherit;font-size:0.85rem;">${escapeHtml(f.name)} (${formatBytes(f.size)})</a>`;
     }).join('') : '';
-
     const reactionsHtml = renderReactions(m.reactions || [], m.id);
 
     el.innerHTML = `
@@ -1444,7 +1444,6 @@ function openStatusEditor() {
     if (!isAdminViewer) return showToast('Нет доступа', 'error');
     const currentStatus = member.custom_status || '';
     const roleLabel = ROLE_LABELS[member.role] || member.role;
-
     showFormSheet('Изменить статус', `
         <div class="form-group"><input name="customStatus" class="form-control" value="${escapeHtml(currentStatus)}" placeholder="Например: Староста" maxlength="50"></div>
         <p style="color:var(--text-secondary);font-size:0.8rem;">Оставьте пустым, чтобы вернуть роль (${escapeHtml(roleLabel)}).</p>
