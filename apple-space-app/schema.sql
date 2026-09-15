@@ -1,6 +1,37 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- ============================================================================
+-- ФУНКЦИЯ НОРМАЛИЗАЦИИ ИМЁН
+-- Берёт первые 2 слова ФИО, приводит к нижнему регистру, ё→е,
+-- сортирует первые два слова по алфавиту.
+-- "Семён Гордеев" → "гордеев семен"
+-- "Гордеев Семен Валерьевич" → "гордеев семен"
+-- ============================================================================
+CREATE OR REPLACE FUNCTION name_key(full_name TEXT) RETURNS TEXT AS $$
+DECLARE
+    parts TEXT[];
+    a TEXT;
+    b TEXT;
+    cleaned TEXT;
+BEGIN
+    IF full_name IS NULL THEN RETURN ''; END IF;
+    cleaned := LOWER(REPLACE(TRIM(full_name), 'ё', 'е'));
+    cleaned := REGEXP_REPLACE(cleaned, '\s+', ' ', 'g');
+    parts := string_to_array(cleaned, ' ');
+    parts := array_remove(parts, '');
+    IF parts IS NULL OR array_length(parts, 1) IS NULL THEN RETURN ''; END IF;
+    IF array_length(parts, 1) = 1 THEN RETURN parts[1]; END IF;
+    a := parts[1];
+    b := parts[2];
+    IF a > b THEN
+        RETURN b || ' ' || a;
+    ELSE
+        RETURN a || ' ' || b;
+    END IF;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
+-- ============================================================================
 -- 1. Глобальные настройки
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS system_settings (
@@ -59,7 +90,7 @@ CREATE TABLE IF NOT EXISTS spaces (
 );
 
 -- ============================================================================
--- 4. Участники
+-- 4. Участники пространств
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS space_members (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -68,10 +99,14 @@ CREATE TABLE IF NOT EXISTS space_members (
     role VARCHAR(20) DEFAULT 'member',
     muted_until TIMESTAMP WITH TIME ZONE NULL,
     custom_status VARCHAR(50) DEFAULT NULL,
+    hidden_from_journal BOOLEAN DEFAULT FALSE,
     joined_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(space_id, user_id)
 );
 
+-- ============================================================================
+-- 4.1 Забаненные
+-- ============================================================================
 CREATE TABLE IF NOT EXISTS space_blocked (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     space_id UUID REFERENCES spaces(id) ON DELETE CASCADE,
@@ -96,6 +131,9 @@ CREATE TABLE IF NOT EXISTS schedules (
     end_time TIME NOT NULL
 );
 
+-- ============================================================================
+-- 6. Замены и отмены
+-- ============================================================================
 CREATE TABLE IF NOT EXISTS schedule_overrides (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     space_id UUID REFERENCES spaces(id) ON DELETE CASCADE,
@@ -110,7 +148,7 @@ CREATE TABLE IF NOT EXISTS schedule_overrides (
 );
 
 -- ============================================================================
--- 6. Домашние задания
+-- 7. Домашние задания
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS homeworks (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -121,6 +159,9 @@ CREATE TABLE IF NOT EXISTS homeworks (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- ============================================================================
+-- 8. Отметки сдачи ДЗ
+-- ============================================================================
 CREATE TABLE IF NOT EXISTS homework_completions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     homework_id UUID REFERENCES homeworks(id) ON DELETE CASCADE,
@@ -131,7 +172,7 @@ CREATE TABLE IF NOT EXISTS homework_completions (
 );
 
 -- ============================================================================
--- 7. Чат
+-- 9. Чат
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS chat_messages (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -143,7 +184,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 );
 
 -- ============================================================================
--- 8. Рекорды игр
+-- 10. Рекорды игр
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS game_scores (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -156,7 +197,7 @@ CREATE TABLE IF NOT EXISTS game_scores (
 );
 
 -- ============================================================================
--- 9. Push
+-- 11. Push-подписки
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS push_subscriptions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -185,7 +226,7 @@ CREATE TABLE IF NOT EXISTS push_mutes (
 );
 
 -- ============================================================================
--- 10. Файлы
+-- 12. Файлы
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS files (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -200,7 +241,7 @@ CREATE TABLE IF NOT EXISTS files (
 );
 
 -- ============================================================================
--- 11. Реакции и упоминания
+-- 13. Реакции и упоминания
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS message_reactions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -220,7 +261,7 @@ CREATE TABLE IF NOT EXISTS message_mentions (
 );
 
 -- ============================================================================
--- 12. Чтение и присутствие
+-- 14. Состояние прочтения и присутствие
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS chat_read_state (
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
@@ -236,7 +277,7 @@ CREATE TABLE IF NOT EXISTS user_presence (
 );
 
 -- ============================================================================
--- 13. Уведомления
+-- 15. Настройки уведомлений
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS user_notification_prefs (
     user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -251,7 +292,7 @@ CREATE TABLE IF NOT EXISTS user_notification_prefs (
 );
 
 -- ============================================================================
--- 14. Предметы учителя
+-- 16. Предметы учителя
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS teacher_subjects (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -263,7 +304,7 @@ CREATE TABLE IF NOT EXISTS teacher_subjects (
 );
 
 -- ============================================================================
--- 15. Журнал оценок
+-- 17. Журнал оценок
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS grades (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -282,7 +323,7 @@ CREATE TABLE IF NOT EXISTS grades (
 );
 
 -- ============================================================================
--- 16. Объявления и отложенные уведомления
+-- 18. Объявления и отложенные уведомления
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS space_announcements (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -302,7 +343,7 @@ CREATE TABLE IF NOT EXISTS pending_notifications (
 );
 
 -- ============================================================================
--- 17. Запросы на восстановление пароля
+-- 19. Запросы на восстановление пароля
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS password_reset_requests (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -320,7 +361,54 @@ CREATE TABLE IF NOT EXISTS password_reset_requests (
 );
 
 -- ============================================================================
--- 18. ИНДЕКСЫ (в самом конце, чтобы не ломать создание таблиц)
+-- 20. Виртуальные ученики журнала
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS journal_students (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    space_id UUID REFERENCES spaces(id) ON DELETE CASCADE,
+    subject_name VARCHAR(100) NOT NULL,
+    student_name VARCHAR(150) NOT NULL,
+    sort_order INT DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(space_id, subject_name, student_name)
+);
+
+-- ============================================================================
+-- 21. Шейринг оценок
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS grade_shares (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    space_id UUID REFERENCES spaces(id) ON DELETE CASCADE,
+    owner_user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    shared_with_user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(space_id, owner_user_id, shared_with_user_id)
+);
+
+-- ============================================================================
+-- 22. Прогресс RPG-кликера
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS rpg_state (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    kills_total INT DEFAULT 0,
+    kills_on_level INT DEFAULT 0,
+    level INT DEFAULT 1,
+    coins BIGINT DEFAULT 0,
+    sword INT DEFAULT 1,
+    armor INT DEFAULT 0,
+    guilds INT DEFAULT 0,
+    warriors INT DEFAULT 0,
+    artifacts INT DEFAULT 0,
+    potions INT DEFAULT 0,
+    forge INT DEFAULT 0,
+    tower INT DEFAULT 0,
+    monster_idx INT DEFAULT 0,
+    last_online TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- ============================================================================
+-- ИНДЕКСЫ
 -- ============================================================================
 CREATE INDEX IF NOT EXISTS idx_chat_created_at ON chat_messages(created_at);
 CREATE INDEX IF NOT EXISTS idx_chat_space ON chat_messages(space_id);
@@ -345,29 +433,8 @@ CREATE INDEX IF NOT EXISTS idx_space_announcements ON space_announcements(space_
 CREATE INDEX IF NOT EXISTS idx_prr_status ON password_reset_requests(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_prr_code ON password_reset_requests(code) WHERE code IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_prr_token ON password_reset_requests(token) WHERE token IS NOT NULL;
-
--- ============================================================================
--- 19. Виртуальные ученики журнала (для тех, кого нет в пространстве)
--- ============================================================================
-CREATE TABLE IF NOT EXISTS journal_students (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    space_id UUID REFERENCES spaces(id) ON DELETE CASCADE,
-    subject_name VARCHAR(100) NOT NULL,
-    student_name VARCHAR(150) NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(space_id, subject_name, student_name)
-);
 CREATE INDEX IF NOT EXISTS idx_journal_students ON journal_students(space_id, subject_name);
-
-ALTER TABLE space_members ADD COLUMN IF NOT EXISTS hidden_from_journal BOOLEAN DEFAULT FALSE;
-
-CREATE TABLE IF NOT EXISTS grade_shares (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    space_id UUID REFERENCES spaces(id) ON DELETE CASCADE,
-    owner_user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    shared_with_user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(space_id, owner_user_id, shared_with_user_id)
-);
+CREATE INDEX IF NOT EXISTS idx_journal_students_order ON journal_students(space_id, subject_name, sort_order);
 CREATE INDEX IF NOT EXISTS idx_grade_shares_recipient ON grade_shares(space_id, shared_with_user_id);
 CREATE INDEX IF NOT EXISTS idx_grade_shares_owner ON grade_shares(space_id, owner_user_id);
+CREATE INDEX IF NOT EXISTS idx_rpg_state_user ON rpg_state(user_id);
