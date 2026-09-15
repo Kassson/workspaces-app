@@ -1263,3 +1263,26 @@ a {
     color: #fff;
     border-color: var(--accent-blue);
 }
+
+/* Заголовки дней в журнале */
+.day-header {
+    font-weight: 700;
+    text-align: center;
+}
+.day-header.past {
+    color: var(--text-secondary);
+    opacity: 0.5;
+}
+.day-header.today {
+    color: #30d158;
+    background: rgba(48, 209, 88, 0.12) !important;
+}
+.day-header.future {
+    color: var(--accent-blue);
+    font-weight: 700;
+}
+
+/* Ячейки дней */
+.journal-table-wrap td.past { opacity: 0.85; }
+.journal-table-wrap td.today { background: rgba(48, 209, 88, 0.06); }
+.journal-table-wrap td.future { background: rgba(0, 136, 204, 0.04); }
