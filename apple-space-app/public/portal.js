@@ -1,13 +1,11 @@
-/* ===================== ОБЩАЯ ЛОГИКА ПОРТАЛА (студент + преподаватель) ===================== */
+/* ===================== ОБЩАЯ ЛОГИКА ПОРТАЛА ===================== */
 
 let systemSettings = {};
 let currentSpace = null;
-
 window._hwStudents = [];
 window._currentHwStatsId = null;
 let _memberForStatusEdit = null;
 
-// ===================== ЭКРАН ЗАГРУЗКИ =====================
 function showLoadingScreen() {
     const el = document.getElementById('loadingScreen');
     if (el) el.classList.add('show');
@@ -17,7 +15,6 @@ function hideLoadingScreen() {
     if (el) el.classList.remove('show');
 }
 
-// ===================== ГЛОБАЛЬНЫЕ НАСТРОЙКИ =====================
 async function loadAndApplySettings(user) {
     try { systemSettings = await apiGet('/api/settings'); } catch (e) { systemSettings = {}; }
     applyGlobalSettings(user);
@@ -99,15 +96,11 @@ function renderScheduleBody() {
     const box = document.getElementById('scheduleBody');
     if (!box) return;
     const { lessons, overrides, todayDow, isAdmin, spaceId } = window.__scheduleData;
-    const today = new Date();
-    const dateStrToday = ymd(today);
+    const dateStrToday = ymd(new Date());
 
     if (_scheduleViewMode === 'today') {
         const todayLessons = lessons.filter(l => l.day_of_week === todayDow).sort((a, b) => a.start_time.localeCompare(b.start_time));
-        if (!todayLessons.length) {
-            box.innerHTML = '<p class="empty-state">Пар сегодня нет</p>';
-            return;
-        }
+        if (!todayLessons.length) { box.innerHTML = '<p class="empty-state">Пар сегодня нет</p>'; return; }
         box.innerHTML = todayLessons.map(l => lessonCardHtml(l, overrides, dateStrToday, false, isAdmin, spaceId)).join('');
     } else {
         let html = `<div class="day-tabs">`;
@@ -187,9 +180,7 @@ async function renderHomeworkTab(container, spaceId, isAdmin) {
         const searchInput = document.getElementById('hwSearch');
         const renderList = (query = '') => {
             const filtered = query
-                ? list.filter(hw =>
-                    hw.title.toLowerCase().includes(query.toLowerCase()) ||
-                    hw.subject_name.toLowerCase().includes(query.toLowerCase()))
+                ? list.filter(hw => hw.title.toLowerCase().includes(query.toLowerCase()) || hw.subject_name.toLowerCase().includes(query.toLowerCase()))
                 : list;
             const listBox = document.getElementById('hwList');
             if (!filtered.length) { listBox.innerHTML = '<p class="empty-state">Заданий пока нет</p>'; return; }
@@ -203,16 +194,11 @@ async function renderHomeworkTab(container, spaceId, isAdmin) {
 function homeworkCardHtml(hw, isAdmin, spaceId) {
     const due = new Date(hw.due_date).toLocaleDateString('ru-RU');
     const remote = systemSettings.remote_mode;
-    const gradeHtml = hw.grade_value
-        ? `<span class="grade-badge" style="background:#30d158;color:#fff;padding:3px 10px;border-radius:8px;font-weight:700;">${hw.grade_value}</span>`
-        : '';
+    const gradeHtml = hw.grade_value ? `<span class="grade-badge" style="background:#30d158;color:#fff;padding:3px 10px;border-radius:8px;font-weight:700;">${hw.grade_value}</span>` : '';
 
     if (isAdmin) {
         return `<div class="hw-card ${hw.is_done ? 'done' : ''}">
-            <div class="hw-top">
-                <span class="hw-subject">${escapeHtml(hw.subject_name)}</span>
-                <span class="hw-due">до ${due}</span>
-            </div>
+            <div class="hw-top"><span class="hw-subject">${escapeHtml(hw.subject_name)}</span><span class="hw-due">до ${due}</span></div>
             <div class="hw-title">${escapeHtml(hw.title)}</div>
             <div class="hw-actions">
                 <button class="btn-small" onclick="openHomeworkStats('${hw.id}')">Статистика</button>
@@ -230,43 +216,28 @@ function homeworkCardHtml(hw, isAdmin, spaceId) {
             <button class="btn-small" onclick="uncompleteHomework('${hw.id}','${spaceId}')">Отменить</button>
         `;
     } else if (remote) {
-        actionsHtml = `
-            <label class="btn-small" style="cursor:pointer;">Прикрепить фото
-                <input type="file" accept="image/*" style="display:none" onchange="submitHomeworkPhoto('${hw.id}','${spaceId}', this)">
-            </label>
-        `;
+        actionsHtml = `<label class="btn-small" style="cursor:pointer;">Прикрепить фото<input type="file" accept="image/*" style="display:none" onchange="submitHomeworkPhoto('${hw.id}','${spaceId}', this)"></label>`;
     } else {
         actionsHtml = `
             <button class="btn-small" onclick="completeHomework('${hw.id}','${spaceId}')">Выполнено</button>
-            <label class="btn-small" style="cursor:pointer;">Прикрепить фото
-                <input type="file" accept="image/*" style="display:none" onchange="submitHomeworkPhoto('${hw.id}','${spaceId}', this)">
-            </label>
+            <label class="btn-small" style="cursor:pointer;">Прикрепить фото<input type="file" accept="image/*" style="display:none" onchange="submitHomeworkPhoto('${hw.id}','${spaceId}', this)"></label>
         `;
     }
 
     return `<div class="hw-card ${hw.is_done ? 'done' : ''}">
-        <div class="hw-top">
-            <span class="hw-subject">${escapeHtml(hw.subject_name)}</span>
-            <span class="hw-due">до ${due}</span>
-        </div>
+        <div class="hw-top"><span class="hw-subject">${escapeHtml(hw.subject_name)}</span><span class="hw-due">до ${due}</span></div>
         <div class="hw-title">${escapeHtml(hw.title)}</div>
         <div class="hw-actions">${actionsHtml}</div>
     </div>`;
 }
 
 async function completeHomework(id, spaceId) {
-    try {
-        await apiPost(`/api/homework/${id}/complete`, {});
-        showToast('ДЗ отмечено как выполненное', 'success');
-        renderHomeworkTab(document.getElementById(currentHwContainerId()), spaceId, false);
-    } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
+    try { await apiPost(`/api/homework/${id}/complete`, {}); showToast('ДЗ отмечено как выполненное', 'success'); renderHomeworkTab(document.getElementById(currentHwContainerId()), spaceId, false); }
+    catch (e) { showToast(e.error || 'Ошибка', 'error'); }
 }
 async function uncompleteHomework(id, spaceId) {
-    try {
-        await apiDelete(`/api/homework/${id}/complete`);
-        showToast('Отметка снята', 'info');
-        renderHomeworkTab(document.getElementById(currentHwContainerId()), spaceId, false);
-    } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
+    try { await apiDelete(`/api/homework/${id}/complete`); showToast('Отметка снята', 'info'); renderHomeworkTab(document.getElementById(currentHwContainerId()), spaceId, false); }
+    catch (e) { showToast(e.error || 'Ошибка', 'error'); }
 }
 async function submitHomeworkPhoto(id, spaceId, input) {
     const file = input.files[0]; if (!file) return;
@@ -281,11 +252,8 @@ async function submitHomeworkPhoto(id, spaceId, input) {
 async function deleteHomework(id, spaceId) {
     const ok = await showConfirm('Удалить задание?', 'Это действие нельзя отменить', 'Удалить', 'Отмена', true);
     if (!ok) return;
-    try {
-        await apiDelete(`/api/homework/${id}`);
-        showToast('Задание удалено', 'success');
-        renderHomeworkTab(document.getElementById(currentHwContainerId()), spaceId, true);
-    } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
+    try { await apiDelete(`/api/homework/${id}`); showToast('Задание удалено', 'success'); renderHomeworkTab(document.getElementById(currentHwContainerId()), spaceId, true); }
+    catch (e) { showToast(e.error || 'Ошибка', 'error'); }
 }
 function currentHwContainerId() { return document.getElementById('tab-hw') ? 'tab-hw' : 'tab-homework'; }
 
@@ -294,7 +262,6 @@ async function openHomeworkStats(homeworkId) {
     if (!currentSpace) return;
     const isAdminViewer = currentUser?.isTeacher || currentSpace?.is_admin;
     if (!isAdminViewer) return showToast('Только для преподавателя', 'error');
-
     window._currentHwStatsId = homeworkId;
 
     const root = document.getElementById('dynamicSheetRoot');
@@ -313,8 +280,7 @@ async function openHomeworkStats(homeworkId) {
             <div style="text-align:center; margin:14px 0;">
                 <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="transform:rotate(-90deg);">
                     <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="var(--card-border)" stroke-width="${stroke}"></circle>
-                    <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="#30d158" stroke-width="${stroke}"
-                            stroke-dasharray="${dash} ${c}" stroke-linecap="round"></circle>
+                    <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="#30d158" stroke-width="${stroke}" stroke-dasharray="${dash} ${c}" stroke-linecap="round"></circle>
                 </svg>
                 <div style="margin-top:-95px; margin-bottom:60px; font-size:1.6rem; font-weight:700;">${s.percentage}%</div>
                 <p style="color:var(--text-secondary);">Выполнили: <b>${s.completed}</b> из <b>${s.total}</b></p>
@@ -333,19 +299,9 @@ async function openHomeworkStats(homeworkId) {
                 let label = 'Не сдано';
                 let labelColor = 'var(--text-secondary)';
                 let opacity = 1;
-
-                if (st.status === 'done') {
-                    borderColor = '#30d158';
-                    label = 'Сдано';
-                    labelColor = '#30d158';
-                } else if (st.status === 'overdue') {
-                    borderColor = '#ff453a';
-                    label = 'Просрочено';
-                    labelColor = '#ff453a';
-                    opacity = 0.85;
-                } else {
-                    opacity = 0.8;
-                }
+                if (st.status === 'done') { borderColor = '#30d158'; label = 'Сдано'; labelColor = '#30d158'; }
+                else if (st.status === 'overdue') { borderColor = '#ff453a'; label = 'Просрочено'; labelColor = '#ff453a'; opacity = 0.85; }
+                else { opacity = 0.8; }
 
                 const photoIdx = st.attachmentUrl ? allPhotoUrls.indexOf(st.attachmentUrl) : -1;
                 const photoPreview = st.attachmentUrl
@@ -353,8 +309,7 @@ async function openHomeworkStats(homeworkId) {
                     : '';
 
                 const gradeSelect = `
-                    <select onchange="setGradeFromStats('${st.id}', '${escapeHtml(st.fullName).replace(/'/g, "\\'")}', this.value, '${homeworkId}')"
-                            style="padding:4px 8px;border-radius:8px;border:1px solid var(--card-border);background:var(--input-bg);color:var(--text);font-weight:700;">
+                    <select onchange="setGradeFromStats('${st.id}', '${escapeHtml(st.fullName).replace(/'/g, "\\'")}', this.value, '${homeworkId}')" style="padding:4px 8px;border-radius:8px;border:1px solid var(--card-border);background:var(--input-bg);color:var(--text);font-weight:700;">
                         <option value="">—</option>
                         <option value="2" ${st.gradeValue === 2 ? 'selected' : ''}>2</option>
                         <option value="3" ${st.gradeValue === 3 ? 'selected' : ''}>3</option>
@@ -363,22 +318,15 @@ async function openHomeworkStats(homeworkId) {
                     </select>
                 `;
 
-                html += `
-                    <div class="hw-student-item" style="border-color:${borderColor}; opacity:${opacity}; display:flex; align-items:center; gap:10px;">
-                        <div class="member-avatar">${escapeHtml(st.avatarEmoji || '👤')}</div>
-                        <div class="member-info" style="flex:1;">
-                            <div class="member-name">${escapeHtml(st.fullName)}</div>
-                            <div class="member-username" style="color:${labelColor};">${label}</div>
-                        </div>
-                        ${photoPreview}
-                        ${gradeSelect}
-                    </div>
-                `;
+                html += `<div class="hw-student-item" style="border-color:${borderColor}; opacity:${opacity}; display:flex; align-items:center; gap:10px;">
+                    <div class="member-avatar">${escapeHtml(st.avatarEmoji || '👤')}</div>
+                    <div class="member-info" style="flex:1;"><div class="member-name">${escapeHtml(st.fullName)}</div><div class="member-username" style="color:${labelColor};">${label}</div></div>
+                    ${photoPreview}
+                    ${gradeSelect}
+                </div>`;
             });
         }
-        html += `</div>`;
-        html += `<button class="btn-secondary" style="margin-top:14px;" onclick="closeDynamicSheet()">Закрыть</button>`;
-
+        html += `</div><button class="btn-secondary" style="margin-top:14px;" onclick="closeDynamicSheet()">Закрыть</button>`;
         root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div>${html}</div>`;
     } catch (e) {
         root.innerHTML = `<div class="sheet show" id="dynamicSheet"><p class="empty-state">Ошибка: ${escapeHtml(e.error || '')}</p><button class="btn-secondary" onclick="closeDynamicSheet()">Закрыть</button></div>`;
@@ -391,27 +339,16 @@ async function setGradeFromStats(studentUserId, studentName, value, homeworkId) 
         const s = await apiGet(`/api/homework/${homeworkId}/stats`);
         const subjectName = s.subjectName || 'Предмет';
         const dueDate = s.dueDate || ymd(new Date());
-
         await apiPost('/api/grades', {
-            spaceId: currentSpace.id,
-            studentName: studentName,
-            studentUserId: studentUserId,
-            subjectName: subjectName,
-            gradeValue: value ? parseInt(value) : null,
-            attendance: 'present',
-            lessonDate: dueDate,
-            homeworkId: homeworkId
+            spaceId: currentSpace.id, studentName, studentUserId,
+            subjectName, gradeValue: value ? parseInt(value) : null,
+            attendance: 'present', lessonDate: dueDate, homeworkId
         });
         showToast(value ? `Оценка ${value} выставлена` : 'Оценка снята', 'success');
-    } catch (e) {
-        showToast(e.error || 'Ошибка', 'error');
-    }
+    } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
 }
 
-// ============================================================================
-//  ЖУРНАЛ
-// ============================================================================
-
+// ===================== ЖУРНАЛ =====================
 const MONTH_NAMES = ['', 'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
 
 function formatMonthName(m) {
@@ -419,60 +356,40 @@ function formatMonthName(m) {
     const parts = m.split('-');
     return `${MONTH_NAMES[parseInt(parts[1])]} ${parseInt(parts[0])}`;
 }
-
 function getDaysOfMonth(monthStr) {
     const parts = monthStr.split('-');
     const year = parseInt(parts[0]);
     const month = parseInt(parts[1]);
     const lastDay = new Date(year, month, 0).getDate();
     const days = [];
-    for (let d = 1; d <= lastDay; d++) {
-        days.push({
-            day: d,
-            date: `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-        });
-    }
+    for (let d = 1; d <= lastDay; d++) days.push({ day: d, date: `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}` });
     return days;
 }
-
 function monthKeyOf(dateStr) {
     const d = new Date(dateStr);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-window.__journal = {
-    spaceId: null,
-    subject: null,
-    month: null,
-    subjects: [],
-    months: [],
-    students: [],
-    allGrades: [],
-    subjGrades: []
-};
+window.__journal = { spaceId: null, subject: null, month: null, subjects: [], months: [], students: [], allGrades: [], subjGrades: [] };
+window.__studentJournal = {};
 
 async function renderGradesTab(container, spaceId, isAdmin) {
     if (!spaceId) { container.innerHTML = emptySpaceState(); return; }
-    if (currentUser?.isTeacher) {
-        await renderTeacherJournal(container, spaceId);
-    } else {
-        await renderStudentGrades(container, spaceId);
-    }
+    if (currentUser?.isTeacher) await renderTeacherJournal(container, spaceId);
+    else await renderStudentGrades(container, spaceId);
 }
 
+// ============ ЖУРНАЛ УЧИТЕЛЯ ============
 async function renderTeacherJournal(container, spaceId) {
     container.innerHTML = '<p class="empty-state">Загрузка…</p>';
-
     try {
         const allGrades = await apiGet(`/api/grades/${spaceId}`);
         const subjectsFromGrades = [...new Set(allGrades.map(g => g.subject_name).filter(Boolean))];
-
         let mySubjects = [];
         try {
             const ts = await apiGet(`/api/teacher-subjects/${spaceId}`);
             mySubjects = ts.map(s => s.subject_name);
         } catch (e) {}
-
         const subjects = [...new Set([...mySubjects, ...subjectsFromGrades])].sort();
 
         window.__journal.spaceId = spaceId;
@@ -480,19 +397,11 @@ async function renderTeacherJournal(container, spaceId) {
         window.__journal.subjects = subjects;
 
         if (!subjects.length) {
-            container.innerHTML = `
-                <h1 class="page-title">Журнал</h1>
-                <div class="settings-card" style="text-align:center;">
-                    <p style="color:var(--text-secondary);margin-top:0;">Нет ни одного предмета. Добавьте первый, чтобы начать вести журнал.</p>
-                    <button class="btn-primary" onclick="addJournalSubject('${spaceId}')">+ Добавить предмет</button>
-                </div>
-            `;
+            container.innerHTML = `<h1 class="page-title">Журнал</h1><div class="settings-card" style="text-align:center;"><p style="color:var(--text-secondary);margin-top:0;">Нет ни одного предмета.</p><button class="btn-primary" onclick="addJournalSubject('${spaceId}')">+ Добавить предмет</button></div>`;
             return;
         }
 
-        if (!window.__journal.subject || !subjects.includes(window.__journal.subject)) {
-            window.__journal.subject = subjects[0];
-        }
+        if (!window.__journal.subject || !subjects.includes(window.__journal.subject)) window.__journal.subject = subjects[0];
 
         const subjGrades = allGrades.filter(g => g.subject_name === window.__journal.subject);
         window.__journal.subjGrades = subjGrades;
@@ -502,10 +411,7 @@ async function renderTeacherJournal(container, spaceId) {
         const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
         if (!monthsFromGrades.includes(currentMonth)) monthsFromGrades.push(currentMonth);
         monthsFromGrades.sort();
-
-        if (!window.__journal.month || !monthsFromGrades.includes(window.__journal.month)) {
-            window.__journal.month = monthsFromGrades[monthsFromGrades.length - 1];
-        }
+        if (!window.__journal.month || !monthsFromGrades.includes(window.__journal.month)) window.__journal.month = monthsFromGrades[monthsFromGrades.length - 1];
         window.__journal.months = monthsFromGrades;
 
         container.innerHTML = renderTeacherJournalHtml();
@@ -524,20 +430,15 @@ function renderTeacherJournalHtml() {
     const month = window.__journal.month;
 
     let html = `<h1 class="page-title">Журнал</h1>`;
-
     html += `<div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">Предмет</div>`;
     html += `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:12px;">`;
-    for (const s of subjects) {
-        html += `<button class="day-tab ${s === subject ? 'active' : ''}" data-subj="${escapeHtml(s)}" style="flex-shrink:0;">${escapeHtml(s)}</button>`;
-    }
+    for (const s of subjects) html += `<button class="day-tab ${s === subject ? 'active' : ''}" data-subj="${escapeHtml(s)}" style="flex-shrink:0;">${escapeHtml(s)}</button>`;
     html += `<button class="day-tab" data-subj="__add__" style="flex-shrink:0;">+ предмет</button>`;
     html += `</div>`;
 
     html += `<div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">Месяц</div>`;
     html += `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:12px;">`;
-    for (const m of months) {
-        html += `<button class="day-tab ${m === month ? 'active' : ''}" data-month="${m}" style="flex-shrink:0;">${formatMonthName(m)}</button>`;
-    }
+    for (const m of months) html += `<button class="day-tab ${m === month ? 'active' : ''}" data-month="${m}" style="flex-shrink:0;">${formatMonthName(m)}</button>`;
     html += `</div>`;
 
     html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
@@ -545,9 +446,7 @@ function renderTeacherJournalHtml() {
         <button class="btn-small" onclick="exportJournalExcel(window.__journal.spaceId)">Экспорт Excel</button>
         <button class="btn-small" onclick="importJournalExcel(window.__journal.spaceId)">Импорт Excel</button>
     </div>`;
-
     html += `<div id="journalTableWrap" class="journal-table-wrap"></div>`;
-
     return html;
 }
 
@@ -585,40 +484,28 @@ async function loadJournalStudents(spaceId) {
         const members = await apiGet(`/api/spaces/${spaceId}/members`);
         const namesFromMembers = members.map(m => m.full_name);
         const namesFromGrades = [...new Set(window.__journal.subjGrades.map(g => g.student_name))];
-
         let extra = [];
         try {
             const extraResp = await apiGet(`/api/journal-students/${spaceId}?subject=${encodeURIComponent(window.__journal.subject || '')}`);
             extra = extraResp.map(s => s.student_name);
         } catch (e) {}
-
         window.__journal.students = [...new Set([...namesFromMembers, ...namesFromGrades, ...extra])].sort();
-    } catch (e) {
-        window.__journal.students = [];
-    }
+    } catch (e) { window.__journal.students = []; }
 }
 
 function renderJournalTable() {
     const wrap = document.getElementById('journalTableWrap');
     if (!wrap) return;
-
     const students = window.__journal.students || [];
     const subjGrades = window.__journal.subjGrades || [];
     const month = window.__journal.month;
-
-    if (!month) {
-        wrap.innerHTML = '<p class="empty-state" style="padding:24px;">Выберите месяц</p>';
-        return;
-    }
+    if (!month) { wrap.innerHTML = '<p class="empty-state" style="padding:24px;">Выберите месяц</p>'; return; }
 
     const days = getDaysOfMonth(month);
     const today = new Date();
     const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
-    if (!students.length) {
-        wrap.innerHTML = '<p class="empty-state" style="padding:24px;">Нет учеников. Нажмите «+ ученик», чтобы добавить.</p>';
-        return;
-    }
+    if (!students.length) { wrap.innerHTML = '<p class="empty-state" style="padding:24px;">Нет учеников. Нажмите «+ ученик», чтобы добавить.</p>'; return; }
 
     let html = `<table><thead><tr><th style="min-width:180px;">Ученик</th>`;
     for (const d of days) {
@@ -633,34 +520,21 @@ function renderJournalTable() {
     for (const st of students) {
         html += `<tr><td class="journal-student-cell" data-student="${escapeHtml(st)}" style="cursor:pointer;" title="Нажмите, чтобы редактировать">${escapeHtml(st)}</td>`;
         const studentGrades = subjGrades.filter(g => g.student_name === st && g.grade_value);
-
         for (const d of days) {
             const cell = subjGrades.find(g => g.student_name === st && g.lesson_date && String(g.lesson_date).slice(0, 10) === d.date);
             let txt = '';
             let cellStyle = '';
             if (cell) {
-                if (cell.attendance === 'absent') {
-                    txt = cell.grade_value ? String(cell.grade_value) : 'Н';
-                    cellStyle = 'background:#ff453a;color:#fff;font-weight:700;';
-                } else if (cell.attendance === 'late') {
-                    txt = cell.grade_value ? String(cell.grade_value) : 'О';
-                    cellStyle = 'background:#ff9f0a;color:#fff;font-weight:700;';
-                } else if (cell.grade_value) {
-                    txt = String(cell.grade_value);
-                    cellStyle = 'font-weight:700;color:#0088cc;';
-                }
+                if (cell.attendance === 'absent') { txt = cell.grade_value ? String(cell.grade_value) : 'Н'; cellStyle = 'background:#ff453a;color:#fff;font-weight:700;'; }
+                else if (cell.attendance === 'late') { txt = cell.grade_value ? String(cell.grade_value) : 'О'; cellStyle = 'background:#ff9f0a;color:#fff;font-weight:700;'; }
+                else if (cell.grade_value) { txt = String(cell.grade_value); cellStyle = 'font-weight:700;color:#0088cc;'; }
             }
-
             const stEsc = escapeHtml(st).replace(/'/g, '&#39;');
             html += `<td style="${cellStyle}cursor:pointer;" onclick="openGradeCell('${stEsc}', '${d.date}')">${txt || '·'}</td>`;
         }
-
-        const avg = studentGrades.length
-            ? (studentGrades.reduce((s, g) => s + g.grade_value, 0) / studentGrades.length).toFixed(2)
-            : '—';
+        const avg = studentGrades.length ? (studentGrades.reduce((s, g) => s + g.grade_value, 0) / studentGrades.length).toFixed(2) : '—';
         html += `<td style="font-weight:700;color:#0088cc;">${avg}</td></tr>`;
     }
-
     html += `</tbody></table>`;
     wrap.innerHTML = html;
 
@@ -671,10 +545,6 @@ function renderJournalTable() {
         });
     });
 }
-
-// ============================================================================
-//  МЕНЮ УЧЕНИКА В ЖУРНАЛЕ — переименовать / удалить
-// ============================================================================
 
 function openStudentMenu(studentName) {
     const subject = window.__journal.subject;
@@ -689,20 +559,10 @@ function openStudentMenu(studentName) {
                 <button class="btn-danger" id="journalDeleteBtn">Удалить из журнала</button>
                 <button class="btn-secondary" onclick="closeDynamicSheet()">Отмена</button>
             </div>
-            <p style="color:var(--text-secondary);font-size:0.75rem;margin-top:14px;line-height:1.4;">
-                Переименование обновит ФИО во всех оценках этого ученика в пространстве.<br>
-                Удаление уберёт все его оценки по предмету «${escapeHtml(subject || '')}» и запись из журнала.
-            </p>
-        </div>
-    `;
+        </div>`;
     document.getElementById('sheetOverlay').classList.add('show');
-
-    document.getElementById('journalRenameBtn').addEventListener('click', () => {
-        renameJournalStudent(studentName);
-    });
-    document.getElementById('journalDeleteBtn').addEventListener('click', () => {
-        deleteJournalStudent(studentName);
-    });
+    document.getElementById('journalRenameBtn').addEventListener('click', () => renameJournalStudent(studentName));
+    document.getElementById('journalDeleteBtn').addEventListener('click', () => deleteJournalStudent(studentName));
 }
 
 async function renameJournalStudent(oldName) {
@@ -710,44 +570,24 @@ async function renameJournalStudent(oldName) {
     if (!newName) return;
     const trimmed = newName.trim();
     if (!trimmed || trimmed === oldName) return;
-
     try {
-        await apiPost('/api/journal-students/rename', {
-            spaceId: window.__journal.spaceId,
-            oldName: oldName,
-            newName: trimmed
-        });
+        await apiPost('/api/journal-students/rename', { spaceId: window.__journal.spaceId, oldName, newName: trimmed });
         showToast('ФИО обновлено', 'success');
         closeDynamicSheet();
         await renderTeacherJournal(document.getElementById('tab-grades'), window.__journal.spaceId);
-    } catch (e) {
-        showToast(e.error || 'Ошибка переименования', 'error');
-    }
+    } catch (e) { showToast(e.error || 'Ошибка переименования', 'error'); }
 }
 
 async function deleteJournalStudent(studentName) {
     const subject = window.__journal.subject || '';
-    const ok = await showConfirm(
-        `Удалить «${studentName}»?`,
-        `Все оценки по предмету «${subject}» будут удалены. Действие необратимо.`,
-        'Удалить',
-        'Отмена',
-        true
-    );
+    const ok = await showConfirm(`Удалить «${studentName}»?`, `Все оценки по предмету «${subject}» будут удалены.`, 'Удалить', 'Отмена', true);
     if (!ok) return;
-
     try {
-        await apiPost('/api/journal-students/delete', {
-            spaceId: window.__journal.spaceId,
-            studentName: studentName,
-            subjectName: subject
-        });
+        await apiPost('/api/journal-students/delete', { spaceId: window.__journal.spaceId, studentName, subjectName: subject });
         showToast('Ученик удалён', 'success');
         closeDynamicSheet();
         await renderTeacherJournal(document.getElementById('tab-grades'), window.__journal.spaceId);
-    } catch (e) {
-        showToast(e.error || 'Ошибка удаления', 'error');
-    }
+    } catch (e) { showToast(e.error || 'Ошибка удаления', 'error'); }
 }
 
 async function openGradeCell(studentName, date) {
@@ -758,7 +598,6 @@ async function openGradeCell(studentName, date) {
 
     const currentGrade = existing?.grade_value || '';
     const currentAttendance = existing?.attendance || 'present';
-
     const d = new Date(date);
     const dateLabel = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
 
@@ -768,7 +607,6 @@ async function openGradeCell(studentName, date) {
             <div class="sheet-handle"></div>
             <h2 class="app-title" style="font-size:1.15rem;margin-bottom:6px;">${escapeHtml(studentName)}</h2>
             <p style="color:var(--text-secondary);font-size:0.85rem;margin:0 0 16px 0;">${escapeHtml(subject)} · ${dateLabel}</p>
-
             <div style="margin-bottom:16px;">
                 <div style="font-weight:600;margin-bottom:8px;">Оценка</div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -779,7 +617,6 @@ async function openGradeCell(studentName, date) {
                     <button class="grade-btn ${currentGrade === 5 ? 'active' : ''}" data-grade="5">5</button>
                 </div>
             </div>
-
             <div style="margin-bottom:16px;">
                 <div style="font-weight:600;margin-bottom:8px;">Посещаемость</div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -788,7 +625,6 @@ async function openGradeCell(studentName, date) {
                     <button class="att-btn ${currentAttendance === 'absent' ? 'active' : ''}" data-att="absent">Нет</button>
                 </div>
             </div>
-
             <button class="btn-primary" id="gradeSaveBtn">Сохранить</button>
             ${existing ? `<button class="btn-danger" id="gradeDeleteBtn" style="margin-top:8px;">Удалить запись</button>` : ''}
             <button class="btn-secondary" style="margin-top:8px;" onclick="closeDynamicSheet()">Отмена</button>
@@ -801,15 +637,13 @@ async function openGradeCell(studentName, date) {
     root.querySelectorAll('.grade-btn').forEach(b => {
         b.addEventListener('click', () => {
             root.querySelectorAll('.grade-btn').forEach(x => x.classList.remove('active'));
-            b.classList.add('active');
-            selGrade = b.dataset.grade;
+            b.classList.add('active'); selGrade = b.dataset.grade;
         });
     });
     root.querySelectorAll('.att-btn').forEach(b => {
         b.addEventListener('click', () => {
             root.querySelectorAll('.att-btn').forEach(x => x.classList.remove('active'));
-            b.classList.add('active');
-            selAtt = b.dataset.att;
+            b.classList.add('active'); selAtt = b.dataset.att;
         });
     });
 
@@ -817,15 +651,7 @@ async function openGradeCell(studentName, date) {
         try {
             const members = await apiGet(`/api/spaces/${spaceId}/members`);
             const match = members.find(m => m.full_name === studentName);
-            await apiPost('/api/grades', {
-                spaceId,
-                studentName,
-                studentUserId: match?.id || null,
-                subjectName: subject,
-                gradeValue: selGrade ? parseInt(selGrade) : null,
-                attendance: selAtt,
-                lessonDate: date
-            });
+            await apiPost('/api/grades', { spaceId, studentName, studentUserId: match?.id || null, subjectName: subject, gradeValue: selGrade ? parseInt(selGrade) : null, attendance: selAtt, lessonDate: date });
             showToast('Сохранено', 'success');
             closeDynamicSheet();
             await renderTeacherJournal(document.getElementById('tab-grades'), spaceId);
@@ -858,64 +684,326 @@ async function journalAddStudent() {
     } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
 }
 
-// ===================== ЖУРНАЛ УЧЕНИКА =====================
+// ============ ЖУРНАЛ УЧЕНИКА ============
 async function renderStudentGrades(container, spaceId) {
     container.innerHTML = '<p class="empty-state">Загрузка…</p>';
     try {
-        const grades = await apiGet(`/api/grades/${spaceId}`);
+        // Загружаем шейры
+        let shares = { asOwner: [], asRecipient: [] };
+        try { shares = await apiGet(`/api/grade-shares/${spaceId}`); } catch (e) {}
 
-        if (!grades.length) {
-            container.innerHTML = `<h1 class="page-title">Журнал</h1><p class="empty-state">Оценок пока нет</p>`;
+        // Проверяем — скрыт ли я
+        let myMember = null;
+        try {
+            const members = await apiGet(`/api/spaces/${spaceId}/members`);
+            myMember = members.find(m => m.id === currentUser.id);
+        } catch (e) {}
+
+        const isHidden = !!myMember?.hidden_from_journal;
+
+        // Если скрыт и нет шейров — блокировка
+        if (isHidden && !shares.asOwner.length) {
+            renderHiddenBlock(container, shares);
             return;
         }
 
-        const bySubject = {};
-        for (const g of grades) {
-            if (!bySubject[g.subject_name]) bySubject[g.subject_name] = [];
-            bySubject[g.subject_name].push(g);
-        }
+        // Загружаем свои оценки
+        let myGrades = [];
+        let myJournalBlocked = false;
+        try { myGrades = await apiGet(`/api/grades/${spaceId}`); }
+        catch (e) { if (e.error === 'hidden') myJournalBlocked = true; }
 
-        let html = `<h1 class="page-title">Мои оценки</h1>`;
+        window.__studentJournal = {
+            spaceId, mode: 'own', isHidden, myJournalBlocked,
+            sharedWith: shares.asRecipient,
+            myOwnShares: shares.asOwner,
+            myGrades
+        };
 
-        for (const subj of Object.keys(bySubject).sort()) {
-            const list = bySubject[subj];
-            const numeric = list.filter(g => g.grade_value).map(g => g.grade_value);
-            const avg = numeric.length ? (numeric.reduce((s, v) => s + v, 0) / numeric.length).toFixed(2) : '—';
-            const absent = list.filter(g => g.attendance === 'absent').length;
-            const late = list.filter(g => g.attendance === 'late').length;
-
-            html += `<div class="settings-card">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                    <div style="font-weight:700;font-size:1.05rem;">${escapeHtml(subj)}</div>
-                    <div style="font-size:1.4rem;font-weight:800;color:#0088cc;">${avg}</div>
-                </div>
-                <div style="color:var(--text-secondary);font-size:0.8rem;margin-bottom:10px;">
-                    Оценок: ${numeric.length} · Пропусков: ${absent} · Опозданий: ${late}
-                </div>
-                <div style="display:flex;flex-direction:column;gap:6px;">`;
-
-            const sorted = [...list].sort((a, b) => new Date(b.lesson_date) - new Date(a.lesson_date));
-            for (const g of sorted) {
-                const d = new Date(g.lesson_date);
-                const dateStr = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
-                let marks = [];
-                if (g.grade_value) marks.push(`<b style="color:#30d158;">${g.grade_value}</b>`);
-                if (g.attendance === 'absent') marks.push('<span style="color:#ff453a;">Н</span>');
-                else if (g.attendance === 'late') marks.push('<span style="color:#ff9f0a;">О</span>');
-                if (!marks.length) marks.push('—');
-                html += `<div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--divider);">
-                    <span style="color:var(--text-secondary);font-size:0.85rem;">${dateStr}</span>
-                    <span>${marks.join(' · ')}</span>
-                </div>`;
-            }
-
-            html += `</div></div>`;
-        }
-
-        container.innerHTML = html;
+        container.innerHTML = renderStudentJournalWithSlider();
+        attachStudentJournalHandlers();
     } catch (e) {
         container.innerHTML = `<p class="empty-state">Ошибка: ${escapeHtml(e.error || '')}</p>`;
     }
+}
+
+function renderHiddenBlock(container, shares) {
+    let html = `<h1 class="page-title">Журнал</h1>`;
+    html += `
+        <div class="settings-card" style="text-align:center; padding:24px;">
+            <div style="font-size:3rem; margin-bottom:8px;">🔒</div>
+            <h3 style="margin:0 0 8px;">Журнал скрыт</h3>
+            <p style="color:var(--text-secondary); margin:0 0 16px; font-size:0.9rem;">
+                Администратор скрыл вас из журнала. Чтобы снова видеть свои оценки,
+                начните делиться ими с однокурсником — он сможет видеть ваши оценки,
+                а вы получите доступ к своему журналу.
+            </p>
+            <button class="btn-primary" onclick="openStartSharing()">Начать делиться</button>
+        </div>
+    `;
+
+    if (shares.asRecipient && shares.asRecipient.length) {
+        html += `
+            <div class="settings-card" style="margin-top:14px;">
+                <h3 style="font-size:1rem;">Доступные вам журналы</h3>
+                ${shares.asRecipient.map(s => `
+                    <div class="member-row" onclick="viewSharedJournal('${s.owner_user_id}', '${escapeHtml(s.owner_username)}')">
+                        <div class="member-avatar">👤</div>
+                        <div class="member-info">
+                            <div class="member-name">${escapeHtml(s.owner_name)}</div>
+                            <div class="member-username">@${escapeHtml(s.owner_username)}</div>
+                        </div>
+                        <span class="code-pill">Открыть</span>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+    container.innerHTML = html;
+}
+
+function renderStudentJournalWithSlider() {
+    const { mode, sharedWith, myGrades, isHidden, myOwnShares, myJournalBlocked } = window.__studentJournal;
+
+    let html = `<h1 class="page-title">Мои оценки</h1>`;
+
+    // Блок для скрытого ученика, который уже начал делиться
+    if (isHidden) {
+        html += `
+            <div class="settings-card" style="background:var(--accent-blue-light);">
+                <p style="margin:0 0 8px; font-size:0.9rem;">
+                    ${myOwnShares.length
+                        ? `Вы делитесь оценками с: <b>${myOwnShares.map(s => '@' + escapeHtml(s.shared_with_username)).join(', ')}</b>`
+                        : 'Вы пока ни с кем не поделились.'}
+                </p>
+                <button class="btn-small" onclick="openStartSharing()">Поделиться ещё</button>
+                <button class="btn-small" onclick="openManageShares()" style="margin-left:6px;">Управление</button>
+            </div>
+        `;
+    }
+
+    // Слайдер, если есть шейры от других
+    if (sharedWith.length) {
+        html += `<div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">Просмотр</div>`;
+        html += `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:12px;">`;
+        html += `<button class="day-tab ${mode === 'own' ? 'active' : ''}" data-owner="__own__" style="flex-shrink:0;">Мои</button>`;
+        for (const s of sharedWith) {
+            html += `<button class="day-tab ${mode === s.owner_user_id ? 'active' : ''}" data-owner="${s.owner_user_id}" style="flex-shrink:0;">${escapeHtml(s.owner_username)}</button>`;
+        }
+        html += `</div>`;
+    }
+
+    if (mode === 'own') {
+        if (myJournalBlocked) {
+            html += `<p class="empty-state">Журнал скрыт. Поделитесь оценками, чтобы увидеть их.</p>`;
+        } else {
+            html += renderStudentGradesHtml(myGrades);
+        }
+    } else {
+        html += `<p class="empty-state">Загрузка…</p>`;
+    }
+
+    return html;
+}
+
+function attachStudentJournalHandlers() {
+    const spaceId = window.__studentJournal.spaceId;
+    document.querySelectorAll('[data-owner]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const ownerId = btn.dataset.owner;
+            if (ownerId === '__own__') {
+                window.__studentJournal.mode = 'own';
+                document.querySelector('.tab-section.active').innerHTML = renderStudentJournalWithSlider();
+                attachStudentJournalHandlers();
+                return;
+            }
+            try {
+                const grades = await apiGet(`/api/grades/${spaceId}?ownerUserId=${ownerId}`);
+                window.__studentJournal.mode = ownerId;
+
+                let html = `<h1 class="page-title">Оценки</h1>`;
+                if (window.__studentJournal.sharedWith.length) {
+                    html += `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:12px;">`;
+                    html += `<button class="day-tab" data-owner="__own__" style="flex-shrink:0;">Мои</button>`;
+                    for (const s of window.__studentJournal.sharedWith) {
+                        html += `<button class="day-tab ${s.owner_user_id === ownerId ? 'active' : ''}" data-owner="${s.owner_user_id}" style="flex-shrink:0;">${escapeHtml(s.owner_username)}</button>`;
+                    }
+                    html += `</div>`;
+                }
+                html += renderStudentGradesHtml(grades);
+                document.querySelector('.tab-section.active').innerHTML = html;
+                attachStudentJournalHandlers();
+            } catch (e) { showToast(e.error || 'Ошибка загрузки', 'error'); }
+        });
+    });
+}
+
+function renderStudentGradesHtml(grades) {
+    if (!grades.length) return '<p class="empty-state">Оценок пока нет</p>';
+    const bySubject = {};
+    for (const g of grades) {
+        if (!bySubject[g.subject_name]) bySubject[g.subject_name] = [];
+        bySubject[g.subject_name].push(g);
+    }
+    let html = '';
+    for (const subj of Object.keys(bySubject).sort()) {
+        const list = bySubject[subj];
+        const numeric = list.filter(g => g.grade_value).map(g => g.grade_value);
+        const avg = numeric.length ? (numeric.reduce((s, v) => s + v, 0) / numeric.length).toFixed(2) : '—';
+        const absent = list.filter(g => g.attendance === 'absent').length;
+        const late = list.filter(g => g.attendance === 'late').length;
+
+        html += `<div class="settings-card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <div style="font-weight:700;font-size:1.05rem;">${escapeHtml(subj)}</div>
+                <div style="font-size:1.4rem;font-weight:800;color:#0088cc;">${avg}</div>
+            </div>
+            <div style="color:var(--text-secondary);font-size:0.8rem;margin-bottom:10px;">Оценок: ${numeric.length} · Пропусков: ${absent} · Опозданий: ${late}</div>
+            <div style="display:flex;flex-direction:column;gap:6px;">`;
+
+        const sorted = [...list].sort((a, b) => new Date(b.lesson_date) - new Date(a.lesson_date));
+        for (const g of sorted) {
+            const d = new Date(g.lesson_date);
+            const dateStr = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+            let marks = [];
+            if (g.grade_value) marks.push(`<b style="color:#30d158;">${g.grade_value}</b>`);
+            if (g.attendance === 'absent') marks.push('<span style="color:#ff453a;">Н</span>');
+            else if (g.attendance === 'late') marks.push('<span style="color:#ff9f0a;">О</span>');
+            if (!marks.length) marks.push('—');
+            html += `<div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--divider);">
+                <span style="color:var(--text-secondary);font-size:0.85rem;">${dateStr}</span>
+                <span>${marks.join(' · ')}</span>
+            </div>`;
+        }
+        html += `</div></div>`;
+    }
+    return html;
+}
+
+async function viewSharedJournal(ownerUserId, ownerUsername) {
+    try {
+        const grades = await apiGet(`/api/grades/${currentSpace.id}?ownerUserId=${ownerUserId}`);
+        const root = document.getElementById('dynamicSheetRoot');
+        root.innerHTML = `
+            <div class="sheet show" id="dynamicSheet">
+                <div class="sheet-handle"></div>
+                <h2 class="app-title" style="font-size:1.2rem;">Журнал @${escapeHtml(ownerUsername)}</h2>
+                ${renderStudentGradesHtml(grades)}
+                <button class="btn-secondary" style="margin-top:14px;" onclick="closeDynamicSheet()">Закрыть</button>
+            </div>`;
+        document.getElementById('sheetOverlay').classList.add('show');
+    } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
+}
+
+// ============ ШЕЙРИНГ ОЦЕНОК ============
+async function openStartSharing() {
+    if (!currentSpace) return;
+    const spaceId = currentSpace.id;
+
+    let members = [];
+    try { members = await apiGet(`/api/spaces/${spaceId}/members`); }
+    catch (e) { return showToast('Ошибка загрузки', 'error'); }
+
+    const available = members.filter(m => m.id !== currentUser.id && !m.hidden_from_journal);
+
+    const root = document.getElementById('dynamicSheetRoot');
+    root.innerHTML = `
+        <div class="sheet show" id="dynamicSheet">
+            <div class="sheet-handle"></div>
+            <h2 class="app-title" style="font-size:1.2rem;">Поделиться оценками</h2>
+            <p style="color:var(--text-secondary); font-size:0.85rem; margin:6px 0 14px;">Выберите участника — он увидит ваши оценки в своём журнале.</p>
+            ${available.length
+                ? available.map(m => `
+                    <div class="member-row" onclick="shareWith('${m.id}')">
+                        <div class="member-avatar">${escapeHtml(m.avatar_emoji || '👤')}</div>
+                        <div class="member-info">
+                            <div class="member-name">${escapeHtml(m.full_name)}</div>
+                            <div class="member-username">@${escapeHtml(m.username)}</div>
+                        </div>
+                    </div>
+                `).join('')
+                : '<p class="empty-state">Нет доступных участников (все скрыты или никого нет)</p>'}
+            <button class="btn-secondary" style="margin-top:12px;" onclick="closeDynamicSheet()">Отмена</button>
+        </div>`;
+    document.getElementById('sheetOverlay').classList.add('show');
+}
+
+async function shareWith(userId) {
+    if (!currentSpace) return;
+    try {
+        await apiPost('/api/grade-shares', { spaceId: currentSpace.id, sharedWithUserId: userId });
+        showToast('Доступ к оценкам передан', 'success');
+        closeDynamicSheet();
+        refreshCurrentTab();
+    } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
+}
+
+async function openManageShares() {
+    if (!currentSpace) return;
+    let shares;
+    try { shares = await apiGet(`/api/grade-shares/${currentSpace.id}`); }
+    catch (e) { return; }
+
+    const root = document.getElementById('dynamicSheetRoot');
+    root.innerHTML = `
+        <div class="sheet show" id="dynamicSheet">
+            <div class="sheet-handle"></div>
+            <h2 class="app-title" style="font-size:1.2rem;">Управление доступом</h2>
+
+            <h3 style="font-size:0.95rem; margin-top:14px;">Кому я открыл свои оценки</h3>
+            ${shares.asOwner.length
+                ? shares.asOwner.map(s => `
+                    <div class="member-row">
+                        <div class="member-avatar">👤</div>
+                        <div class="member-info">
+                            <div class="member-name">${escapeHtml(s.shared_with_name)}</div>
+                            <div class="member-username">@${escapeHtml(s.shared_with_username)}</div>
+                        </div>
+                        <button class="btn-small" style="background:#ff453a;color:#fff;" onclick="removeShare('${s.id}', 'owner')">Перестать делиться</button>
+                    </div>
+                `).join('')
+                : '<p class="empty-state" style="padding:12px 0;">Ни с кем не поделились</p>'}
+
+            <h3 style="font-size:0.95rem; margin-top:14px;">Кто открыл мне свои оценки</h3>
+            ${shares.asRecipient.length
+                ? shares.asRecipient.map(s => `
+                    <div class="member-row">
+                        <div class="member-avatar">👤</div>
+                        <div class="member-info">
+                            <div class="member-name">${escapeHtml(s.owner_name)}</div>
+                            <div class="member-username">@${escapeHtml(s.owner_username)}</div>
+                        </div>
+                        <button class="btn-small" onclick="removeShare('${s.id}', 'recipient')">Убрать из списка</button>
+                    </div>
+                `).join('')
+                : '<p class="empty-state" style="padding:12px 0;">Никто не поделился</p>'}
+
+            <button class="btn-secondary" style="margin-top:14px;" onclick="closeDynamicSheet()">Закрыть</button>
+        </div>`;
+    document.getElementById('sheetOverlay').classList.add('show');
+}
+
+async function removeShare(shareId, role) {
+    let title = '';
+    let text = '';
+    if (role === 'owner') {
+        title = 'Перестать делиться?';
+        text = 'Участник больше не будет видеть ваши оценки.';
+        if (window.__studentJournal?.isHidden && window.__studentJournal.myOwnShares.length <= 1) {
+            text += ' ⚠️ Это ваш последний шейр — после удаления ваш журнал снова станет недоступен.';
+        }
+    } else {
+        title = 'Убрать из списка?';
+        text = 'Чужие оценки исчезнут из вашего журнала.';
+    }
+    const ok = await showConfirm(title, text, 'Удалить', 'Отмена', true);
+    if (!ok) return;
+    try {
+        await apiDelete(`/api/grade-shares/${shareId}`);
+        showToast('Доступ удалён', 'success');
+        closeDynamicSheet();
+        refreshCurrentTab();
+    } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
 }
 
 // ===================== EXCEL =====================
@@ -923,14 +1011,10 @@ async function exportJournalExcel(spaceId) {
     const subject = window.__journal?.subject || '';
     const month = window.__journal?.month || '';
     if (!subject || !month) { showToast('Выберите предмет и месяц', 'error'); return; }
-
     try {
         const url = `/api/grades/${spaceId}/export?subject=${encodeURIComponent(subject)}&month=${month}`;
         const res = await fetch(url, { headers: authHeaders() });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || 'Ошибка выгрузки');
-        }
+        if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || 'Ошибка выгрузки'); }
         const blob = await res.blob();
         const objUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -941,9 +1025,7 @@ async function exportJournalExcel(spaceId) {
         a.remove();
         URL.revokeObjectURL(objUrl);
         showToast('Файл выгружен', 'success');
-    } catch (e) {
-        showToast(e.message || 'Ошибка', 'error');
-    }
+    } catch (e) { showToast(e.message || 'Ошибка', 'error'); }
 }
 
 function importJournalExcel(spaceId) {
@@ -953,40 +1035,27 @@ function importJournalExcel(spaceId) {
     input.addEventListener('change', async () => {
         const file = input.files[0];
         if (!file) return;
-
         const formData = new FormData();
         formData.append('file', file);
-
         try {
-            const res = await fetch(`/api/grades/${spaceId}/import`, {
-                method: 'POST',
-                headers: authHeaders(),
-                body: formData
-            });
+            const res = await fetch(`/api/grades/${spaceId}/import`, { method: 'POST', headers: authHeaders(), body: formData });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Ошибка импорта');
             showToast(`Импорт: +${data.inserted} новых, ${data.updated} обновлено`, 'success', 5000);
             if (data.subject) window.__journal.subject = data.subject;
             if (data.month) window.__journal.month = data.month;
             await renderTeacherJournal(document.getElementById('tab-grades'), spaceId);
-        } catch (e) {
-            showToast(e.message || 'Ошибка', 'error');
-        }
+        } catch (e) { showToast(e.message || 'Ошибка', 'error'); }
     });
     input.click();
 }
 
 // ===================== ЧАТ =====================
 let chatJoinedSpace = null;
-let chatIsAdmin = false;
-let chatCurrentUserId = null;
 let typingUsers = new Map();
 
 function renderChatTab(container, spaceId, isAdmin, currentUserId) {
     if (!spaceId) { container.innerHTML = emptySpaceState(); return; }
-    chatIsAdmin = isAdmin;
-    chatCurrentUserId = currentUserId;
-
     container.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:6px;">
             <h1 class="page-title" style="margin:0;">Чат группы</h1>
@@ -1001,9 +1070,7 @@ function renderChatTab(container, spaceId, isAdmin, currentUserId) {
             <div id="filePreviewContainer" style="padding:0 12px;"></div>
             <div class="chat-input-row">
                 <label class="attach-btn" style="cursor:pointer; padding:8px; display:flex; align-items:center;">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
-                    </svg>
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
                     <input type="file" id="chatFileInput" multiple style="display:none">
                 </label>
                 <textarea id="chatInput" rows="1" placeholder="Сообщение…"></textarea>
@@ -1030,9 +1097,7 @@ function renderChatTab(container, spaceId, isAdmin, currentUserId) {
     let searchTimeout;
     searchInput.addEventListener('input', (e) => {
         clearTimeout(searchTimeout);
-        searchTimeout = setTimeout(() => {
-            loadChatHistory(spaceId, isAdmin, currentUserId, e.target.value);
-        }, 300);
+        searchTimeout = setTimeout(() => loadChatHistory(spaceId, isAdmin, currentUserId, e.target.value), 300);
     });
 
     const fileInput = document.getElementById('chatFileInput');
@@ -1064,14 +1129,8 @@ function renderChatTab(container, spaceId, isAdmin, currentUserId) {
     socket.on('new_message', (msg) => { if (msg.space_id === spaceId) appendChatMessage(msg, isAdmin, currentUserId); });
     socket.on('message_deleted', ({ messageId }) => { document.getElementById('msg-' + messageId)?.remove(); });
     socket.on('reaction_updated', ({ messageId }) => { reloadMessageReactions(messageId); });
-    socket.on('user_typing', ({ userId, nickname }) => {
-        typingUsers.set(userId, { nickname });
-        renderTypingIndicator();
-    });
-    socket.on('user_stopped_typing', ({ userId }) => {
-        typingUsers.delete(userId);
-        renderTypingIndicator();
-    });
+    socket.on('user_typing', ({ userId, nickname }) => { typingUsers.set(userId, { nickname }); renderTypingIndicator(); });
+    socket.on('user_stopped_typing', ({ userId }) => { typingUsers.delete(userId); renderTypingIndicator(); });
 
     apiPost(`/api/chat/${spaceId}/mark-read`, {}).catch(() => {});
     updateBadges();
@@ -1093,18 +1152,12 @@ function renderFilePreview(files) {
     const box = document.getElementById('filePreviewContainer');
     if (!box) return;
     if (!files.length) { box.innerHTML = ''; return; }
-    box.innerHTML = files.map((f) => `
-        <div style="display:inline-block;margin:4px;padding:6px 10px;background:var(--input-bg);border-radius:8px;font-size:12px;">
-            ${escapeHtml(f.name)} (${formatBytes(f.size)})
-        </div>
-    `).join('');
+    box.innerHTML = files.map(f => `<div style="display:inline-block;margin:4px;padding:6px 10px;background:var(--input-bg);border-radius:8px;font-size:12px;">${escapeHtml(f.name)} (${formatBytes(f.size)})</div>`).join('');
 }
 
 async function loadChatHistory(spaceId, isAdmin, currentUserId, search = '') {
     try {
-        const url = search
-            ? `/api/chat/${spaceId}/messages?q=${encodeURIComponent(search)}`
-            : `/api/chat/${spaceId}/messages`;
+        const url = search ? `/api/chat/${spaceId}/messages?q=${encodeURIComponent(search)}` : `/api/chat/${spaceId}/messages`;
         const rows = await apiGet(url);
         const box = document.getElementById('chatMessages');
         if (!box) return;
@@ -1122,25 +1175,16 @@ function appendChatMessage(m, isAdmin, currentUserId) {
     el.className = 'chat-bubble' + (mine ? ' mine' : '');
     el.id = 'msg-' + m.id;
 
-    const replyHtml = m.reply_to
-        ? `<div class="chat-reply-quote" style="border-left:3px solid #0088cc; padding-left:8px; margin-bottom:6px; font-size:0.8rem; opacity:0.8;">
-             <div style="font-weight:600;">${escapeHtml(m.reply_to.full_name || '')}</div>
-             <div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml((m.reply_to.message || '').slice(0, 60))}</div>
-           </div>`
-        : '';
+    const replyHtml = m.reply_to ? `<div class="chat-reply-quote" style="border-left:3px solid #0088cc; padding-left:8px; margin-bottom:6px; font-size:0.8rem; opacity:0.8;"><div style="font-weight:600;">${escapeHtml(m.reply_to.full_name || '')}</div><div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml((m.reply_to.message || '').slice(0, 60))}</div></div>` : '';
 
-    const filesHtml = (m.files && m.files.length)
-        ? m.files.map((f) => {
-            if (f.mime.startsWith('image/')) {
-                const allUrls = m.files.filter(x => x.mime.startsWith('image/')).map(x => x.url);
-                const myIdx = allUrls.indexOf(f.url);
-                return `<img src="${f.url}" style="max-width:200px;border-radius:10px;margin-top:6px;cursor:pointer;display:block;" onclick="openImageViewer(${JSON.stringify(allUrls).replace(/"/g, '&quot;')}, ${myIdx})">`;
-            }
-            return `<a href="${f.url}" target="_blank" style="display:inline-block;padding:6px 10px;background:rgba(0,0,0,0.05);border-radius:8px;margin-top:6px;text-decoration:none;color:inherit;font-size:0.85rem;">
-                ${escapeHtml(f.name)} (${formatBytes(f.size)})
-            </a>`;
-        }).join('')
-        : '';
+    const filesHtml = (m.files && m.files.length) ? m.files.map((f) => {
+        if (f.mime.startsWith('image/')) {
+            const allUrls = m.files.filter(x => x.mime.startsWith('image/')).map(x => x.url);
+            const myIdx = allUrls.indexOf(f.url);
+            return `<img src="${f.url}" style="max-width:200px;border-radius:10px;margin-top:6px;cursor:pointer;display:block;" onclick="openImageViewer(${JSON.stringify(allUrls).replace(/"/g, '&quot;')}, ${myIdx})">`;
+        }
+        return `<a href="${f.url}" target="_blank" style="display:inline-block;padding:6px 10px;background:rgba(0,0,0,0.05);border-radius:8px;margin-top:6px;text-decoration:none;color:inherit;font-size:0.85rem;">${escapeHtml(f.name)} (${formatBytes(f.size)})</a>`;
+    }).join('') : '';
 
     const reactionsHtml = renderReactions(m.reactions || [], m.id);
 
@@ -1154,8 +1198,7 @@ function appendChatMessage(m, isAdmin, currentUserId) {
             <button class="btn-tiny" onclick="replyToMessage('${m.id}', '${escapeHtml(m.full_name).replace(/'/g, "\\'")}', '${escapeHtml(m.message.slice(0, 40)).replace(/'/g, "\\'")}')">Ответить</button>
             <button class="btn-tiny" onclick="openReactionPicker('${m.id}')">Реакция</button>
             ${isAdmin ? `<button class="btn-tiny" onclick="deleteChatMessage('${m.id}')">Удалить</button>` : ''}
-        </div>
-    `;
+        </div>`;
     box.appendChild(el);
     box.scrollTop = box.scrollHeight;
 }
@@ -1163,15 +1206,8 @@ function appendChatMessage(m, isAdmin, currentUserId) {
 function renderReactions(reactions, messageId) {
     if (!reactions.length) return '';
     const counts = {};
-    for (const r of reactions) {
-        if (!counts[r.emoji]) counts[r.emoji] = { count: 0 };
-        counts[r.emoji].count++;
-    }
-    return Object.entries(counts).map(([emoji, data]) =>
-        `<span class="reaction-chip" style="display:inline-block;padding:2px 8px;margin:2px;background:var(--input-bg);border-radius:12px;font-size:13px;cursor:pointer;" onclick="toggleReaction('${messageId}', '${emoji}')">
-            ${emoji} ${data.count}
-        </span>`
-    ).join('');
+    for (const r of reactions) { if (!counts[r.emoji]) counts[r.emoji] = { count: 0 }; counts[r.emoji].count++; }
+    return Object.entries(counts).map(([emoji, data]) => `<span class="reaction-chip" style="display:inline-block;padding:2px 8px;margin:2px;background:var(--input-bg);border-radius:12px;font-size:13px;cursor:pointer;" onclick="toggleReaction('${messageId}', '${emoji}')">${emoji} ${data.count}</span>`).join('');
 }
 
 async function reloadMessageReactions(messageId) {
@@ -1193,19 +1229,15 @@ function openReactionPicker(messageId) {
     const box = document.createElement('div');
     box.style.cssText = 'background:var(--bg-card);border-radius:16px 16px 0 0;padding:16px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center;max-width:400px;width:100%;';
     const all = [...POSITIVE_REACTIONS, ...NEGATIVE_REACTIONS];
-    box.innerHTML = all.map(e =>
-        `<button style="font-size:26px;background:var(--input-bg);border:none;border-radius:50%;width:48px;height:48px;cursor:pointer;" onclick="toggleReaction('${messageId}','${e}'); this.closest('div').parentElement.remove();">${e}</button>`
-    ).join('');
+    box.innerHTML = all.map(e => `<button style="font-size:26px;background:var(--input-bg);border:none;border-radius:50%;width:48px;height:48px;cursor:pointer;" onclick="toggleReaction('${messageId}','${e}'); this.closest('div').parentElement.remove();">${e}</button>`).join('');
     overlay.appendChild(box);
     overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
     document.body.appendChild(overlay);
 }
 
 async function toggleReaction(messageId, emoji) {
-    try {
-        await apiPost(`/api/messages/${messageId}/react`, { emoji });
-        reloadMessageReactions(messageId);
-    } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
+    try { await apiPost(`/api/messages/${messageId}/react`, { emoji }); reloadMessageReactions(messageId); }
+    catch (e) { showToast(e.error || 'Ошибка', 'error'); }
 }
 
 let _replyToId = null;
@@ -1221,24 +1253,19 @@ function replyToMessage(messageId, name, preview) {
     previewEl.innerHTML = `<div><b>${escapeHtml(name)}</b><br>${escapeHtml(preview)}</div><button style="background:none;border:none;cursor:pointer;font-size:16px;" onclick="cancelReply()">✕</button>`;
     container.parentElement.insertBefore(previewEl, container);
 }
-function cancelReply() {
-    _replyToId = null;
-    document.getElementById('replyPreview')?.remove();
-}
+function cancelReply() { _replyToId = null; document.getElementById('replyPreview')?.remove(); }
 
 async function sendChatMessage(spaceId) {
     const input = document.getElementById('chatInput');
     const text = input.value.trim();
     const files = window.__pendingFiles ? window.__pendingFiles() : [];
     if (!text && !files.length) return;
-
     try {
         let fileIds = [];
         if (files.length) {
             const uploaded = await uploadFiles(files, spaceId);
             fileIds = uploaded.filter(f => f.id).map(f => f.id);
         }
-
         const mentions = [];
         const mentionRegex = /@([a-zA-Z0-9_]+)/g;
         let match;
@@ -1247,25 +1274,18 @@ async function sendChatMessage(spaceId) {
         if (mentions.length) {
             try {
                 const members = await apiGet(`/api/spaces/${spaceId}/members`);
-                for (const nick of mentions) {
-                    const found = members.find(m => m.username === nick);
-                    if (found) mentionIds.push(found.id);
-                }
+                for (const nick of mentions) { const found = members.find(m => m.username === nick); if (found) mentionIds.push(found.id); }
             } catch (e) {}
         }
-
         socket.emit('send_message', { message: text, replyToId: _replyToId, fileIds, mentions: mentionIds });
         input.value = '';
         cancelReply();
         if (window.__clearPendingFiles) window.__clearPendingFiles();
         socket.emit('typing_stop');
-    } catch (e) {
-        showToast(e.error || 'Ошибка отправки', 'error');
-    }
+    } catch (e) { showToast(e.error || 'Ошибка отправки', 'error'); }
 }
 function deleteChatMessage(id) { socket.emit('delete_message', { messageId: id }); }
 
-// ===================== МУТЫ ЧАТА =====================
 function formatMuteLabel(m) {
     if (!m) return 'Уведомления';
     if (m.muted_forever) return 'Выкл.';
@@ -1275,16 +1295,11 @@ function formatMuteLabel(m) {
     }
     return 'Уведомления';
 }
-
 async function refreshChatMuteBtn(spaceId) {
     const btn = document.getElementById('chatMuteBtn');
     if (!btn) return;
-    try {
-        const m = await getChatMute(spaceId);
-        btn.textContent = formatMuteLabel(m);
-    } catch (e) {}
+    try { const m = await getChatMute(spaceId); btn.textContent = formatMuteLabel(m); } catch (e) {}
 }
-
 let _chatMutePanel = null;
 function closeChatMutePanel() { if (_chatMutePanel) { _chatMutePanel.remove(); _chatMutePanel = null; } }
 
@@ -1292,7 +1307,6 @@ function openChatMutePanel(spaceId) {
     if (_chatMutePanel) { closeChatMutePanel(); return; }
     const btn = document.getElementById('chatMuteBtn');
     if (!btn) return;
-
     _chatMutePanel = document.createElement('div');
     _chatMutePanel.style.cssText = 'position:absolute;top:56px;right:16px;z-index:200;background:var(--bg-card);border:1px solid var(--card-border);border-radius:12px;padding:10px;min-width:200px;display:flex;flex-direction:column;gap:6px;box-shadow:0 8px 24px rgba(0,0,0,0.18);';
     _chatMutePanel.innerHTML = `
@@ -1301,13 +1315,10 @@ function openChatMutePanel(spaceId) {
         <button class="btn-small" data-dur="8h">На 8 часов</button>
         <button class="btn-small" data-dur="24h">На 24 часа</button>
         <button class="btn-small" data-dur="forever">Навсегда</button>
-        <button class="btn-small" data-dur="off" style="background:#0088cc;color:#fff;">Включить обратно</button>
-    `;
-
+        <button class="btn-small" data-dur="off" style="background:#0088cc;color:#fff;">Включить обратно</button>`;
     const chatTab = document.getElementById('tab-chat');
     if (chatTab && getComputedStyle(chatTab).position === 'static') chatTab.style.position = 'relative';
     (chatTab || document.body).appendChild(_chatMutePanel);
-
     _chatMutePanel.addEventListener('click', async (e) => {
         const target = e.target.closest('button[data-dur]');
         if (!target) return;
@@ -1320,7 +1331,6 @@ function openChatMutePanel(spaceId) {
         } catch (err) { showToast(err.error || 'Ошибка', 'error'); }
         closeChatMutePanel();
     });
-
     setTimeout(() => {
         const handler = (ev) => {
             if (!_chatMutePanel) { document.removeEventListener('click', handler); return; }
@@ -1351,6 +1361,7 @@ async function renderMembersTab(container, spaceId, isAdmin) {
                     <div class="member-username">@${escapeHtml(m.username)}</div>
                 </div>
                 <span class="code-pill">${escapeHtml(getMemberDisplayStatus(m))}</span>
+                ${m.hidden_from_journal ? '<span class="code-pill" style="background:#707579;color:#fff;margin-left:4px;">Скрыт</span>' : ''}
             </div>
         `).join('');
         html += '</div>';
@@ -1367,6 +1378,8 @@ async function openMemberProfile(member) {
     const muted = member.muted_until && new Date(member.muted_until) > new Date();
     const manageable = isAdminViewer && !isSelf;
     const displayStatus = getMemberDisplayStatus(member);
+    const isHidden = !!member.hidden_from_journal;
+    const isRoot = !!currentUser?.isRoot;
 
     const statusBadge = manageable
         ? `<span class="code-pill" style="cursor:pointer;" onclick="openStatusEditor()">${escapeHtml(displayStatus)} ✎</span>`
@@ -1380,6 +1393,7 @@ async function openMemberProfile(member) {
             <p style="margin:8px 0 0;">
                 ${statusBadge}
                 ${muted ? '<span class="code-pill" style="background:#ff9f0a;color:#fff;">Мут</span>' : ''}
+                ${isHidden ? '<span class="code-pill" style="background:#707579;color:#fff;">Скрыт из журнала</span>' : ''}
                 ${isSelf ? '<span class="code-pill" style="background:#0088cc;color:#fff;">Вы</span>' : ''}
             </p>
         </div>
@@ -1387,6 +1401,7 @@ async function openMemberProfile(member) {
             <div style="display:flex; flex-direction:column; gap:8px; margin-top:16px;">
                 ${member.role !== 'admin' ? `<button class="btn-small" onclick="changeMemberRole('${member.id}', 'admin')">Сделать админом</button>` : `<button class="btn-small" onclick="changeMemberRole('${member.id}', 'member')">Снять админа</button>`}
                 ${muted ? `<button class="btn-small" onclick="unmuteMember('${member.id}')">Снять мут</button>` : `<button class="btn-small" onclick="muteMember('${member.id}')">Замутить</button>`}
+                ${isRoot && !isSelf ? `<button class="btn-small" id="toggleHideBtn" style="background:${isHidden ? '#30d158' : '#707579'}; color:#fff;">${isHidden ? 'Показать в журнале' : 'Скрыть из журнала'}</button>` : ''}
                 <button class="btn-small" style="background:#ff9f0a;color:#fff;" onclick="blockMember('${member.id}', '${escapeHtml(member.full_name).replace(/'/g, "\\'")}')">Забанить</button>
                 <button class="btn-small" style="background:#ff453a;color:#fff;" onclick="kickMember('${member.id}', '${escapeHtml(member.full_name).replace(/'/g, "\\'")}')">Исключить</button>
             </div>
@@ -1396,6 +1411,29 @@ async function openMemberProfile(member) {
     const root = document.getElementById('dynamicSheetRoot');
     root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div>${body}<button type="button" class="btn-secondary" style="margin-top:14px;" onclick="closeDynamicSheet()">Закрыть</button></div>`;
     document.getElementById('sheetOverlay').classList.add('show');
+
+    const hideBtn = document.getElementById('toggleHideBtn');
+    if (hideBtn) {
+        hideBtn.addEventListener('click', async () => {
+            const newHidden = !isHidden;
+            const ok = await showConfirm(
+                newHidden ? 'Скрыть ученика из журнала?' : 'Показать ученика в журнале?',
+                newHidden
+                    ? 'Ученик не будет отображаться в журнале и в Excel-выгрузке. Сам ученик не увидит свой журнал, пока не начнёт делиться.'
+                    : 'Ученик снова появится в журнале, и его оценки станут доступны.',
+                newHidden ? 'Скрыть' : 'Показать',
+                'Отмена',
+                newHidden
+            );
+            if (!ok) return;
+            try {
+                await apiPost(`/api/spaces/${currentSpace.id}/members/${member.id}/hide`, { hidden: newHidden });
+                showToast(newHidden ? 'Ученик скрыт' : 'Ученик снова в журнале', 'success');
+                closeDynamicSheet();
+                refreshCurrentTab();
+            } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
+        });
+    }
 }
 
 function openStatusEditor() {
@@ -1403,14 +1441,11 @@ function openStatusEditor() {
     if (!member) return;
     const isAdminViewer = currentUser?.isTeacher || currentSpace?.is_admin;
     if (!isAdminViewer) return showToast('Нет доступа', 'error');
-
     const currentStatus = member.custom_status || '';
     const roleLabel = ROLE_LABELS[member.role] || member.role;
 
     showFormSheet('Изменить статус', `
-        <div class="form-group">
-            <input name="customStatus" class="form-control" value="${escapeHtml(currentStatus)}" placeholder="Например: Староста" maxlength="50">
-        </div>
+        <div class="form-group"><input name="customStatus" class="form-control" value="${escapeHtml(currentStatus)}" placeholder="Например: Староста" maxlength="50"></div>
         <p style="color:var(--text-secondary);font-size:0.8rem;">Оставьте пустым, чтобы вернуть роль (${escapeHtml(roleLabel)}).</p>
     `, async (fd) => {
         const status = (fd.get('customStatus') || '').trim();
@@ -1425,36 +1460,24 @@ async function changeMemberRole(userId, role) {
     try { await apiPost(`/api/spaces/${currentSpace.id}/members/${userId}/role`, { role }); closeDynamicSheet(); refreshCurrentTab(); showToast('Роль изменена', 'success'); }
     catch (e) { showToast(e.error || 'Ошибка', 'error'); }
 }
-
 function muteMember(userId) {
-    showFormSheet('Замутить участника', `
-        <div class="form-group"><label>Время мута (минуты)</label>
-            <input type="number" name="minutes" class="form-control" value="60" min="1" required>
-        </div>
-    `, async (fd) => {
+    showFormSheet('Замутить участника', `<div class="form-group"><label>Время мута (минуты)</label><input type="number" name="minutes" class="form-control" value="60" min="1" required></div>`, async (fd) => {
         await apiPost(`/api/spaces/${currentSpace.id}/members/${userId}/mute`, { minutes: parseInt(fd.get('minutes')) });
         closeDynamicSheet(); refreshCurrentTab(); showToast('Участник замучен', 'success');
     }, 'Замутить');
 }
-
 async function unmuteMember(userId) {
     try { await apiDelete(`/api/spaces/${currentSpace.id}/members/${userId}/mute`); closeDynamicSheet(); refreshCurrentTab(); showToast('Мут снят', 'success'); }
     catch (e) { showToast(e.error || 'Ошибка', 'error'); }
 }
-
 async function blockMember(userId, fullName) {
     const ok = await showConfirm(`Забанить «${fullName}»?`, '', 'Забанить', 'Отмена', true);
     if (!ok) return;
-    showFormSheet(`Забанить «${fullName}»`, `
-        <div class="form-group"><label>Причина (необязательно)</label>
-            <input type="text" name="reason" class="form-control" placeholder="Например: спам">
-        </div>
-    `, async (fd) => {
+    showFormSheet(`Забанить «${fullName}»`, `<div class="form-group"><label>Причина (необязательно)</label><input type="text" name="reason" class="form-control" placeholder="Например: спам"></div>`, async (fd) => {
         await apiPost(`/api/spaces/${currentSpace.id}/members/${userId}/block`, { reason: fd.get('reason') || null });
         closeDynamicSheet(); refreshCurrentTab(); showToast('Участник забанен', 'success');
     }, 'Забанить');
 }
-
 async function kickMember(userId, fullName) {
     const ok = await showConfirm(`Исключить «${fullName}»?`, '', 'Исключить', 'Отмена', true);
     if (!ok) return;
@@ -1462,7 +1485,6 @@ async function kickMember(userId, fullName) {
     catch (e) { showToast(e.error || 'Ошибка', 'error'); }
 }
 
-// ===================== ЧЁРНЫЙ СПИСОК =====================
 async function openBlacklist() {
     if (!currentSpace) return;
     const root = document.getElementById('dynamicSheetRoot');
@@ -1482,9 +1504,7 @@ async function openBlacklist() {
         if (!data.blocked.length && !data.muted.length) html += `<p class="empty-state">Список пуст</p>`;
         html += `<button class="btn-secondary" style="margin-top:14px;" onclick="closeDynamicSheet()">Закрыть</button>`;
         root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div>${html}</div>`;
-    } catch (e) {
-        root.innerHTML = `<div class="sheet show" id="dynamicSheet"><p class="empty-state">Ошибка</p><button class="btn-secondary" onclick="closeDynamicSheet()">Закрыть</button></div>`;
-    }
+    } catch (e) { root.innerHTML = `<div class="sheet show" id="dynamicSheet"><p class="empty-state">Ошибка</p><button class="btn-secondary" onclick="closeDynamicSheet()">Закрыть</button></div>`; }
 }
 
 async function unblockMember(userId) {
@@ -1527,12 +1547,7 @@ function openEditProfile(keepState) {
         ${currentUser.isTeacher ? '' : `<div class="form-group"><input name="nickname" class="form-control" placeholder="Ник" value="${escapeHtml(state.nickname)}"></div>`}
     `, async (fd) => {
         _editingProfileState = { firstName: fd.get('firstName') || '', lastName: fd.get('lastName') || '', nickname: fd.get('nickname') || '' };
-        const r = await apiPost('/api/auth/update-profile', {
-            firstName: _editingProfileState.firstName,
-            lastName: _editingProfileState.lastName,
-            nickname: currentUser.isTeacher ? null : _editingProfileState.nickname,
-            avatarEmoji: _selectedEmoji
-        });
+        const r = await apiPost('/api/auth/update-profile', { firstName: _editingProfileState.firstName, lastName: _editingProfileState.lastName, nickname: currentUser.isTeacher ? null : _editingProfileState.nickname, avatarEmoji: _selectedEmoji });
         if (!r || !r.success) throw new Error((r && r.error) || 'Не удалось сохранить');
         currentUser = r.user;
         localStorage.setItem('user', JSON.stringify(r.user));
@@ -1541,39 +1556,18 @@ function openEditProfile(keepState) {
         setTimeout(() => location.reload(), 800);
     }, 'Сохранить');
 }
-
 function openEmojiPicker() {
     const form = document.getElementById('dynamicSheetForm');
-    if (form) {
-        const fd = new FormData(form);
-        _editingProfileState = { firstName: fd.get('firstName') || '', lastName: fd.get('lastName') || '', nickname: fd.get('nickname') || '' };
-    }
+    if (form) { const fd = new FormData(form); _editingProfileState = { firstName: fd.get('firstName') || '', lastName: fd.get('lastName') || '', nickname: fd.get('nickname') || '' }; }
     const root = document.getElementById('dynamicSheetRoot');
-    root.innerHTML = `
-        <div class="sheet show" id="dynamicSheet">
-            <div class="sheet-handle"></div>
-            <h2 class="app-title" style="font-size:1.2rem;">Выберите аватар</h2>
-            <div class="emoji-grid">
-                ${EMOJI_LIST.map(e => `<button type="button" class="emoji-btn" onclick="pickEmoji('${e}')">${e}</button>`).join('')}
-            </div>
-            <button type="button" class="btn-secondary" style="margin-top:14px;" onclick="openEditProfile(true)">Назад</button>
-        </div>`;
+    root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div><h2 class="app-title" style="font-size:1.2rem;">Выберите аватар</h2><div class="emoji-grid">${EMOJI_LIST.map(e => `<button type="button" class="emoji-btn" onclick="pickEmoji('${e}')">${e}</button>`).join('')}</div><button type="button" class="btn-secondary" style="margin-top:14px;" onclick="openEditProfile(true)">Назад</button></div>`;
     document.getElementById('sheetOverlay').classList.add('show');
 }
 function pickEmoji(e) { _selectedEmoji = e; openEditProfile(true); }
 
-// ===================== УНИВЕРСАЛЬНАЯ ФОРМА =====================
 function showFormSheet(title, bodyHtml, onSubmit, submitLabel = 'Сохранить') {
     const root = document.getElementById('dynamicSheetRoot');
-    root.innerHTML = `
-        <div class="sheet show" id="dynamicSheet">
-            <div class="sheet-handle"></div>
-            <h2 class="app-title" style="font-size:1.3rem;">${title}</h2>
-            <form id="dynamicSheetForm">${bodyHtml}
-                <button type="submit" class="btn-primary">${submitLabel}</button>
-                <button type="button" class="btn-secondary" onclick="closeDynamicSheet()">Отмена</button>
-            </form>
-        </div>`;
+    root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div><h2 class="app-title" style="font-size:1.3rem;">${title}</h2><form id="dynamicSheetForm">${bodyHtml}<button type="submit" class="btn-primary">${submitLabel}</button><button type="button" class="btn-secondary" onclick="closeDynamicSheet()">Отмена</button></form></div>`;
     document.getElementById('sheetOverlay').classList.add('show');
     document.getElementById('dynamicSheetForm').onsubmit = async (e) => {
         e.preventDefault();
@@ -1589,23 +1583,17 @@ function closeDynamicSheet() {
 
 function openAddLessonSheet(spaceId) {
     showFormSheet('Новый урок', `
-        <div class="form-group"><select name="dayOfWeek" class="form-control">
-            ${WEEKDAY_NAMES.slice(1).map((d, i) => `<option value="${i + 1}">${d}</option>`).join('')}
-        </select></div>
+        <div class="form-group"><select name="dayOfWeek" class="form-control">${WEEKDAY_NAMES.slice(1).map((d, i) => `<option value="${i + 1}">${d}</option>`).join('')}</select></div>
         <div class="form-group"><input name="subjectName" class="form-control" placeholder="Предмет" required></div>
         <div class="form-group"><input name="classroom" class="form-control" placeholder="Кабинет"></div>
         <div class="form-group"><input name="teacherName" class="form-control" placeholder="Преподаватель"></div>
-        <div class="form-group" style="display:flex; gap:8px;">
-            <input name="startTime" type="time" class="form-control" required>
-            <input name="endTime" type="time" class="form-control" required>
-        </div>
+        <div class="form-group" style="display:flex; gap:8px;"><input name="startTime" type="time" class="form-control" required><input name="endTime" type="time" class="form-control" required></div>
     `, async (fd) => {
         await apiPost('/api/schedule', { spaceId, dayOfWeek: parseInt(fd.get('dayOfWeek')), subjectName: fd.get('subjectName'), classroom: fd.get('classroom'), teacherName: fd.get('teacherName'), startTime: fd.get('startTime'), endTime: fd.get('endTime') });
         showToast('Урок добавлен', 'success');
         renderScheduleUnified(document.getElementById('tab-schedule'), spaceId, true);
     }, 'Добавить');
 }
-
 function openEditLessonSheet(lesson, dateStr, spaceId) {
     showFormSheet(`Урок: ${lesson.subject_name}`, `
         <p class="app-subtitle" style="text-align:left; margin-bottom:10px;">Изменения на ${new Date(dateStr).toLocaleDateString('ru-RU')}</p>
@@ -1621,14 +1609,12 @@ function openEditLessonSheet(lesson, dateStr, spaceId) {
         renderScheduleUnified(document.getElementById('tab-schedule'), spaceId, true);
     }, 'Сохранить');
 }
-
 async function deleteLessonPermanently(id, spaceId) {
     const ok = await showConfirm('Удалить урок насовсем?', '', 'Удалить', 'Отмена', true);
     if (!ok) return;
     try { await apiDelete(`/api/schedule/${id}`); closeDynamicSheet(); renderScheduleUnified(document.getElementById('tab-schedule'), spaceId, true); showToast('Урок удалён', 'success'); }
     catch (e) { showToast(e.error || 'Ошибка', 'error'); }
 }
-
 function openAddHomeworkSheet(spaceId) {
     showFormSheet('Новое домашнее задание', `
         <div class="form-group"><input name="subjectName" class="form-control" placeholder="Предмет" required></div>
@@ -1640,21 +1626,15 @@ function openAddHomeworkSheet(spaceId) {
         renderHomeworkTab(document.getElementById(currentHwContainerId()), spaceId, true);
     }, 'Добавить');
 }
-
 function openJoinSpaceForm() {
-    showFormSheet('Присоединиться к группе', `
-        <div class="form-group"><input name="code" class="form-control" placeholder="Код приглашения" required style="text-transform:uppercase;"></div>
-    `, async (fd) => {
+    showFormSheet('Присоединиться к группе', `<div class="form-group"><input name="code" class="form-control" placeholder="Код приглашения" required style="text-transform:uppercase;"></div>`, async (fd) => {
         await apiPost('/api/spaces/join', { code: fd.get('code') });
         showToast('Вы присоединились', 'success');
         await window.__reloadSpaces?.();
     }, 'Присоединиться');
 }
-
 function openCreateSpaceForm() {
-    showFormSheet('Новая группа', `
-        <div class="form-group"><input name="name" class="form-control" placeholder="Название пространства" required></div>
-    `, async (fd) => {
+    showFormSheet('Новая группа', `<div class="form-group"><input name="name" class="form-control" placeholder="Название пространства" required></div>`, async (fd) => {
         const space = await apiPost('/api/spaces', { name: fd.get('name') });
         showToast(`Группа создана. Код: ${space.invite_code}`, 'success', 6000);
         await window.__reloadSpaces?.();
@@ -1662,10 +1642,7 @@ function openCreateSpaceForm() {
 }
 
 function emptySpaceState() {
-    return `<div class="empty-state">
-        <p>Вы пока не состоите ни в одном пространстве.</p>
-        <button class="btn-primary" style="max-width:240px;" onclick="openJoinSpaceForm()">Присоединиться по коду</button>
-    </div>`;
+    return `<div class="empty-state"><p>Вы пока не состоите ни в одном пространстве.</p><button class="btn-primary" style="max-width:240px;" onclick="openJoinSpaceForm()">Присоединиться по коду</button></div>`;
 }
 
 function refreshCurrentTab() {
@@ -1681,7 +1658,7 @@ function refreshCurrentTab() {
     }
 }
 
-/* ===================== PUSH: КАРТОЧКА НАСТРОЕК ===================== */
+/* ===================== PUSH ===================== */
 async function renderPushSettingsCard() {
     const box = document.getElementById('pushSettingsContainer');
     if (!box) return;
@@ -1712,20 +1689,12 @@ async function renderPushSettingsCard() {
         { key: 'grades_enabled', label: 'Оценки' }
     ];
 
-    box.innerHTML = `
-        <h3>Уведомления</h3>
-        <p style="color:var(--text-secondary); font-size:0.9rem; margin-top:0;">${statusText}</p>
+    box.innerHTML = `<h3>Уведомления</h3><p style="color:var(--text-secondary); font-size:0.9rem; margin-top:0;">${statusText}</p>
         <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
-            ${prefRows.map(r => `
-                <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <span>${r.label}</span>
-                    <label class="switch"><input type="checkbox" data-pref="${r.key}" ${prefs[r.key] ? 'checked' : ''}><span class="slider"></span></label>
-                </div>
-            `).join('')}
+            ${prefRows.map(r => `<div style="display:flex;justify-content:space-between;align-items:center;"><span>${r.label}</span><label class="switch"><input type="checkbox" data-pref="${r.key}" ${prefs[r.key] ? 'checked' : ''}><span class="slider"></span></label></div>`).join('')}
         </div>
         <p style="color:var(--text-secondary);font-size:0.8rem;margin-top:12px;">Ответы и упоминания, а также объявления колледжа приходят всегда.</p>
-        <button class="btn-primary" id="pushSettingsBtn" style="margin-top:12px;">Настроить браузерные уведомления</button>
-    `;
+        <button class="btn-primary" id="pushSettingsBtn" style="margin-top:12px;">Настроить браузерные уведомления</button>`;
 
     box.querySelectorAll('input[data-pref]').forEach(input => {
         input.addEventListener('change', async () => {
@@ -1742,7 +1711,6 @@ async function openPushSettingsModal() {
     const root = document.getElementById('dynamicSheetRoot');
     const enabled = await isPushEnabled();
     const mute = await getPushMute();
-
     let statusText;
     if (mute.muted_forever) statusText = 'Заглушены навсегда';
     else if (mute.muted_until && new Date(mute.muted_until) > new Date()) {
@@ -1751,39 +1719,33 @@ async function openPushSettingsModal() {
     } else if (!enabled) statusText = 'Уведомления выключены';
     else statusText = 'Уведомления включены';
 
-    root.innerHTML = `
-        <div class="sheet show" id="dynamicSheet">
-            <div class="sheet-handle"></div>
-            <h2 class="app-title" style="font-size:1.3rem;">Браузерные уведомления</h2>
-            <p style="color:var(--text-secondary);font-size:0.9rem;text-align:center;margin:6px 0 16px 0;">${statusText}</p>
-            <button class="btn-small" id="pushToggleBtn" style="width:100%;margin-bottom:16px;">${enabled ? 'Выключить полностью' : 'Включить в браузере'}</button>
-            <p style="font-weight:600;margin:0 0 8px;font-size:0.9rem;">Заглушить на время:</p>
-            <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">
-                <button class="btn-small" data-dur="1h">На 1 час</button>
-                <button class="btn-small" data-dur="8h">На 8 часов</button>
-                <button class="btn-small" data-dur="24h">На 24 часа</button>
-                <button class="btn-small" data-dur="forever" style="background:#ff453a;color:#fff;">Навсегда</button>
-            </div>
-            <button class="btn-primary" id="pushUnmuteBtn" style="width:100%;">Включить обратно</button>
-            <button class="btn-secondary" style="margin-top:8px;" onclick="closeDynamicSheet()">Закрыть</button>
-        </div>`;
+    root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div>
+        <h2 class="app-title" style="font-size:1.3rem;">Браузерные уведомления</h2>
+        <p style="color:var(--text-secondary);font-size:0.9rem;text-align:center;margin:6px 0 16px 0;">${statusText}</p>
+        <button class="btn-small" id="pushToggleBtn" style="width:100%;margin-bottom:16px;">${enabled ? 'Выключить полностью' : 'Включить в браузере'}</button>
+        <p style="font-weight:600;margin:0 0 8px;font-size:0.9rem;">Заглушить на время:</p>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">
+            <button class="btn-small" data-dur="1h">На 1 час</button>
+            <button class="btn-small" data-dur="8h">На 8 часов</button>
+            <button class="btn-small" data-dur="24h">На 24 часа</button>
+            <button class="btn-small" data-dur="forever" style="background:#ff453a;color:#fff;">Навсегда</button>
+        </div>
+        <button class="btn-primary" id="pushUnmuteBtn" style="width:100%;">Включить обратно</button>
+        <button class="btn-secondary" style="margin-top:8px;" onclick="closeDynamicSheet()">Закрыть</button>
+    </div>`;
     document.getElementById('sheetOverlay').classList.add('show');
 
     root.querySelector('#pushToggleBtn').addEventListener('click', async () => {
         try {
             if (await isPushEnabled()) await disablePush();
             else await enablePush();
-            closeDynamicSheet();
-            renderPushSettingsCard();
-            showToast('Готово', 'success');
+            closeDynamicSheet(); renderPushSettingsCard(); showToast('Готово', 'success');
         } catch (e) { showToast(e.message || 'Ошибка', 'error'); }
     });
-
     root.querySelector('#pushUnmuteBtn').addEventListener('click', async () => {
         try { await clearPushMute(); closeDynamicSheet(); renderPushSettingsCard(); showToast('Уведомления включены', 'success'); }
         catch (e) { showToast('Ошибка', 'error'); }
     });
-
     root.querySelectorAll('button[data-dur]').forEach(btn => {
         btn.addEventListener('click', async () => {
             try { await setPushMute(btn.dataset.dur); closeDynamicSheet(); renderPushSettingsCard(); showToast('Заглушено', 'success'); }
