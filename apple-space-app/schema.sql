@@ -358,3 +358,16 @@ CREATE TABLE IF NOT EXISTS journal_students (
     UNIQUE(space_id, subject_name, student_name)
 );
 CREATE INDEX IF NOT EXISTS idx_journal_students ON journal_students(space_id, subject_name);
+
+ALTER TABLE space_members ADD COLUMN IF NOT EXISTS hidden_from_journal BOOLEAN DEFAULT FALSE;
+
+CREATE TABLE IF NOT EXISTS grade_shares (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    space_id UUID REFERENCES spaces(id) ON DELETE CASCADE,
+    owner_user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    shared_with_user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(space_id, owner_user_id, shared_with_user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_grade_shares_recipient ON grade_shares(space_id, shared_with_user_id);
+CREATE INDEX IF NOT EXISTS idx_grade_shares_owner ON grade_shares(space_id, owner_user_id);
