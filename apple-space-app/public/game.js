@@ -123,15 +123,25 @@ function startRpgClicker(area) {
         </div>
     `;
 
-    const monsterTypes = [
-        { name: 'Слизень', emoji: '🟢', hp: 10, reward: 5 },
-        { name: 'Крыса', emoji: '🐀', hp: 25, reward: 12 },
-        { name: 'Гоблин', emoji: '👺', hp: 60, reward: 30 },
-        { name: 'Скелет', emoji: '💀', hp: 150, reward: 75 },
-        { name: 'Орк', emoji: '👹', hp: 400, reward: 180 },
-        { name: 'Демон', emoji: '😈', hp: 1000, reward: 450 },
-        { name: 'Дракон', emoji: '🐉', hp: 3000, reward: 1200 }
+       const monsterTypes = [
+        { name: 'Слизень',   emoji: '🟢', hp: 10,   reward: 5,    weight: 30 },
+        { name: 'Крыса',     emoji: '🐀', hp: 25,   reward: 12,   weight: 25 },
+        { name: 'Гоблин',    emoji: '👺', hp: 60,   reward: 30,   weight: 18 },
+        { name: 'Скелет',    emoji: '💀', hp: 150,  reward: 75,   weight: 12 },
+        { name: 'Орк',       emoji: '👹', hp: 400,  reward: 180,  weight: 7 },
+        { name: 'Демон',     emoji: '😈', hp: 1000, reward: 450,  weight: 5 },
+        { name: 'Дракон',    emoji: '🐉', hp: 3000, reward: 1200, weight: 3 }
     ];
+
+    function pickRandomMonster() {
+        const total = monsterTypes.reduce((s, m) => s + m.weight, 0);
+        let r = Math.random() * total;
+        for (let i = 0; i < monsterTypes.length; i++) {
+            r -= monsterTypes[i].weight;
+            if (r <= 0) return i;
+        }
+        return 0;
+    }
 
     let monsterIdx = Math.min(state.monsterIdx || 0, monsterTypes.length - 1);
     let monsterHp = monsterTypes[monsterIdx].hp * (1 + state.level * 0.5);
