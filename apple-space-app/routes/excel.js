@@ -117,9 +117,8 @@ function buildJournalWorkbook({ subject, month, students = [], grades = [], incl
         ws.getColumn(1 + d).width = 5;
     }
 
-    // Пустой шаблон — на этом останавливаемся, учеников не пишем
+    // Пустой шаблон — только шапка
     if (!includeStudents) {
-        // Границы только для шапки
         for (let c = 1; c <= avgCellCol; c++) {
             ws.getCell(headerRow, c).border = {
                 top: { style: 'thin', color: { argb: 'FFDDDDDD' } },
@@ -308,7 +307,6 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                 return res.status(403).json({ error: 'Нет доступа' });
             }
 
-            // Шаблон строго пустой: только шапка, без учеников
             const wb = buildJournalWorkbook({
                 subject,
                 month,
@@ -387,13 +385,24 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                     [spaceId]
                 )).rows;
 
+                // Хелпер: ищет участника по ключу через локальную реализацию name_key
+                function localNameKey(fullName) {
+                    if (!fullName) return '';
+                    const parts = String(fullName)
+                        .trim().toLowerCase()
+                        .replace(/ё/g, 'е')
+                        .replace(/\s+/g, ' ')
+                        .split(' ')
+                        .filter(Boolean);
+                    if (parts.length < 2) return parts.join(' ');
+                    const firstTwo = [parts[0], parts[1]].sort();
+                    return firstTwo.join(' ');
+                }
                 function findMemberByKey(name) {
-                    const keyParts = String(name || '').trim().toLowerCase().replace(/\s+/g, ' ').split(' ').slice(0, 2);
-                    const key = keyParts.join(' ');
+                    const key = localNameKey(name);
                     if (!key) return null;
                     for (const mm of spaceMembers) {
-                        const mp = String(mm.full_name || '').trim().toLowerCase().replace(/\s+/g, ' ').split(' ').slice(0, 2);
-                        if (mp.join(' ') === key) return mm;
+                        if (localNameKey(mm.full_name) === key) return mm;
                     }
                     return null;
                 }
@@ -411,25 +420,41 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                     let studentName = String(ws.getCell(r, 1).value || '').trim();
                     if (!studentName) continue;
 
-                    const keyParts = studentName.toLowerCase().replace(/\s+/g, ' ').split(' ').slice(0, 2);
+                    // Нормализация: если есть ученик с тем же ключом в journal_students — используем его каноничное имя
                     const existingJournalName = await pool.query(
                         `SELECT student_name,
                                 LENGTH(student_name) - LENGTH(REPLACE(student_name, ' ', '')) AS word_count
                          FROM journal_students
                          WHERE space_id = $1 AND subject_name = $2
-                           AND LOWER(SPLIT_PART(TRIM(student_name), ' ', 1)) = $3
-                           AND LOWER(SPLIT_PART(TRIM(student_name), ' ', 2)) = $4
+                           AND name_key(student_name) = name_key($3)
                          ORDER BY word_count DESC, student_name
                          LIMIT 1`,
-                        [spaceId, subject, keyParts[0], keyParts[1] || '']
+                        [spaceId, subject, studentName]
                     );
                     if (existingJournalName.rows.length) {
                         studentName = existingJournalName.rows[0].student_name;
+                    } else {
+                        // Ищем в grades
+                        const existingGradeName = await pool.query(
+                            `SELECT student_name,
+                                    LENGTH(student_name) - LENGTH(REPLACE(student_name, ' ', '')) AS word_count
+                             FROM grades
+                             WHERE space_id = $1 AND subject_name = $2
+                               AND name_key(student_name) = name_key($3)
+                             ORDER BY word_count DESC, student_name
+                             LIMIT 1`,
+                            [spaceId, subject, studentName]
+                        );
+                        if (existingGradeName.rows.length) {
+                            studentName = existingGradeName.rows[0].student_name;
+                        }
                     }
 
+                    // Находим user_id ТОЛЬКО если ученик уже в пространстве
                     const member = findMemberByKey(studentName);
                     const studentUserId = member?.id || null;
 
+                    // Добавляем в journal_students с порядком (если ещё нет)
                     const exists = await pool.query(
                         'SELECT id FROM journal_students WHERE space_id = $1 AND subject_name = $2 AND student_name = $3',
                         [spaceId, subject, studentName]
