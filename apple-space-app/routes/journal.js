@@ -50,7 +50,18 @@ function registerJournalRoutes(app, pool, verifyJWT, requireSpaceAccess) {
                 return res.status(403).json({ error: 'Нет доступа к пространству' });
             }
 
-            // Максимальный sort_order для этого пространства и предмета
+            // Если ученик с таким же ключом уже есть — не создаём дубликат
+            const existing = await pool.query(
+                `SELECT * FROM journal_students
+                 WHERE space_id = $1 AND subject_name = $2
+                   AND name_key(student_name) = name_key($3)
+                 LIMIT 1`,
+                [spaceId, subjectName.trim(), studentName.trim()]
+            );
+            if (existing.rows.length) {
+                return res.json(existing.rows[0]);
+            }
+
             const maxQ = await pool.query(
                 'SELECT COALESCE(MAX(sort_order), 0) AS m FROM journal_students WHERE space_id = $1 AND subject_name = $2',
                 [spaceId, subjectName.trim()]
@@ -60,8 +71,6 @@ function registerJournalRoutes(app, pool, verifyJWT, requireSpaceAccess) {
             const r = await pool.query(
                 `INSERT INTO journal_students (space_id, subject_name, student_name, sort_order)
                  VALUES ($1, $2, $3, $4)
-                 ON CONFLICT (space_id, subject_name, student_name) DO UPDATE
-                 SET sort_order = EXCLUDED.sort_order
                  RETURNING *`,
                 [spaceId, subjectName.trim(), studentName.trim(), nextOrder]
             );
@@ -88,6 +97,7 @@ function registerJournalRoutes(app, pool, verifyJWT, requireSpaceAccess) {
 
     // ========================================================================
     //  POST /api/journal-students/rename
+    //  Переименование всех вариантов написания с тем же ключом (ФИ + ё→е + сорт)
     // ========================================================================
     app.post('/api/journal-students/rename', verifyJWT, async (req, res) => {
         try {
@@ -111,20 +121,13 @@ function registerJournalRoutes(app, pool, verifyJWT, requireSpaceAccess) {
                 return res.status(403).json({ error: 'Нет доступа' });
             }
 
-            const oldKeyParts = String(oldName).trim().toLowerCase().replace(/\s+/g, ' ').split(' ').slice(0, 2);
-            const oldKey = oldKeyParts.join(' ');
-
+            // Находим все имена с тем же ключом через SQL-функцию name_key
             const allNamesQ = await pool.query(
-                `SELECT DISTINCT student_name FROM grades WHERE space_id = $1`,
-                [spaceId]
+                `SELECT DISTINCT student_name FROM grades
+                 WHERE space_id = $1 AND name_key(student_name) = name_key($2)`,
+                [spaceId, oldName]
             );
-            const matchingNames = allNamesQ.rows
-                .map(r => r.student_name)
-                .filter(n => {
-                    const parts = String(n).trim().toLowerCase().replace(/\s+/g, ' ').split(' ').slice(0, 2);
-                    return parts.join(' ') === oldKey;
-                });
-
+            const matchingNames = allNamesQ.rows.map(r => r.student_name);
             if (!matchingNames.length) matchingNames.push(oldName);
 
             const r1 = await pool.query(
@@ -154,6 +157,7 @@ function registerJournalRoutes(app, pool, verifyJWT, requireSpaceAccess) {
 
     // ========================================================================
     //  POST /api/journal-students/delete
+    //  Удаляет все варианты написания с тем же ключом
     // ========================================================================
     app.post('/api/journal-students/delete', verifyJWT, async (req, res) => {
         try {
@@ -172,28 +176,23 @@ function registerJournalRoutes(app, pool, verifyJWT, requireSpaceAccess) {
                 return res.status(403).json({ error: 'Нет доступа' });
             }
 
-            const keyParts = String(studentName).trim().toLowerCase().replace(/\s+/g, ' ').split(' ').slice(0, 2);
-            const key = keyParts.join(' ');
-
+            // Находим все имена с тем же ключом
             let namesQ;
             if (subjectName) {
                 namesQ = await pool.query(
-                    `SELECT DISTINCT student_name FROM grades WHERE space_id = $1 AND subject_name = $2`,
-                    [spaceId, subjectName]
+                    `SELECT DISTINCT student_name FROM grades
+                     WHERE space_id = $1 AND subject_name = $2
+                       AND name_key(student_name) = name_key($3)`,
+                    [spaceId, subjectName, studentName]
                 );
             } else {
                 namesQ = await pool.query(
-                    `SELECT DISTINCT student_name FROM grades WHERE space_id = $1`,
-                    [spaceId]
+                    `SELECT DISTINCT student_name FROM grades
+                     WHERE space_id = $1 AND name_key(student_name) = name_key($2)`,
+                    [spaceId, studentName]
                 );
             }
-            const matchingNames = namesQ.rows
-                .map(r => r.student_name)
-                .filter(n => {
-                    const parts = String(n).trim().toLowerCase().replace(/\s+/g, ' ').split(' ').slice(0, 2);
-                    return parts.join(' ') === key;
-                });
-
+            const matchingNames = namesQ.rows.map(r => r.student_name);
             if (!matchingNames.length) matchingNames.push(studentName);
 
             let r1, r2;
