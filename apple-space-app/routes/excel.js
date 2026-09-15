@@ -50,6 +50,8 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                 return res.status(403).json({ error: 'Только для учителей' });
             }
 
+            const isRoot = user.rows[0].username === 'root_teacher';
+
             const { spaceId } = req.params;
             const { subject, month } = req.query;
             if (!subject || !month) return res.status(400).json({ error: 'Нужны subject и month' });
@@ -76,12 +78,16 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                 [spaceId, subject, monthStart, monthEnd]
             )).rows;
 
-            const members = (await pool.query(
-                `SELECT u.full_name FROM space_members sm
-                 JOIN users u ON u.id = sm.user_id
-                 WHERE sm.space_id = $1 AND u.is_teacher = FALSE`,
-                [spaceId]
-            )).rows.map(r => r.full_name);
+            // Ученики: активные + виртуальные. Скрытые — только для Root.
+            const membersQuery = isRoot
+                ? `SELECT u.full_name FROM space_members sm
+                   JOIN users u ON u.id = sm.user_id
+                   WHERE sm.space_id = $1 AND u.is_teacher = FALSE`
+                : `SELECT u.full_name FROM space_members sm
+                   JOIN users u ON u.id = sm.user_id
+                   WHERE sm.space_id = $1 AND u.is_teacher = FALSE
+                     AND COALESCE(sm.hidden_from_journal, FALSE) = FALSE`;
+            const members = (await pool.query(membersQuery, [spaceId])).rows.map(r => r.full_name);
 
             const virtualStudents = (await pool.query(
                 `SELECT student_name FROM journal_students
@@ -89,7 +95,20 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                 [spaceId, subject]
             )).rows.map(r => r.student_name);
 
-            const gradesStudents = [...new Set(grades.map(g => g.student_name))];
+            // Фильтр оценок скрытых учеников (для не-root)
+            let filteredGrades = grades;
+            if (!isRoot) {
+                const hiddenNames = (await pool.query(
+                    `SELECT u.full_name FROM space_members sm
+                     JOIN users u ON u.id = sm.user_id
+                     WHERE sm.space_id = $1 AND u.is_teacher = FALSE AND sm.hidden_from_journal = TRUE`,
+                    [spaceId]
+                )).rows.map(r => r.full_name);
+                const hiddenSet = new Set(hiddenNames.map(n => n.toLowerCase().trim()));
+                filteredGrades = grades.filter(g => !hiddenSet.has(g.student_name.toLowerCase().trim()));
+            }
+
+            const gradesStudents = [...new Set(filteredGrades.map(g => g.student_name))];
             const allStudents = [...new Set([...members, ...virtualStudents, ...gradesStudents])].sort();
 
             const wb = new ExcelJS.Workbook();
@@ -138,7 +157,7 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                 ws.getCell(row, 1).value = st;
                 ws.getCell(row, 1).font = { bold: true };
 
-                const studentGrades = grades.filter(g => g.student_name === st);
+                const studentGrades = filteredGrades.filter(g => g.student_name === st);
 
                 for (let d = 1; d <= daysInMonth; d++) {
                     const dateStr = `${year}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
@@ -146,19 +165,15 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                     const cell = ws.getCell(row, 1 + d);
 
                     if (g) {
-                        // Определяем содержимое и цвет
                         if (g.attendance === 'absent') {
-                            // Красный фон, буква Н или "5"
                             cell.value = g.grade_value ? String(g.grade_value) : 'Н';
                             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF453A' } };
                             cell.font = { color: { argb: 'FFFFFFFF' }, bold: true };
                         } else if (g.attendance === 'late') {
-                            // Жёлтый фон, "О" или оценка
                             cell.value = g.grade_value ? String(g.grade_value) : 'О';
                             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF9F0A' } };
                             cell.font = { color: { argb: 'FFFFFFFF' }, bold: true };
                         } else if (g.grade_value) {
-                            // Обычная оценка
                             cell.value = String(g.grade_value);
                             cell.font = { bold: true };
                         }
@@ -259,7 +274,7 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                     if (!studentName) continue;
 
                     const userMatch = await pool.query(
-                        `SELECT id FROM users WHERE LOWER(full_name) = LOWER($1) AND is_teacher = FALSE LIMIT 1`,
+                        `SELECT id FROM users WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1)) AND is_teacher = FALSE LIMIT 1`,
                         [studentName]
                     );
                     const studentUserId = userMatch.rows[0]?.id || null;
