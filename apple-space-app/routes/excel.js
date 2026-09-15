@@ -27,6 +27,27 @@ function formatMonthLabel(mk) {
     return `${MONTH_NAMES_RU[month]} ${year}`;
 }
 
+// ============================================================================
+//  JS-аналог SQL-функции name_key()
+//  "Семён Гордеев"          → "гордеев семен"
+//  "Гордеев Семен Валерьевич" → "гордеев семен"
+//  Совпадает с portal.js и с name_key() в БД.
+// ============================================================================
+function nameKey(fullName) {
+    if (!fullName) return '';
+    const parts = String(fullName)
+        .trim()
+        .toLowerCase()
+        .replace(/ё/g, 'е')
+        .replace(/\s+/g, ' ')
+        .split(' ')
+        .filter(Boolean);
+    if (!parts.length) return '';
+    if (parts.length === 1) return parts[0];
+    const firstTwo = [parts[0], parts[1]].sort();
+    return firstTwo.join(' ');
+}
+
 function parseCellValue(raw) {
     if (raw === null || raw === undefined || raw === '') return null;
     const s = String(raw).trim().toUpperCase();
@@ -249,20 +270,25 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
 
             const gradesStudents = [...new Set(filteredGrades.map(g => g.student_name))];
 
-            const seenLower = new Set();
+            // ================================================================
+            //  АВТОСОРТИРОВКА А→Я
+            //  Дедуп по name_key (а не по toLowerCase) + сортировка
+            //  по name_key — порядок полностью совпадает с веб-журналом.
+            // ================================================================
+            const seenKeys = new Set();
             const orderedStudents = [];
-            for (const n of virtualStudents) {
-                const low = n.toLowerCase();
-                if (seenLower.has(low)) continue;
-                seenLower.add(low);
+            for (const n of [...virtualStudents, ...gradesStudents]) {
+                if (!n || !n.trim()) continue;
+                const key = nameKey(n);
+                if (!key || seenKeys.has(key)) continue;
+                seenKeys.add(key);
                 orderedStudents.push(n);
             }
-            for (const n of gradesStudents) {
-                const low = n.toLowerCase();
-                if (seenLower.has(low)) continue;
-                seenLower.add(low);
-                orderedStudents.push(n);
-            }
+
+            orderedStudents.sort((a, b) =>
+                nameKey(a).localeCompare(nameKey(b), 'ru')
+            );
+            // ================================================================
 
             const wb = buildJournalWorkbook({
                 subject,
@@ -511,6 +537,33 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                         }
                     }
                 }
+
+                // ============================================================
+                //  АВТОСОРТИРОВКА А→Я после импорта
+                //  Пересчитываем sort_order в journal_students по name_key,
+                //  чтобы порядок совпадал с веб-журналом (portal.js) и
+                //  с последующим экспортом.
+                // ============================================================
+                try {
+                    await pool.query(
+                        `WITH ordered AS (
+                            SELECT id,
+                                   ROW_NUMBER() OVER (
+                                       ORDER BY name_key(student_name) ASC, student_name ASC
+                                   ) AS rn
+                            FROM journal_students
+                            WHERE space_id = $1 AND subject_name = $2
+                        )
+                        UPDATE journal_students js
+                        SET sort_order = o.rn
+                        FROM ordered o
+                        WHERE js.id = o.id`,
+                        [spaceId, subject]
+                    );
+                } catch (e) {
+                    console.warn('reorder journal_students failed:', e.message);
+                }
+                // ============================================================
 
                 res.json({ ok: true, subject, month, inserted, updated, skipped, studentsAdded, errors: errors.slice(0, 20) });
             } catch (e) {
