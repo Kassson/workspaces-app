@@ -357,7 +357,6 @@ function nameKey(fullName) {
         .split(' ')
         .filter(Boolean);
     if (parts.length < 2) return parts.join(' ');
-    // Сортируем первые два слова по алфавиту
     const firstTwo = [parts[0], parts[1]].sort();
     return firstTwo.join(' ');
 }
@@ -373,7 +372,6 @@ function pickCanonicalName(names) {
     })[0];
 }
 
-// Строит массив месяцев между minMonth и maxMonth включительно
 function buildMonthRange(minMonth, maxMonth) {
     const months = [];
     let [y, m] = minMonth.split('-').map(Number);
@@ -421,7 +419,6 @@ async function renderTeacherJournal(container, spaceId) {
         const subjGrades = allGrades.filter(g => g.subject_name === window.__journal.subject);
         window.__journal.subjGrades = subjGrades;
 
-        // Диапазон месяцев: от самого старого с оценками до текущего + 1
         const monthsWithData = [...new Set(subjGrades.map(g => monthKeyOf(g.lesson_date)))].sort();
         const now = new Date();
         const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -458,14 +455,12 @@ function renderTeacherJournalHtml() {
 
     let html = `<h1 class="page-title">Журнал</h1>`;
 
-    // === Предметы ===
     html += `<div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">Предмет</div>`;
     html += `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:14px;">`;
     for (const s of subjects) html += `<button class="day-tab ${s === subject ? 'active' : ''}" data-subj="${escapeHtml(s)}" style="flex-shrink:0;">${escapeHtml(s)}</button>`;
     html += `<button class="day-tab" data-subj="__add__" style="flex-shrink:0;">+ предмет</button>`;
     html += `</div>`;
 
-    // === Месяц со стрелками ===
     html += `<div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">Месяц</div>`;
     html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
         <button id="prevMonthBtn" class="btn-small" style="flex-shrink:0;" ${monthIdx <= 0 ? 'disabled' : ''}>←</button>
@@ -473,12 +468,10 @@ function renderTeacherJournalHtml() {
         <button id="nextMonthBtn" class="btn-small" style="flex-shrink:0;" ${monthIdx >= months.length - 1 ? 'disabled' : ''}>→</button>
     </div>`;
 
-    // Скрытый список месяцев
     html += `<div id="monthList" style="display:none;">`;
     for (const m of months) html += `<button data-month="${m}"></button>`;
     html += `</div>`;
 
-    // === Кнопки ===
     html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
         <button class="btn-small" onclick="journalAddStudent()">+ ученик</button>
         <button class="btn-small" onclick="exportJournalExcel(window.__journal.spaceId)">Экспорт Excel</button>
@@ -569,7 +562,6 @@ async function loadJournalStudents(spaceId) {
             groups[key].push(name);
         };
 
-        // Сначала journal_students в их порядке — им отдаём приоритет
         for (const n of fromJournal) addToGroup(n);
         for (const n of memberNames) addToGroup(n);
         for (const n of fromGrades) addToGroup(n);
@@ -577,19 +569,20 @@ async function loadJournalStudents(spaceId) {
         // Каноничное имя для каждой группы
         const canonicalByKey = {};
         const order = [];
-        // Сохраняем порядок из journal_students
         for (const n of fromJournal) {
             const key = nameKey(n);
             if (!key || canonicalByKey[key]) continue;
             canonicalByKey[key] = pickCanonicalName(groups[key]);
             order.push(canonicalByKey[key]);
         }
-        // Добавляем новые ключи, которых нет в journal_students
         for (const key in groups) {
             if (canonicalByKey[key]) continue;
             canonicalByKey[key] = pickCanonicalName(groups[key]);
             order.push(canonicalByKey[key]);
         }
+
+        // ===== АВТОСОРТИРОВКА ПО АЛФАВИТУ (по name_key) =====
+        order.sort((a, b) => nameKey(a).localeCompare(nameKey(b), 'ru'));
 
         window.__journal.students = order;
         window.__journal.nameGroups = groups;
@@ -859,7 +852,6 @@ function renderStudentJournalWithSlider() {
 
     let html = `<h1 class="page-title">Мои оценки</h1>`;
 
-    // Карточка шейринга — всегда сверху
     html += `
         <div class="settings-card" style="background:var(--accent-blue-light);">
             <p style="margin:0 0 10px; font-size:0.9rem;">
@@ -874,7 +866,6 @@ function renderStudentJournalWithSlider() {
         </div>
     `;
 
-    // Плашка про скрытие
     if (isHidden && myJournalBlocked) {
         html += `
             <div class="settings-card" style="background:var(--warning-bg, #fff3cd); border-left:3px solid var(--warning, #ff9f0a); color:var(--warning-text, #664d03);">
@@ -886,7 +877,6 @@ function renderStudentJournalWithSlider() {
         `;
     }
 
-    // Слайдер чужих журналов
     if (sharedWith && sharedWith.length) {
         html += `<div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">Просмотр</div>`;
         html += `<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:12px;">`;
