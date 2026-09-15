@@ -348,8 +348,18 @@ function monthKeyOf(dateStr) {
 }
 
 function nameKey(fullName) {
-    const parts = String(fullName || '').trim().toLowerCase().replace(/\s+/g, ' ').split(' ').filter(Boolean);
-    return parts.slice(0, 2).join(' ');
+    if (!fullName) return '';
+    const parts = String(fullName)
+        .trim()
+        .toLowerCase()
+        .replace(/ё/g, 'е')
+        .replace(/\s+/g, ' ')
+        .split(' ')
+        .filter(Boolean);
+    if (parts.length < 2) return parts.join(' ');
+    // Сортируем первые два слова по алфавиту
+    const firstTwo = [parts[0], parts[1]].sort();
+    return firstTwo.join(' ');
 }
 
 function pickCanonicalName(names) {
