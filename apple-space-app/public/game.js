@@ -185,7 +185,8 @@ function startRpgClicker(area) {
         setTimeout(() => particle.remove(), 600);
 
         if (monsterHp <= 0) {
-            state.coins += monsterTypes[monsterIdx].reward * (1 + state.level * 0.3);
+            const armorMultiplier = 1 + state.armor * 0.15; // +15% за каждый уровень доспехов
+            state.coins += monsterTypes[monsterIdx].reward * (1 + state.level * 0.3) * armorMultiplier;
             monsterIdx = pickRandomMonster();
             state.monsterIdx = monsterIdx;
             maxMonsterHp = monsterTypes[monsterIdx].hp * (1 + state.level * 0.5);
@@ -271,7 +272,8 @@ function startRpgClicker(area) {
         if (dps > 0) {
             monsterHp -= dps / 10;
             if (monsterHp <= 0) {
-                state.coins += monsterTypes[monsterIdx].reward * (1 + state.level * 0.3);
+                const armorMultiplier = 1 + state.armor * 0.15; // +15% за каждый уровень доспехов
+               state.coins += monsterTypes[monsterIdx].reward * (1 + state.level * 0.3) * armorMultiplier;
                 monsterIdx = pickRandomMonster();
                 state.monsterIdx = monsterIdx;
                 maxMonsterHp = monsterTypes[monsterIdx].hp * (1 + state.level * 0.5);
