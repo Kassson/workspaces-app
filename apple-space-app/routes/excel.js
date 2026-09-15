@@ -28,10 +28,10 @@ function formatMonthLabel(mk) {
 }
 
 // ============================================================================
-//  JS-аналог SQL-функции name_key()
-//  "Семён Гордеев"          → "гордеев семен"
-//  "Гордеев Семен Валерьевич" → "гордеев семен"
-//  Совпадает с portal.js и с name_key() в БД.
+//  nameKey() — КЛЮЧ ДЛЯ ДЕДУПЛИКАЦИИ
+//  Первые два слова, регистр вниз, ё→е, первые два слова сортируются
+//  между собой. Задача — чтобы «Гордеев Семён» и «Семён Гордеев» дали
+//  ОДИН ключ. НЕ использовать для сортировки A-Z — см. surnameSortKey.
 // ============================================================================
 function nameKey(fullName) {
     if (!fullName) return '';
@@ -46,6 +46,21 @@ function nameKey(fullName) {
     if (parts.length === 1) return parts[0];
     const firstTwo = [parts[0], parts[1]].sort();
     return firstTwo.join(' ');
+}
+
+// ============================================================================
+//  surnameSortKey() — КЛЮЧ ДЛЯ СОРТИРОВКИ A-Z ПО ФАМИЛИИ
+//  НЕ переставляет первые два слова. В русской школе ФИО = «Фамилия Имя
+//  Отчество», поэтому сортировка по строке = сортировка по фамилии.
+//  "Гордеев Семен Валерьевич" → "гордеев семен валерьевич"
+// ============================================================================
+function surnameSortKey(fullName) {
+    if (!fullName) return '';
+    return String(fullName)
+        .trim()
+        .toLowerCase()
+        .replace(/ё/g, 'е')
+        .replace(/\s+/g, ' ');
 }
 
 function parseCellValue(raw) {
@@ -158,7 +173,10 @@ function buildJournalWorkbook({ subject, month, students = [], grades = [], incl
         ws.getCell(row, 1).value = st;
         ws.getCell(row, 1).font = { bold: true };
 
-        const studentGrades = gradesList.filter(g => g.student_name === st);
+        // Оценки ищем по дедуп-ключу nameKey — чтобы поймать варианты
+        // написания имени одного и того же ученика
+        const stKey = nameKey(st);
+        const studentGrades = gradesList.filter(g => nameKey(g.student_name) === stKey);
 
         for (let d = 1; d <= daysInMonth; d++) {
             const dateStr = `${year}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
@@ -257,8 +275,10 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                      WHERE sm.space_id = $1 AND u.is_teacher = FALSE AND sm.hidden_from_journal = TRUE`,
                     [spaceId]
                 )).rows.map(r => r.full_name);
-                const hiddenSet = new Set(hiddenNames.map(n => n.toLowerCase().trim()));
-                filteredGrades = grades.filter(g => !hiddenSet.has(g.student_name.toLowerCase().trim()));
+                // Скрытых сравниваем по дедуп-ключу nameKey — чтобы «Гордеев Семён»
+                // и «Гордеев Семен Валерьевич» считались одним учеником
+                const hiddenKeys = new Set(hiddenNames.map(n => nameKey(n)));
+                filteredGrades = grades.filter(g => !hiddenKeys.has(nameKey(g.student_name)));
             }
 
             const virtualStudents = (await pool.query(
@@ -271,9 +291,9 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
             const gradesStudents = [...new Set(filteredGrades.map(g => g.student_name))];
 
             // ================================================================
-            //  АВТОСОРТИРОВКА А→Я
-            //  Дедуп по name_key (а не по toLowerCase) + сортировка
-            //  по name_key — порядок полностью совпадает с веб-журналом.
+            //  АВТОСОРТИРОВКА A→Я ПО ФАМИЛИИ
+            //  Дедуп по nameKey (ловит «Гордеев Семён» / «Семён Гордеев»),
+            //  финальная сортировка по surnameSortKey (первое слово = фамилия).
             // ================================================================
             const seenKeys = new Set();
             const orderedStudents = [];
@@ -286,9 +306,8 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
             }
 
             orderedStudents.sort((a, b) =>
-                nameKey(a).localeCompare(nameKey(b), 'ru')
+                surnameSortKey(a).localeCompare(surnameSortKey(b), 'ru')
             );
-            // ================================================================
 
             const wb = buildJournalWorkbook({
                 subject,
@@ -411,7 +430,7 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                     [spaceId]
                 )).rows;
 
-                // Хелпер: ищет участника по ключу через локальную реализацию name_key
+                // Хелпер: ищет участника по дедуп-ключу name_key
                 function localNameKey(fullName) {
                     if (!fullName) return '';
                     const parts = String(fullName)
@@ -446,7 +465,7 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                     let studentName = String(ws.getCell(r, 1).value || '').trim();
                     if (!studentName) continue;
 
-                    // Нормализация: если есть ученик с тем же ключом в journal_students — используем его каноничное имя
+                    // Нормализация имени по дедуп-ключу
                     const existingJournalName = await pool.query(
                         `SELECT student_name,
                                 LENGTH(student_name) - LENGTH(REPLACE(student_name, ' ', '')) AS word_count
@@ -460,7 +479,6 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                     if (existingJournalName.rows.length) {
                         studentName = existingJournalName.rows[0].student_name;
                     } else {
-                        // Ищем в grades
                         const existingGradeName = await pool.query(
                             `SELECT student_name,
                                     LENGTH(student_name) - LENGTH(REPLACE(student_name, ' ', '')) AS word_count
@@ -476,11 +494,9 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                         }
                     }
 
-                    // Находим user_id ТОЛЬКО если ученик уже в пространстве
                     const member = findMemberByKey(studentName);
                     const studentUserId = member?.id || null;
 
-                    // Добавляем в journal_students с порядком (если ещё нет)
                     const exists = await pool.query(
                         'SELECT id FROM journal_students WHERE space_id = $1 AND subject_name = $2 AND student_name = $3',
                         [spaceId, subject, studentName]
@@ -539,17 +555,18 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                 }
 
                 // ============================================================
-                //  АВТОСОРТИРОВКА А→Я после импорта
-                //  Пересчитываем sort_order в journal_students по name_key,
-                //  чтобы порядок совпадал с веб-журналом (portal.js) и
-                //  с последующим экспортом.
+                //  АВТОСОРТИРОВКА A→Я ПО ФАМИЛИИ после импорта
+                //  Пересчёт sort_order в journal_students по полной строке
+                //  (первое слово = фамилия) — синхронизирует БД с веб-журналом
+                //  и с последующим экспортом.
                 // ============================================================
                 try {
                     await pool.query(
                         `WITH ordered AS (
                             SELECT id,
                                    ROW_NUMBER() OVER (
-                                       ORDER BY name_key(student_name) ASC, student_name ASC
+                                       ORDER BY LOWER(REPLACE(student_name, 'ё', 'е')) ASC,
+                                                student_name ASC
                                    ) AS rn
                             FROM journal_students
                             WHERE space_id = $1 AND subject_name = $2
@@ -563,7 +580,6 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                 } catch (e) {
                     console.warn('reorder journal_students failed:', e.message);
                 }
-                // ============================================================
 
                 res.json({ ok: true, subject, month, inserted, updated, skipped, studentsAdded, errors: errors.slice(0, 20) });
             } catch (e) {
