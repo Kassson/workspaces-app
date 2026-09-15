@@ -30,10 +30,7 @@ if (!process.env.ROOT_TEACHER_PASSWORD) {
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-    cors: {
-        origin: process.env.ALLOWED_ORIGIN || '*',
-        credentials: true
-    }
+    cors: { origin: process.env.ALLOWED_ORIGIN || '*', credentials: true }
 });
 
 app.set('io', io);
@@ -51,19 +48,14 @@ app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.ht
 app.get('/teach', (req, res) => res.sendFile(path.join(__dirname, 'public', 'teach', 'index.html')));
 
 const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 20,
+    windowMs: 15 * 60 * 1000, max: 20,
     message: { error: 'Слишком много попыток. Попробуйте через 15 минут.' },
-    standardHeaders: true,
-    legacyHeaders: false
+    standardHeaders: true, legacyHeaders: false
 });
-
 const generalLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 300,
+    windowMs: 60 * 1000, max: 300,
     message: { error: 'Слишком много запросов. Подождите немного.' }
 });
-
 app.use('/api/', generalLimiter);
 
 const pool = new Pool({
@@ -77,66 +69,20 @@ push.initWebPush();
 setInterval(() => push.checkLessonReminders(pool), 60 * 1000);
 
 const LESSON_TIMES = {
-    1: { start: '09:00', end: '09:45' },
-    2: { start: '10:00', end: '10:45' },
-    3: { start: '11:00', end: '11:45' },
-    4: { start: '12:00', end: '12:45' },
-    5: { start: '13:05', end: '13:50' },
-    6: { start: '14:10', end: '14:55' },
-    7: { start: '15:05', end: '15:50' },
-    8: { start: '15:55', end: '16:40' }
+    1: { start: '09:00', end: '09:45' }, 2: { start: '10:00', end: '10:45' },
+    3: { start: '11:00', end: '11:45' }, 4: { start: '12:00', end: '12:45' },
+    5: { start: '13:05', end: '13:50' }, 6: { start: '14:10', end: '14:55' },
+    7: { start: '15:05', end: '15:50' }, 8: { start: '15:55', end: '16:40' }
 };
 const DAY_MAP = {
-    'ПОНЕДЕЛЬНИК': 1, 'ПН': 1,
-    'ВТОРНИК': 2, 'ВТ': 2,
-    'СРЕДА': 3, 'СР': 3,
-    'ЧЕТВЕРГ': 4, 'ЧТ': 4,
-    'ПЯТНИЦА': 5, 'ПТ': 5,
-    'СУББОТА': 6, 'СБ': 6,
+    'ПОНЕДЕЛЬНИК': 1, 'ПН': 1, 'ВТОРНИК': 2, 'ВТ': 2, 'СРЕДА': 3, 'СР': 3,
+    'ЧЕТВЕРГ': 4, 'ЧТ': 4, 'ПЯТНИЦА': 5, 'ПТ': 5, 'СУББОТА': 6, 'СБ': 6,
     'ВОСКРЕСЕНЬЕ': 7, 'ВС': 7
 };
-
-const DEFAULT_SCHEDULE_TEMPLATE = `День\t№ урока\tПредмет\tКабинет
-ПОНЕДЕЛЬНИК\t1\t\t
-ПОНЕДЕЛЬНИК\t2\t\t
-ПОНЕДЕЛЬНИК\t3\t\t
-ПОНЕДЕЛЬНИК\t4\t\t
-ПОНЕДЕЛЬНИК\t5\t\t
-ПОНЕДЕЛЬНИК\t6\t\t
-ПОНЕДЕЛЬНИК\t7\t\t
-ПОНЕДЕЛЬНИК\t8\t\t
-ВТОРНИК\t1\t\t
-ВТОРНИК\t2\t\t
-ВТОРНИК\t3\t\t
-ВТОРНИК\t4\t\t
-ВТОРНИК\t5\t\t
-ВТОРНИК\t6\t\t
-ВТОРНИК\t7\t\t
-ВТОРНИК\t8\t\t
-СРЕДА\t1\t\t
-СРЕДА\t2\t\t
-СРЕДА\t3\t\t
-СРЕДА\t4\t\t
-СРЕДА\t5\t\t
-СРЕДА\t6\t\t
-СРЕДА\t7\t\t
-СРЕДА\t8\t\t
-ЧЕТВЕРГ\t1\t\t
-ЧЕТВЕРГ\t2\t\t
-ЧЕТВЕРГ\t3\t\t
-ЧЕТВЕРГ\t4\t\t
-ЧЕТВЕРГ\t5\t\t
-ЧЕТВЕРГ\t6\t\t
-ЧЕТВЕРГ\t7\t\t
-ЧЕТВЕРГ\t8\t\t
-ПЯТНИЦА\t1\t\t
-ПЯТНИЦА\t2\t\t
-ПЯТНИЦА\t3\t\t
-ПЯТНИЦА\t4\t\t
-ПЯТНИЦА\t5\t\t
-ПЯТНИЦА\t6\t\t
-ПЯТНИЦА\t7\t\t
-ПЯТНИЦА\t8\t\t`;
+const DEFAULT_SCHEDULE_TEMPLATE = `День\t№ урока\tПредмет\tКабинет\n` + Array.from({length:5}, (_,i) => {
+    const d = ['ПОНЕДЕЛЬНИК','ВТОРНИК','СРЕДА','ЧЕТВЕРГ','ПЯТНИЦА'][i];
+    return Array.from({length:8}, (_,j) => `${d}\t${j+1}\t\t`).join('\n');
+}).join('\n');
 
 const ALLOWED_DOMAINS = ['gmail.com', 'mail.ru', 'yandex.ru', 'rambler.ru', 'bk.ru', 'list.ru', 'inbox.ru', 'ya.ru', 'outlook.com', 'yahoo.com'];
 function isValidEmailDomain(email) {
@@ -145,7 +91,6 @@ function isValidEmailDomain(email) {
     if (!match) return false;
     return ALLOWED_DOMAINS.includes(match[1].toLowerCase());
 }
-
 function isValidPassword(password) {
     if (typeof password !== 'string') return false;
     if (password.length < 8) return false;
@@ -154,14 +99,7 @@ function isValidPassword(password) {
     return true;
 }
 
-const BANNED_SUBSTRINGS = [
-    'admin', 'administrator', 'root', 'moderator', 'support', 'system', 'null', 'undefined',
-    'админ', 'администратор', 'модератор', 'рут', 'систем',
-    'бля', 'хуй', 'хуе', 'хер', 'пизд', 'ебан', 'еба', 'сук', 'мраз', 'гандон', 'долбоеб', 'долбоёб',
-    'fuck', 'shit', 'bitch', 'asshole', 'nigger', 'faggot',
-    'гитлер', 'hitler', 'сталин', 'stalin', 'ленин', 'lenin', 'путин', 'putin',
-    'зеленский', 'zelensky', 'трамп', 'trump', 'байден', 'biden'
-];
+const BANNED_SUBSTRINGS = ['admin','administrator','root','moderator','support','system','null','undefined','админ','администратор','модератор','рут','систем','бля','хуй','хуе','хер','пизд','ебан','еба','сук','мраз','гандон','долбоеб','долбоёб','fuck','shit','bitch','asshole','nigger','faggot','гитлер','hitler','сталин','stalin','ленин','lenin','путин','putin','зеленский','zelensky','трамп','trump','байден','biden'];
 function containsBannedWord(text) {
     if (!text) return false;
     const normalized = String(text).toLowerCase().replace(/[^a-zа-я0-9]/gi, '');
@@ -181,6 +119,7 @@ function verifyJWT(req, res, next) {
 
 async function getUserById(id) { const r = await pool.query('SELECT * FROM users WHERE id = $1', [id]); return r.rows[0] || null; }
 function isSuperAdmin(user) { return !!(user && user.is_teacher && user.is_teacher_verified); }
+function isRoot(user) { return !!(user && user.username === 'root_teacher'); }
 async function isSpaceAdmin(user, spaceId) {
     if (isSuperAdmin(user)) return true;
     const r = await pool.query("SELECT 1 FROM space_members WHERE space_id = $1 AND user_id = $2 AND role IN ('admin','starosta')", [spaceId, user.id]);
@@ -234,8 +173,7 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
     try {
         const hash = await bcrypt.hash(password, 10);
         await pool.query(
-            `INSERT INTO users (username, full_name, email, password_hash, is_teacher, is_teacher_verified, email_verified)
-             VALUES ($1, $2, $3, $4, false, false, true)`,
+            `INSERT INTO users (username, full_name, email, password_hash, is_teacher, is_teacher_verified, email_verified) VALUES ($1, $2, $3, $4, false, false, true)`,
             [nickName, `${firstName} ${lastName}`, userEmail, hash]
         );
         res.json({ message: 'Успех' });
@@ -253,8 +191,7 @@ app.post('/api/teach/register', authLimiter, async (req, res) => {
         const code = 'T-' + generateCode(4);
         const username = userEmail.split('@')[0] + '_' + generateCode(3);
         await pool.query(
-            `INSERT INTO users (username, full_name, email, password_hash, is_teacher, is_teacher_verified, verification_code, email_verified)
-             VALUES ($1, $2, $3, $4, true, false, $5, true)`,
+            `INSERT INTO users (username, full_name, email, password_hash, is_teacher, is_teacher_verified, verification_code, email_verified) VALUES ($1, $2, $3, $4, true, false, $5, true)`,
             [username, fullName, userEmail, hash, code]
         );
         res.json({ code });
@@ -267,14 +204,9 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
         const userRes = await pool.query('SELECT * FROM users WHERE email = $1 OR username = $1', [login]);
         if (!userRes.rows.length) return res.status(400).json({ error: 'Неверный логин или пароль' });
         const user = userRes.rows[0];
-
-        if (user.locked_until && new Date(user.locked_until) > new Date()) {
-            return res.status(403).json({ error: 'Аккаунт заблокирован. Попробуйте позже.' });
-        }
-
+        if (user.locked_until && new Date(user.locked_until) > new Date()) return res.status(403).json({ error: 'Аккаунт заблокирован. Попробуйте позже.' });
         if (isTeacher && !user.is_teacher) return res.status(403).json({ error: 'Это аккаунт студента' });
         if (!isTeacher && user.is_teacher) return res.status(403).json({ error: 'Это аккаунт преподавателя' });
-
         const validPassword = await bcrypt.compare(password, user.password_hash);
         if (!validPassword) {
             const attempts = (user.failed_login_attempts || 0) + 1;
@@ -282,9 +214,7 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
             await pool.query('UPDATE users SET failed_login_attempts = $1, locked_until = $2 WHERE id = $3', [attempts, lockUntil, user.id]);
             return res.status(400).json({ error: 'Неверный логин или пароль' });
         }
-
         await pool.query('UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = $1', [user.id]);
-
         const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '30d' });
         res.json({ token, user: publicUser(user) });
     } catch (err) { res.status(500).json({ error: 'Ошибка сервера' }); }
@@ -305,10 +235,8 @@ app.post('/api/auth/update-profile', verifyJWT, async (req, res) => {
     const newNickname = user.is_teacher ? user.username : (nickname || user.username);
     const newTheme = ['auto', 'light', 'dark'].includes(theme) ? theme : (user.theme || 'auto');
     try {
-        await pool.query(
-            'UPDATE users SET full_name = $1, username = $2, avatar_emoji = $3, theme = $4 WHERE id = $5',
-            [`${firstName} ${lastName}`, newNickname, avatarEmoji || '👤', newTheme, user.id]
-        );
+        await pool.query('UPDATE users SET full_name = $1, username = $2, avatar_emoji = $3, theme = $4 WHERE id = $5',
+            [`${firstName} ${lastName}`, newNickname, avatarEmoji || '👤', newTheme, user.id]);
         const updated = await getUserById(user.id);
         res.json({ success: true, user: publicUser(updated) });
     } catch (e) {
@@ -338,16 +266,13 @@ app.post('/api/settings/update', verifyJWT, async (req, res) => {
     const user = await getUserById(req.userId);
     if (!user || user.username !== 'root_teacher') return res.status(403).json({ error: 'Только Root' });
     const { remote_mode, maintenance_mode, exams_mode, private_chat_mode, global_announcement } = req.body;
-
     const prevQ = await pool.query('SELECT global_announcement FROM system_settings WHERE id = 1');
     const prevAnnouncement = (prevQ.rows[0] && prevQ.rows[0].global_announcement) || '';
-
     const r = await pool.query(
         `UPDATE system_settings SET remote_mode=$1, maintenance_mode=$2, exams_mode=$3, private_chat_mode=$4, global_announcement=$5 WHERE id = 1 RETURNING *`,
         [!!remote_mode, !!maintenance_mode, !!exams_mode, !!private_chat_mode, global_announcement || '']
     );
     io.emit('settings_updated', r.rows[0]);
-
     const newAnnouncement = (global_announcement || '').trim();
     if (newAnnouncement && newAnnouncement !== prevAnnouncement) {
         push.notifyCollegeAnnouncement(pool, newAnnouncement).catch(e => console.error('push announcement:', e.message));
@@ -361,16 +286,11 @@ app.post('/api/auth/request-password-reset', authLimiter, async (req, res) => {
     if (!login) return res.status(400).json({ error: 'Введите логин или email' });
     try {
         const userQ = await pool.query('SELECT * FROM users WHERE email = $1 OR username = $1', [login]);
-        if (!userQ.rows.length) {
-            return res.json({ ok: true, message: 'Запрос отправлен. Обратитесь к преподавателю.' });
-        }
+        if (!userQ.rows.length) return res.json({ ok: true, message: 'Запрос отправлен.' });
         const user = userQ.rows[0];
-
         const existing = await pool.query(
-            `SELECT * FROM password_reset_requests WHERE user_id = $1 AND status IN ('pending','approved') ORDER BY created_at DESC LIMIT 1`,
-            [user.id]
+            `SELECT * FROM password_reset_requests WHERE user_id = $1 AND status IN ('pending','approved') ORDER BY created_at DESC LIMIT 1`, [user.id]
         );
-
         let request;
         if (existing.rows.length && (Date.now() - new Date(existing.rows[0].created_at).getTime()) < 60 * 60 * 1000) {
             request = existing.rows[0];
@@ -379,37 +299,24 @@ app.post('/api/auth/request-password-reset', authLimiter, async (req, res) => {
             const token = user.is_teacher ? crypto.randomBytes(32).toString('hex') : null;
             const displayName = user.is_teacher ? `Преподаватель: ${user.full_name}` : user.full_name;
             const r = await pool.query(
-                `INSERT INTO password_reset_requests (user_id, user_type, display_name, username, code, token)
-                 VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+                `INSERT INTO password_reset_requests (user_id, user_type, display_name, username, code, token) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
                 [user.id, user.is_teacher ? 'teacher' : 'student', displayName, user.username, code, token]
             );
             request = r.rows[0];
-
             io.to('teachers').emit('password_reset_request', {
-                id: request.id,
-                displayName: request.display_name,
-                username: request.username,
-                userType: request.user_type,
-                code: request.code,
-                createdAt: request.created_at
+                id: request.id, displayName: request.display_name, username: request.username,
+                userType: request.user_type, code: request.code, createdAt: request.created_at
             });
         }
-
         res.json({ ok: true, message: 'Запрос отправлен. Обратитесь к преподавателю.' });
-    } catch (e) {
-        console.error('request-password-reset:', e.message);
-        res.status(500).json({ error: 'Ошибка сервера' });
-    }
+    } catch (e) { console.error('request-password-reset:', e.message); res.status(500).json({ error: 'Ошибка сервера' }); }
 });
 
 app.get('/api/auth/password-reset-status/:login', authLimiter, async (req, res) => {
     try {
         const userQ = await pool.query('SELECT id FROM users WHERE email = $1 OR username = $1', [req.params.login]);
         if (!userQ.rows.length) return res.json({ status: 'none' });
-        const r = await pool.query(
-            `SELECT id, status, code, token FROM password_reset_requests WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`,
-            [userQ.rows[0].id]
-        );
+        const r = await pool.query(`SELECT id, status, code, token FROM password_reset_requests WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`, [userQ.rows[0].id]);
         if (!r.rows.length) return res.json({ status: 'none' });
         res.json(r.rows[0]);
     } catch (e) { res.json({ status: 'none' }); }
@@ -418,13 +325,8 @@ app.get('/api/auth/password-reset-status/:login', authLimiter, async (req, res) 
 app.get('/api/password-reset-requests', verifyJWT, async (req, res) => {
     const user = await getUserById(req.userId);
     if (!isSuperAdmin(user)) return res.status(403).json({ error: 'Только для учителей' });
-
     const r = await pool.query(
-        `SELECT prr.*, u.full_name AS teacher_full_name
-         FROM password_reset_requests prr
-         LEFT JOIN users u ON u.id = prr.user_id
-         WHERE prr.status IN ('pending','approved') AND prr.created_at > NOW() - INTERVAL '24 hours'
-         ORDER BY prr.created_at DESC`
+        `SELECT prr.*, u.full_name AS teacher_full_name FROM password_reset_requests prr LEFT JOIN users u ON u.id = prr.user_id WHERE prr.status IN ('pending','approved') AND prr.created_at > NOW() - INTERVAL '24 hours' ORDER BY prr.created_at DESC`
     );
     res.json(r.rows);
 });
@@ -432,28 +334,14 @@ app.get('/api/password-reset-requests', verifyJWT, async (req, res) => {
 app.post('/api/password-reset-requests/:id/approve', verifyJWT, async (req, res) => {
     const approver = await getUserById(req.userId);
     if (!isSuperAdmin(approver)) return res.status(403).json({ error: 'Только для учителей' });
-
     const r = await pool.query('SELECT * FROM password_reset_requests WHERE id = $1', [req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Запрос не найден' });
     const request = r.rows[0];
     if (request.status === 'resolved') return res.status(400).json({ error: 'Запрос уже выполнен' });
-
-    if (request.user_id === approver.id) {
-        return res.status(400).json({ error: 'Нельзя подтвердить свой запрос' });
-    }
-
-    await pool.query(
-        `UPDATE password_reset_requests SET status = 'approved', approved_by = $1, approved_at = NOW() WHERE id = $2`,
-        [approver.id, req.params.id]
-    );
-
+    if (request.user_id === approver.id) return res.status(400).json({ error: 'Нельзя подтвердить свой запрос' });
+    await pool.query(`UPDATE password_reset_requests SET status = 'approved', approved_by = $1, approved_at = NOW() WHERE id = $2`, [approver.id, req.params.id]);
     io.to('teachers').emit('password_reset_updated', { id: req.params.id, status: 'approved' });
-
-    res.json({
-        ok: true,
-        token: request.token,
-        link: request.token ? `/?reset=${request.token}` : null
-    });
+    res.json({ ok: true, token: request.token, link: request.token ? `/?reset=${request.token}` : null });
 });
 
 app.delete('/api/password-reset-requests/:id', verifyJWT, async (req, res) => {
@@ -468,71 +356,37 @@ app.post('/api/auth/reset-password-with-code', authLimiter, async (req, res) => 
     const { login, code, newPassword } = req.body;
     if (!login || !code || !newPassword) return res.status(400).json({ error: 'Заполните все поля' });
     if (!isValidPassword(newPassword)) return res.status(400).json({ error: 'Пароль: минимум 8 символов, буква и цифра' });
-
     try {
         const userQ = await pool.query('SELECT * FROM users WHERE email = $1 OR username = $1', [login]);
         if (!userQ.rows.length) return res.status(400).json({ error: 'Неверный код' });
         const user = userQ.rows[0];
-
-        const r = await pool.query(
-            `SELECT * FROM password_reset_requests WHERE user_id = $1 AND code = $2 AND status IN ('pending','approved') ORDER BY created_at DESC LIMIT 1`,
-            [user.id, String(code).trim()]
-        );
+        const r = await pool.query(`SELECT * FROM password_reset_requests WHERE user_id = $1 AND code = $2 AND status IN ('pending','approved') ORDER BY created_at DESC LIMIT 1`, [user.id, String(code).trim()]);
         if (!r.rows.length) return res.status(400).json({ error: 'Неверный или устаревший код' });
-
         const hash = await bcrypt.hash(newPassword, 10);
-        await pool.query(
-            'UPDATE users SET password_hash = $1, failed_login_attempts = 0, locked_until = NULL WHERE id = $2',
-            [hash, user.id]
-        );
-        await pool.query(
-            `UPDATE password_reset_requests SET status = 'resolved', resolved_at = NOW() WHERE id = $1`,
-            [r.rows[0].id]
-        );
-
+        await pool.query('UPDATE users SET password_hash = $1, failed_login_attempts = 0, locked_until = NULL WHERE id = $2', [hash, user.id]);
+        await pool.query(`UPDATE password_reset_requests SET status = 'resolved', resolved_at = NOW() WHERE id = $1`, [r.rows[0].id]);
         io.to('teachers').emit('password_reset_updated', { id: r.rows[0].id, status: 'resolved' });
         res.json({ ok: true });
-    } catch (e) {
-        console.error('reset-with-code:', e.message);
-        res.status(500).json({ error: 'Ошибка сервера' });
-    }
+    } catch (e) { console.error('reset-with-code:', e.message); res.status(500).json({ error: 'Ошибка сервера' }); }
 });
 
 app.post('/api/auth/reset-password-with-token', authLimiter, async (req, res) => {
     const { token, newPassword } = req.body;
     if (!token || !newPassword) return res.status(400).json({ error: 'Заполните поля' });
     if (!isValidPassword(newPassword)) return res.status(400).json({ error: 'Пароль: минимум 8 символов, буква и цифра' });
-
     try {
-        const r = await pool.query(
-            `SELECT * FROM password_reset_requests WHERE token = $1 AND status = 'approved' AND created_at > NOW() - INTERVAL '24 hours' LIMIT 1`,
-            [token]
-        );
+        const r = await pool.query(`SELECT * FROM password_reset_requests WHERE token = $1 AND status = 'approved' AND created_at > NOW() - INTERVAL '24 hours' LIMIT 1`, [token]);
         if (!r.rows.length) return res.status(400).json({ error: 'Ссылка недействительна или устарела' });
-
         const hash = await bcrypt.hash(newPassword, 10);
-        await pool.query(
-            'UPDATE users SET password_hash = $1, failed_login_attempts = 0, locked_until = NULL WHERE id = $2',
-            [hash, r.rows[0].user_id]
-        );
-        await pool.query(
-            `UPDATE password_reset_requests SET status = 'resolved', resolved_at = NOW() WHERE id = $1`,
-            [r.rows[0].id]
-        );
-
+        await pool.query('UPDATE users SET password_hash = $1, failed_login_attempts = 0, locked_until = NULL WHERE id = $2', [hash, r.rows[0].user_id]);
+        await pool.query(`UPDATE password_reset_requests SET status = 'resolved', resolved_at = NOW() WHERE id = $1`, [r.rows[0].id]);
         io.to('teachers').emit('password_reset_updated', { id: r.rows[0].id, status: 'resolved' });
         res.json({ ok: true });
-    } catch (e) {
-        console.error('reset-with-token:', e.message);
-        res.status(500).json({ error: 'Ошибка сервера' });
-    }
+    } catch (e) { console.error('reset-with-token:', e.message); res.status(500).json({ error: 'Ошибка сервера' }); }
 });
 
 app.get('/api/auth/check-reset-token/:token', authLimiter, async (req, res) => {
-    const r = await pool.query(
-        `SELECT id, status FROM password_reset_requests WHERE token = $1 AND status = 'approved' AND created_at > NOW() - INTERVAL '24 hours' LIMIT 1`,
-        [req.params.token]
-    );
+    const r = await pool.query(`SELECT id, status FROM password_reset_requests WHERE token = $1 AND status = 'approved' AND created_at > NOW() - INTERVAL '24 hours' LIMIT 1`, [req.params.token]);
     res.json({ valid: r.rows.length > 0 });
 });
 
@@ -564,10 +418,7 @@ app.post('/api/spaces/join', verifyJWT, async (req, res) => {
         const existing = await pool.query('SELECT space_id FROM space_members WHERE user_id = $1 LIMIT 1', [user.id]);
         if (existing.rows.length && existing.rows[0].space_id !== space.rows[0].id) return res.status(400).json({ error: 'Вы уже в другой группе' });
     }
-    await pool.query(
-        `INSERT INTO space_members (space_id, user_id, role) VALUES ($1, $2, 'member') ON CONFLICT (space_id, user_id) DO NOTHING`,
-        [space.rows[0].id, user.id]
-    );
+    await pool.query(`INSERT INTO space_members (space_id, user_id, role) VALUES ($1, $2, 'member') ON CONFLICT (space_id, user_id) DO NOTHING`, [space.rows[0].id, user.id]);
     res.json(space.rows[0]);
 });
 
@@ -584,10 +435,7 @@ app.get('/api/spaces/mine', verifyJWT, async (req, res) => {
         const r = await pool.query('SELECT *, true AS is_admin FROM spaces ORDER BY created_at DESC');
         return res.json(r.rows);
     }
-    const r = await pool.query(
-        `SELECT s.*, (sm.role = 'admin' OR sm.role = 'starosta') AS is_admin FROM spaces s JOIN space_members sm ON sm.space_id = s.id WHERE sm.user_id = $1 ORDER BY s.created_at DESC`,
-        [user.id]
-    );
+    const r = await pool.query(`SELECT s.*, (sm.role = 'admin' OR sm.role = 'starosta') AS is_admin FROM spaces s JOIN space_members sm ON sm.space_id = s.id WHERE sm.user_id = $1 ORDER BY s.created_at DESC`, [user.id]);
     res.json(r.rows);
 });
 
@@ -603,15 +451,23 @@ app.post('/api/spaces/:spaceId/rotate-invite-code', verifyJWT, requireSpaceAdmin
 });
 
 // ================= УЧАСТНИКИ =================
+// Скрытые видны: Root (все), сам скрытый (себя). Остальные — нет.
 app.get('/api/spaces/:spaceId/members', verifyJWT, requireSpaceAccess, async (req, res) => {
+    const user = req.currentUser;
+    const root = isRoot(user);
     const r = await pool.query(
         `SELECT u.id, u.username, u.full_name, u.is_teacher, u.avatar_emoji, sm.role, sm.custom_status, sm.joined_at, sm.muted_until,
                 COALESCE(sm.hidden_from_journal, FALSE) AS hidden_from_journal
          FROM space_members sm
          JOIN users u ON u.id = sm.user_id
          WHERE sm.space_id = $1 AND u.is_teacher = FALSE
+           AND (
+               $2::boolean = TRUE           -- Root видит всех
+               OR sm.user_id = $3            -- сам себя видит
+               OR COALESCE(sm.hidden_from_journal, FALSE) = FALSE
+           )
          ORDER BY CASE sm.role WHEN 'admin' THEN 0 WHEN 'starosta' THEN 1 ELSE 2 END, u.full_name`,
-        [req.params.spaceId]
+        [req.params.spaceId, root, user.id]
     );
     res.json(r.rows);
 });
@@ -620,14 +476,9 @@ app.post('/api/spaces/:spaceId/members/:userId/role', verifyJWT, requireSpaceAdm
     const { role } = req.body;
     if (!['admin', 'member'].includes(role)) return res.status(400).json({ error: 'Роль: admin или member' });
     if (req.params.userId === req.currentUser.id) return res.status(400).json({ error: 'Нельзя изменить свою роль' });
-
     const target = await pool.query('SELECT is_teacher FROM users WHERE id = $1', [req.params.userId]);
     if (target.rows[0]?.is_teacher) return res.status(403).json({ error: 'Нельзя менять роль преподавателя' });
-
-    const r = await pool.query(
-        'UPDATE space_members SET role = $1 WHERE space_id = $2 AND user_id = $3 RETURNING *',
-        [role, req.params.spaceId, req.params.userId]
-    );
+    const r = await pool.query('UPDATE space_members SET role = $1 WHERE space_id = $2 AND user_id = $3 RETURNING *', [role, req.params.spaceId, req.params.userId]);
     if (!r.rows.length) return res.status(404).json({ error: 'Не найден' });
     io.to(`space:${req.params.spaceId}`).emit('members_updated');
     res.json(r.rows[0]);
@@ -638,14 +489,9 @@ app.post('/api/spaces/:spaceId/members/:userId/custom-status', verifyJWT, requir
     if (typeof customStatus !== 'string') return res.status(400).json({ error: 'Неверный формат' });
     const trimmed = customStatus.trim().slice(0, 50);
     if (trimmed && violatesProfanityFilter(trimmed)) return res.status(400).json({ error: 'Запрещённые слова' });
-
     const target = await pool.query('SELECT is_teacher FROM users WHERE id = $1', [req.params.userId]);
     if (target.rows[0]?.is_teacher) return res.status(403).json({ error: 'Нельзя менять статус преподавателя' });
-
-    await pool.query(
-        'UPDATE space_members SET custom_status = $1 WHERE space_id = $2 AND user_id = $3',
-        [trimmed || null, req.params.spaceId, req.params.userId]
-    );
+    await pool.query('UPDATE space_members SET custom_status = $1 WHERE space_id = $2 AND user_id = $3', [trimmed || null, req.params.spaceId, req.params.userId]);
     io.to(`space:${req.params.spaceId}`).emit('members_updated');
     res.json({ success: true });
 });
@@ -679,18 +525,12 @@ app.delete('/api/spaces/:spaceId/members/:userId/mute', verifyJWT, requireSpaceA
 app.post('/api/spaces/:spaceId/members/:userId/block', verifyJWT, requireSpaceAdmin, async (req, res) => {
     const { reason } = req.body;
     if (req.params.userId === req.currentUser.id) return res.status(400).json({ error: 'Нельзя забанить себя' });
-    const target = await pool.query(
-        'SELECT sm.role, u.is_teacher FROM space_members sm JOIN users u ON u.id = sm.user_id WHERE sm.space_id = $1 AND sm.user_id = $2',
-        [req.params.spaceId, req.params.userId]
-    );
+    const target = await pool.query('SELECT sm.role, u.is_teacher FROM space_members sm JOIN users u ON u.id = sm.user_id WHERE sm.space_id = $1 AND sm.user_id = $2', [req.params.spaceId, req.params.userId]);
     if (!target.rows.length) return res.status(404).json({ error: 'Не найден' });
     if (target.rows[0].is_teacher) return res.status(403).json({ error: 'Нельзя забанить преподавателя' });
     if (target.rows[0].role === 'admin' && !req.currentUser.is_teacher) return res.status(403).json({ error: 'Только преподаватель' });
     await pool.query('DELETE FROM space_members WHERE space_id = $1 AND user_id = $2', [req.params.spaceId, req.params.userId]);
-    await pool.query(
-        'INSERT INTO space_blocked (space_id, user_id, blocked_by, reason) VALUES ($1, $2, $3, $4) ON CONFLICT (space_id, user_id) DO UPDATE SET blocked_by = EXCLUDED.blocked_by, reason = EXCLUDED.reason, blocked_at = NOW()',
-        [req.params.spaceId, req.params.userId, req.currentUser.id, reason || null]
-    );
+    await pool.query('INSERT INTO space_blocked (space_id, user_id, blocked_by, reason) VALUES ($1, $2, $3, $4) ON CONFLICT (space_id, user_id) DO UPDATE SET blocked_by = EXCLUDED.blocked_by, reason = EXCLUDED.reason, blocked_at = NOW()', [req.params.spaceId, req.params.userId, req.currentUser.id, reason || null]);
     io.to(`space:${req.params.spaceId}`).emit('members_updated');
     res.json({ success: true });
 });
@@ -702,24 +542,15 @@ app.delete('/api/spaces/:spaceId/blocked/:userId', verifyJWT, requireSpaceAdmin,
 });
 
 app.get('/api/spaces/:spaceId/blacklist', verifyJWT, requireSpaceAdmin, async (req, res) => {
-    const blocked = await pool.query(
-        `SELECT u.id, u.full_name, u.username, u.avatar_emoji, sb.reason, sb.blocked_at, 'blocked' AS type FROM space_blocked sb JOIN users u ON u.id = sb.user_id WHERE sb.space_id = $1 ORDER BY sb.blocked_at DESC`,
-        [req.params.spaceId]
-    );
-    const muted = await pool.query(
-        `SELECT u.id, u.full_name, u.username, u.avatar_emoji, sm.muted_until, 'muted' AS type FROM space_members sm JOIN users u ON u.id = sm.user_id WHERE sm.space_id = $1 AND sm.muted_until IS NOT NULL AND sm.muted_until > NOW() ORDER BY sm.muted_until DESC`,
-        [req.params.spaceId]
-    );
+    const blocked = await pool.query(`SELECT u.id, u.full_name, u.username, u.avatar_emoji, sb.reason, sb.blocked_at, 'blocked' AS type FROM space_blocked sb JOIN users u ON u.id = sb.user_id WHERE sb.space_id = $1 ORDER BY sb.blocked_at DESC`, [req.params.spaceId]);
+    const muted = await pool.query(`SELECT u.id, u.full_name, u.username, u.avatar_emoji, sm.muted_until, 'muted' AS type FROM space_members sm JOIN users u ON u.id = sm.user_id WHERE sm.space_id = $1 AND sm.muted_until IS NOT NULL AND sm.muted_until > NOW() ORDER BY sm.muted_until DESC`, [req.params.spaceId]);
     res.json({ blocked: blocked.rows, muted: muted.rows });
 });
 
 // ================= РАСПИСАНИЕ =================
 app.get('/api/schedule/:spaceId', verifyJWT, requireSpaceAccess, async (req, res) => {
     const lessons = await pool.query('SELECT * FROM schedules WHERE space_id = $1 ORDER BY day_of_week, start_time', [req.params.spaceId]);
-    const overrides = await pool.query(
-        `SELECT * FROM schedule_overrides WHERE space_id = $1 AND override_date >= CURRENT_DATE - INTERVAL '1 day' AND override_date <= CURRENT_DATE + INTERVAL '60 days'`,
-        [req.params.spaceId]
-    );
+    const overrides = await pool.query(`SELECT * FROM schedule_overrides WHERE space_id = $1 AND override_date >= CURRENT_DATE - INTERVAL '1 day' AND override_date <= CURRENT_DATE + INTERVAL '60 days'`, [req.params.spaceId]);
     res.json({ lessons: lessons.rows, overrides: overrides.rows });
 });
 
@@ -727,17 +558,11 @@ app.post('/api/schedule', verifyJWT, requireSpaceAdmin, async (req, res) => {
     const { id, spaceId, dayOfWeek, subjectName, classroom, teacherName, startTime, endTime } = req.body;
     if (!spaceId || !dayOfWeek || !subjectName || !startTime || !endTime) return res.status(400).json({ error: 'Заполните поля' });
     if (id) {
-        const r = await pool.query(
-            `UPDATE schedules SET subject_name=$1, classroom=$2, teacher_name=$3, start_time=$4, end_time=$5, day_of_week=$6 WHERE id = $7 AND space_id = $8 RETURNING *`,
-            [subjectName, classroom, teacherName, startTime, endTime, dayOfWeek, id, spaceId]
-        );
+        const r = await pool.query(`UPDATE schedules SET subject_name=$1, classroom=$2, teacher_name=$3, start_time=$4, end_time=$5, day_of_week=$6 WHERE id = $7 AND space_id = $8 RETURNING *`, [subjectName, classroom, teacherName, startTime, endTime, dayOfWeek, id, spaceId]);
         push.notifyScheduleChange(pool, spaceId, `${subjectName} — изменено`).catch(() => {});
         return res.json(r.rows[0]);
     }
-    const r = await pool.query(
-        `INSERT INTO schedules (space_id, day_of_week, subject_name, classroom, teacher_name, start_time, end_time) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-        [spaceId, dayOfWeek, subjectName, classroom, teacherName, startTime, endTime]
-    );
+    const r = await pool.query(`INSERT INTO schedules (space_id, day_of_week, subject_name, classroom, teacher_name, start_time, end_time) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`, [spaceId, dayOfWeek, subjectName, classroom, teacherName, startTime, endTime]);
     push.notifyScheduleChange(pool, spaceId, `Новая пара: ${subjectName}`).catch(() => {});
     res.json(r.rows[0]);
 });
@@ -781,10 +606,7 @@ app.post('/api/schedule/import', verifyJWT, requireSpaceAdmin, async (req, res) 
             values.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
             params.push(spaceId, l.dayOfWeek, l.subjectName, l.classroom, null, l.startTime, l.endTime);
         }
-        await pool.query(
-            `INSERT INTO schedules (space_id, day_of_week, subject_name, classroom, teacher_name, start_time, end_time) VALUES ${values.join(', ')}`,
-            params
-        );
+        await pool.query(`INSERT INTO schedules (space_id, day_of_week, subject_name, classroom, teacher_name, start_time, end_time) VALUES ${values.join(', ')}`, params);
         io.to(`space:${spaceId}`).emit('schedule_updated');
         push.notifyScheduleChange(pool, spaceId, `Импортировано ${lessons.length} пар`).catch(() => {});
         res.json({ success: true, imported: lessons.length, errors: errors.slice(0, 10), skipped: skipped.slice(0, 10) });
@@ -811,11 +633,7 @@ app.get('/api/schedule/:spaceId/export', verifyJWT, requireSpaceAccess, async (r
 app.post('/api/schedule/override', verifyJWT, requireSpaceAdmin, async (req, res) => {
     const { spaceId, scheduleId, date, isCanceled, replacementSubject, replacementClassroom, replacementTeacher } = req.body;
     if (!scheduleId || !date) return res.status(400).json({ error: 'Не указан урок' });
-    const r = await pool.query(
-        `INSERT INTO schedule_overrides (space_id, schedule_id, override_date, is_canceled, replacement_subject, replacement_classroom, replacement_teacher) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (schedule_id, override_date) DO UPDATE SET is_canceled = EXCLUDED.is_canceled, replacement_subject = EXCLUDED.replacement_subject, replacement_classroom = EXCLUDED.replacement_classroom, replacement_teacher = EXCLUDED.replacement_teacher RETURNING *`,
-        [spaceId, scheduleId, date, !!isCanceled, replacementSubject || null, replacementClassroom || null, replacementTeacher || null]
-    );
-
+    const r = await pool.query(`INSERT INTO schedule_overrides (space_id, schedule_id, override_date, is_canceled, replacement_subject, replacement_classroom, replacement_teacher) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (schedule_id, override_date) DO UPDATE SET is_canceled = EXCLUDED.is_canceled, replacement_subject = EXCLUDED.replacement_subject, replacement_classroom = EXCLUDED.replacement_classroom, replacement_teacher = EXCLUDED.replacement_teacher RETURNING *`, [spaceId, scheduleId, date, !!isCanceled, replacementSubject || null, replacementClassroom || null, replacementTeacher || null]);
     try {
         const lessonQ = await pool.query('SELECT subject_name, classroom FROM schedules WHERE id = $1', [scheduleId]);
         const lesson = lessonQ.rows[0] || {};
@@ -825,7 +643,6 @@ app.post('/api/schedule/override', verifyJWT, requireSpaceAdmin, async (req, res
         else body = `${date}: изменение в расписании — ${lesson.subject_name || ''}`;
         push.notifyScheduleChange(pool, spaceId, body).catch(() => {});
     } catch (e) { console.error('push schedule:', e.message); }
-
     io.to(`space:${spaceId}`).emit('schedule_updated');
     res.json(r.rows[0]);
 });
@@ -841,14 +658,9 @@ app.delete('/api/schedule/override/:id', verifyJWT, async (req, res) => {
 
 app.get('/api/schedule/:spaceId/ics', verifyJWT, requireSpaceAccess, async (req, res) => {
     const lessons = (await pool.query('SELECT * FROM schedules WHERE space_id = $1', [req.params.spaceId])).rows;
-    const overrides = (await pool.query(
-        `SELECT * FROM schedule_overrides WHERE space_id = $1 AND override_date >= CURRENT_DATE AND override_date <= CURRENT_DATE + INTERVAL '90 days'`,
-        [req.params.spaceId]
-    )).rows;
-
+    const overrides = (await pool.query(`SELECT * FROM schedule_overrides WHERE space_id = $1 AND override_date >= CURRENT_DATE AND override_date <= CURRENT_DATE + INTERVAL '90 days'`, [req.params.spaceId])).rows;
     let ics = 'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Workspaces//RU\r\nCALSCALE:GREGORIAN\r\nX-WR-CALNAME:Расписание\r\n';
     const toICSDate = (d, t) => `${d.replace(/-/g, '')}T${t.replace(/:/g, '').slice(0, 6)}`;
-
     for (let offset = 0; offset < 90; offset++) {
         const day = new Date(); day.setDate(day.getDate() + offset);
         const dow = day.getDay() === 0 ? 7 : day.getDay();
@@ -876,8 +688,7 @@ app.get('/api/schedule/:spaceId/ics', verifyJWT, requireSpaceAccess, async (req,
 // ================= ДОМАШНИЕ ЗАДАНИЯ =================
 app.get('/api/homework/:spaceId', verifyJWT, requireSpaceAccess, async (req, res) => {
     const hw = await pool.query(
-        `SELECT h.*, hc.attachment_url, hc.completed_at, (hc.id IS NOT NULL) AS is_done,
-                g.grade_value
+        `SELECT h.*, hc.attachment_url, hc.completed_at, (hc.id IS NOT NULL) AS is_done, g.grade_value
          FROM homeworks h
          LEFT JOIN homework_completions hc ON hc.homework_id = h.id AND hc.user_id = $2
          LEFT JOIN grades g ON g.homework_id = h.id AND g.student_user_id = $2
@@ -887,6 +698,7 @@ app.get('/api/homework/:spaceId', verifyJWT, requireSpaceAccess, async (req, res
     res.json(hw.rows);
 });
 
+// Статистика ДЗ — фильтруем скрытых для не-Root
 app.get('/api/homework/:id/stats', verifyJWT, async (req, res) => {
     const user = await getUserById(req.userId);
     const hw = await pool.query('SELECT * FROM homeworks WHERE id = $1', [req.params.id]);
@@ -896,6 +708,7 @@ app.get('/api/homework/:id/stats', verifyJWT, async (req, res) => {
     const isAdmin = await isSpaceAdmin(user, spaceId);
     if (!isAdmin) return res.status(403).json({ error: 'Только преподаватель/админ' });
 
+    const root = isRoot(user);
     const dueDate = hw.rows[0].due_date;
     const now = new Date();
     const dueDateObj = new Date(dueDate);
@@ -912,18 +725,15 @@ app.get('/api/homework/:id/stats', verifyJWT, async (req, res) => {
          LEFT JOIN homework_completions hc ON hc.homework_id = $1 AND hc.user_id = u.id
          LEFT JOIN grades g ON g.homework_id = $1 AND g.student_user_id = u.id
          WHERE sm.space_id = $2 AND u.is_teacher = FALSE
+           AND ($3::boolean = TRUE OR COALESCE(sm.hidden_from_journal, FALSE) = FALSE)
          ORDER BY (hc.id IS NULL) ASC, u.full_name ASC`,
-        [req.params.id, spaceId]
+        [req.params.id, spaceId, root]
     );
 
     const students = r.rows.map(s => ({
-        id: s.id,
-        fullName: s.full_name,
-        username: s.username,
+        id: s.id, fullName: s.full_name, username: s.username,
         avatarEmoji: s.avatar_emoji || '👤',
-        isDone: !!s.is_done,
-        completedAt: s.completed_at,
-        attachmentUrl: s.attachment_url,
+        isDone: !!s.is_done, completedAt: s.completed_at, attachmentUrl: s.attachment_url,
         gradeValue: s.grade_value,
         status: s.is_done ? 'done' : (isOverdue ? 'overdue' : 'pending')
     }));
@@ -931,7 +741,6 @@ app.get('/api/homework/:id/stats', verifyJWT, async (req, res) => {
     const totalCount = students.length;
     const completedCount = students.filter(s => s.isDone).length;
     const percentage = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
-
     res.json({ percentage, completed: completedCount, total: totalCount, students, dueDate, isOverdue, subjectName: hw.rows[0].subject_name });
 });
 
@@ -955,10 +764,7 @@ app.delete('/api/homework/:id', verifyJWT, async (req, res) => {
 app.post('/api/homework/:id/complete', verifyJWT, async (req, res) => {
     const user = await getUserById(req.userId);
     const { attachment } = req.body;
-    const r = await pool.query(
-        `INSERT INTO homework_completions (homework_id, user_id, attachment_url) VALUES ($1,$2,$3) ON CONFLICT (homework_id, user_id) DO UPDATE SET attachment_url = EXCLUDED.attachment_url, completed_at = NOW() RETURNING *`,
-        [req.params.id, user.id, attachment || null]
-    );
+    const r = await pool.query(`INSERT INTO homework_completions (homework_id, user_id, attachment_url) VALUES ($1,$2,$3) ON CONFLICT (homework_id, user_id) DO UPDATE SET attachment_url = EXCLUDED.attachment_url, completed_at = NOW() RETURNING *`, [req.params.id, user.id, attachment || null]);
     res.json(r.rows[0]);
 });
 
@@ -984,54 +790,34 @@ app.get('/api/grades/:spaceId', verifyJWT, requireSpaceAccess, async (req, res) 
                 [spaceId, ownerUserId, user.id]
             );
             if (!share.rows.length) return res.status(403).json({ error: 'Нет доступа к оценкам' });
-
             const r = await pool.query(
-                `SELECT g.*, u.full_name AS teacher_name FROM grades g
-                 LEFT JOIN users u ON u.id = g.teacher_id
-                 WHERE g.space_id = $1 AND g.student_user_id = $2
-                 ORDER BY g.lesson_date DESC`,
+                `SELECT g.*, u.full_name AS teacher_name FROM grades g LEFT JOIN users u ON u.id = g.teacher_id WHERE g.space_id = $1 AND g.student_user_id = $2 ORDER BY g.lesson_date DESC`,
                 [spaceId, ownerUserId]
             );
             return res.json(r.rows);
         }
 
         // Свои оценки — проверяем, не скрыт ли
-        const member = await pool.query(
-            'SELECT hidden_from_journal FROM space_members WHERE space_id = $1 AND user_id = $2',
-            [spaceId, user.id]
-        );
+        const member = await pool.query('SELECT hidden_from_journal FROM space_members WHERE space_id = $1 AND user_id = $2', [spaceId, user.id]);
         const isHidden = member.rows[0]?.hidden_from_journal;
-
         if (isHidden) {
-            const hasShare = await pool.query(
-                'SELECT 1 FROM grade_shares WHERE space_id = $1 AND owner_user_id = $2 LIMIT 1',
-                [spaceId, user.id]
-            );
-            if (!hasShare.rows.length) {
-                return res.status(403).json({
-                    error: 'hidden',
-                    message: 'Вы скрыты. Нажмите «Начать делиться», чтобы восстановить доступ к своим оценкам.'
-                });
-            }
+            const hasShare = await pool.query('SELECT 1 FROM grade_shares WHERE space_id = $1 AND owner_user_id = $2 LIMIT 1', [spaceId, user.id]);
+            if (!hasShare.rows.length) return res.status(403).json({ error: 'hidden', message: 'Вы скрыты. Нажмите «Начать делиться», чтобы восстановить доступ к своим оценкам.' });
         }
 
         try {
             await pool.query(
-                `UPDATE grades SET student_user_id = $1, updated_at = NOW()
-                 WHERE space_id = $2 AND student_user_id IS NULL
-                   AND LOWER(TRIM(student_name)) = LOWER(TRIM($3))`,
+                `UPDATE grades SET student_user_id = $1, updated_at = NOW() WHERE space_id = $2 AND student_user_id IS NULL AND LOWER(TRIM(student_name)) = LOWER(TRIM($3))`,
                 [user.id, spaceId, user.full_name]
             );
         } catch (e) {}
 
         const r = await pool.query(
-            `SELECT g.*, u.full_name AS teacher_name FROM grades g
-             LEFT JOIN users u ON u.id = g.teacher_id
-             WHERE g.space_id = $1
-               AND (
-                   g.student_user_id = $2
-                   OR (g.student_user_id IS NULL AND LOWER(TRIM(g.student_name)) = LOWER(TRIM($3)))
-               )
+            `SELECT g.*, u.full_name AS teacher_name FROM grades g LEFT JOIN users u ON u.id = g.teacher_id
+             WHERE g.space_id = $1 AND (
+                 g.student_user_id = $2
+                 OR (g.student_user_id IS NULL AND LOWER(TRIM(g.student_name)) = LOWER(TRIM($3)))
+             )
              ORDER BY g.lesson_date DESC`,
             [spaceId, user.id, user.full_name]
         );
@@ -1039,8 +825,8 @@ app.get('/api/grades/:spaceId', verifyJWT, requireSpaceAccess, async (req, res) 
     }
 
     // ============ УЧИТЕЛЬ ============
-    const isRoot = user.username === 'root_teacher';
-    const hiddenFilter = isRoot ? '' : `AND (sm.hidden_from_journal = FALSE OR sm.hidden_from_journal IS NULL)`;
+    const root = isRoot(user);
+    const hiddenFilter = root ? '' : `AND (sm.hidden_from_journal = FALSE OR sm.hidden_from_journal IS NULL)`;
 
     let query, params;
     if (isSuperAdmin(user)) {
@@ -1076,7 +862,6 @@ app.get('/api/grades/:spaceId', verifyJWT, requireSpaceAccess, async (req, res) 
             params = [spaceId, user.id];
         }
     }
-
     const r = await pool.query(query, params);
     res.json(r.rows);
 });
@@ -1086,17 +871,33 @@ app.post('/api/grades', verifyJWT, async (req, res) => {
     if (!user.is_teacher) return res.status(403).json({ error: 'Только для учителей' });
 
     const { spaceId, studentName, studentUserId, subjectName, gradeValue, attendance, lessonDate, homeworkId, comment } = req.body;
-    if (!spaceId || !studentName || !subjectName || !lessonDate) {
-        return res.status(400).json({ error: 'Заполните поля' });
+    if (!spaceId || !studentName || !subjectName || !lessonDate) return res.status(400).json({ error: 'Заполните поля' });
+
+    // Проверяем, не скрыт ли ученик (для не-Root)
+    if (!isRoot(user)) {
+        let checkUserId = studentUserId;
+        if (!checkUserId) {
+            const m = await pool.query(
+                `SELECT id FROM users WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1)) AND is_teacher = FALSE LIMIT 1`,
+                [studentName]
+            );
+            checkUserId = m.rows[0]?.id;
+        }
+        if (checkUserId) {
+            const hiddenCheck = await pool.query(
+                'SELECT 1 FROM space_members WHERE space_id = $1 AND user_id = $2 AND hidden_from_journal = TRUE',
+                [spaceId, checkUserId]
+            );
+            if (hiddenCheck.rows.length) {
+                return res.status(400).json({ error: 'Ученик скрыт из журнала — оценку выставить нельзя' });
+            }
+        }
     }
 
     let finalStudentUserId = studentUserId || null;
     if (!finalStudentUserId) {
         try {
-            const match = await pool.query(
-                `SELECT id FROM users WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1)) AND is_teacher = FALSE LIMIT 1`,
-                [studentName]
-            );
+            const match = await pool.query(`SELECT id FROM users WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1)) AND is_teacher = FALSE LIMIT 1`, [studentName]);
             if (match.rows.length) finalStudentUserId = match.rows[0].id;
         } catch (e) {}
     }
@@ -1110,11 +911,9 @@ app.post('/api/grades', verifyJWT, async (req, res) => {
              RETURNING *`,
             [spaceId, finalStudentUserId, studentName, subjectName, user.id, gradeValue || null, attendance || 'present', lessonDate, homeworkId || null, comment || null]
         );
-
         if (gradeValue && finalStudentUserId) {
             push.notifyGrade(pool, finalStudentUserId, subjectName, gradeValue).catch(() => {});
         }
-
         res.json(r.rows[0]);
     } catch (e) {
         console.error('Ошибка сохранения оценки:', e.message);
@@ -1125,24 +924,13 @@ app.post('/api/grades', verifyJWT, async (req, res) => {
 app.patch('/api/grades/:id', verifyJWT, async (req, res) => {
     const user = await getUserById(req.userId);
     if (!user.is_teacher) return res.status(403).json({ error: 'Только для учителей' });
-
     const grade = await pool.query('SELECT * FROM grades WHERE id = $1', [req.params.id]);
     if (!grade.rows.length) return res.status(404).json({ error: 'Оценка не найдена' });
-
     const g = grade.rows[0];
-    if (g.teacher_id !== user.id && !isSuperAdmin(user)) {
-        return res.status(403).json({ error: 'Нет прав' });
-    }
-
+    if (g.teacher_id !== user.id && !isSuperAdmin(user)) return res.status(403).json({ error: 'Нет прав' });
     const { gradeValue, attendance, comment } = req.body;
-    const r = await pool.query(
-        'UPDATE grades SET grade_value = COALESCE($1, grade_value), attendance = COALESCE($2, attendance), comment = COALESCE($3, comment), updated_at = NOW() WHERE id = $4 RETURNING *',
-        [gradeValue, attendance, comment, req.params.id]
-    );
-
-    if (gradeValue && g.student_user_id) {
-        push.notifyGrade(pool, g.student_user_id, g.subject_name, gradeValue).catch(() => {});
-    }
+    const r = await pool.query('UPDATE grades SET grade_value = COALESCE($1, grade_value), attendance = COALESCE($2, attendance), comment = COALESCE($3, comment), updated_at = NOW() WHERE id = $4 RETURNING *', [gradeValue, attendance, comment, req.params.id]);
+    if (gradeValue && g.student_user_id) push.notifyGrade(pool, g.student_user_id, g.subject_name, gradeValue).catch(() => {});
     res.json(r.rows[0]);
 });
 
@@ -1158,10 +946,7 @@ app.delete('/api/grades/:id', verifyJWT, async (req, res) => {
 
 app.get('/api/teacher-subjects/:spaceId', verifyJWT, requireSpaceAccess, async (req, res) => {
     const user = req.currentUser;
-    const r = await pool.query(
-        'SELECT * FROM teacher_subjects WHERE space_id = $1 AND teacher_id = $2 ORDER BY subject_name',
-        [req.params.spaceId, user.id]
-    );
+    const r = await pool.query('SELECT * FROM teacher_subjects WHERE space_id = $1 AND teacher_id = $2 ORDER BY subject_name', [req.params.spaceId, user.id]);
     res.json(r.rows);
 });
 
@@ -1171,10 +956,7 @@ app.post('/api/teacher-subjects', verifyJWT, async (req, res) => {
     const { spaceId, subjectName } = req.body;
     if (!spaceId || !subjectName) return res.status(400).json({ error: 'Заполните поля' });
     try {
-        const r = await pool.query(
-            'INSERT INTO teacher_subjects (space_id, teacher_id, subject_name) VALUES ($1, $2, $3) ON CONFLICT (space_id, teacher_id, subject_name) DO NOTHING RETURNING *',
-            [spaceId, user.id, subjectName]
-        );
+        const r = await pool.query('INSERT INTO teacher_subjects (space_id, teacher_id, subject_name) VALUES ($1, $2, $3) ON CONFLICT (space_id, teacher_id, subject_name) DO NOTHING RETURNING *', [spaceId, user.id, subjectName]);
         res.json(r.rows[0] || { ok: true });
     } catch (e) { res.status(500).json({ error: 'Ошибка' }); }
 });
@@ -1193,30 +975,18 @@ app.get('/api/chat/:spaceId/messages', verifyJWT, requireSpaceAccess, async (req
     const search = req.query.q;
     let query, params;
     if (search) {
-        query = `SELECT cm.*, u.full_name, u.username, u.is_teacher, u.avatar_emoji
-                 FROM chat_messages cm JOIN users u ON u.id = cm.user_id
-                 WHERE cm.space_id = $1 AND cm.message ILIKE $2
-                 ORDER BY cm.created_at DESC LIMIT 100`;
+        query = `SELECT cm.*, u.full_name, u.username, u.is_teacher, u.avatar_emoji FROM chat_messages cm JOIN users u ON u.id = cm.user_id WHERE cm.space_id = $1 AND cm.message ILIKE $2 ORDER BY cm.created_at DESC LIMIT 100`;
         params = [req.params.spaceId, '%' + search + '%'];
     } else {
-        query = `SELECT cm.*, u.full_name, u.username, u.is_teacher, u.avatar_emoji
-                 FROM chat_messages cm JOIN users u ON u.id = cm.user_id
-                 WHERE cm.space_id = $1 ORDER BY cm.created_at DESC LIMIT 50`;
+        query = `SELECT cm.*, u.full_name, u.username, u.is_teacher, u.avatar_emoji FROM chat_messages cm JOIN users u ON u.id = cm.user_id WHERE cm.space_id = $1 ORDER BY cm.created_at DESC LIMIT 50`;
         params = [req.params.spaceId];
     }
     const r = await pool.query(query, params);
     const messages = r.rows.reverse();
-
     const ids = messages.map(m => m.id);
     if (ids.length) {
-        const reactions = await pool.query(
-            `SELECT message_id, emoji, user_id FROM message_reactions WHERE message_id = ANY($1::uuid[])`,
-            [ids]
-        );
-        const files = await pool.query(
-            `SELECT id, message_id, original_name, mime, size, key FROM files WHERE message_id = ANY($1::uuid[])`,
-            [ids]
-        );
+        const reactions = await pool.query(`SELECT message_id, emoji, user_id FROM message_reactions WHERE message_id = ANY($1::uuid[])`, [ids]);
+        const files = await pool.query(`SELECT id, message_id, original_name, mime, size, key FROM files WHERE message_id = ANY($1::uuid[])`, [ids]);
         const filesMap = {};
         for (const f of files.rows) {
             if (!filesMap[f.message_id]) filesMap[f.message_id] = [];
@@ -1236,11 +1006,7 @@ app.get('/api/chat/:spaceId/messages', verifyJWT, requireSpaceAccess, async (req
 });
 
 app.post('/api/chat/:spaceId/mark-read', verifyJWT, requireSpaceAccess, async (req, res) => {
-    await pool.query(
-        `INSERT INTO chat_read_state (user_id, space_id, last_read_at) VALUES ($1, $2, NOW())
-         ON CONFLICT (user_id, space_id) DO UPDATE SET last_read_at = NOW()`,
-        [req.userId, req.params.spaceId]
-    );
+    await pool.query(`INSERT INTO chat_read_state (user_id, space_id, last_read_at) VALUES ($1, $2, NOW()) ON CONFLICT (user_id, space_id) DO UPDATE SET last_read_at = NOW()`, [req.userId, req.params.spaceId]);
     res.json({ ok: true });
 });
 
@@ -1248,38 +1014,25 @@ app.get('/api/chat/unread', verifyJWT, async (req, res) => {
     const userId = req.userId;
     const user = await getUserById(userId);
     let spaces;
-    if (isSuperAdmin(user)) {
-        spaces = (await pool.query('SELECT id FROM spaces')).rows;
-    } else {
-        spaces = (await pool.query('SELECT space_id AS id FROM space_members WHERE user_id = $1', [userId])).rows;
-    }
+    if (isSuperAdmin(user)) spaces = (await pool.query('SELECT id FROM spaces')).rows;
+    else spaces = (await pool.query('SELECT space_id AS id FROM space_members WHERE user_id = $1', [userId])).rows;
     const result = {};
     for (const s of spaces) {
         const state = await pool.query('SELECT last_read_at FROM chat_read_state WHERE user_id = $1 AND space_id = $2', [userId, s.id]);
         const lastRead = state.rows[0]?.last_read_at || new Date(0);
-        const count = await pool.query(
-            'SELECT COUNT(*)::int AS c FROM chat_messages WHERE space_id = $1 AND created_at > $2 AND user_id != $3',
-            [s.id, lastRead, userId]
-        );
+        const count = await pool.query('SELECT COUNT(*)::int AS c FROM chat_messages WHERE space_id = $1 AND created_at > $2 AND user_id != $3', [s.id, lastRead, userId]);
         result[s.id] = count.rows[0].c;
     }
     res.json(result);
 });
 
-// ================= РЕАКЦИИ =================
 app.post('/api/messages/:messageId/react', verifyJWT, async (req, res) => {
     const { emoji } = req.body;
     if (!emoji) return res.status(400).json({ error: 'Не указан эмодзи' });
     try {
-        await pool.query(
-            `INSERT INTO message_reactions (message_id, user_id, emoji) VALUES ($1, $2, $3)
-             ON CONFLICT (message_id, user_id) DO UPDATE SET emoji = EXCLUDED.emoji`,
-            [req.params.messageId, req.userId, emoji]
-        );
+        await pool.query(`INSERT INTO message_reactions (message_id, user_id, emoji) VALUES ($1, $2, $3) ON CONFLICT (message_id, user_id) DO UPDATE SET emoji = EXCLUDED.emoji`, [req.params.messageId, req.userId, emoji]);
         const msg = await pool.query('SELECT space_id FROM chat_messages WHERE id = $1', [req.params.messageId]);
-        if (msg.rows.length) {
-            io.to(`space:${msg.rows[0].space_id}`).emit('reaction_updated', { messageId: req.params.messageId });
-        }
+        if (msg.rows.length) io.to(`space:${msg.rows[0].space_id}`).emit('reaction_updated', { messageId: req.params.messageId });
         res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: 'Ошибка' }); }
 });
@@ -1291,14 +1044,10 @@ app.delete('/api/messages/:messageId/react', verifyJWT, async (req, res) => {
     res.json({ ok: true });
 });
 
-// ================= НАСТРОЙКИ УВЕДОМЛЕНИЙ =================
 app.get('/api/notification-prefs', verifyJWT, async (req, res) => {
     const r = await pool.query('SELECT * FROM user_notification_prefs WHERE user_id = $1', [req.userId]);
     if (!r.rows.length) {
-        const defaults = await pool.query(
-            'INSERT INTO user_notification_prefs (user_id) VALUES ($1) RETURNING *',
-            [req.userId]
-        );
+        const defaults = await pool.query('INSERT INTO user_notification_prefs (user_id) VALUES ($1) RETURNING *', [req.userId]);
         return res.json(defaults.rows[0]);
     }
     res.json(r.rows[0]);
@@ -1310,15 +1059,7 @@ app.post('/api/notification-prefs', verifyJWT, async (req, res) => {
         const r = await pool.query(
             `INSERT INTO user_notification_prefs (user_id, all_enabled, chat_enabled, schedule_enabled, lesson_reminder_enabled, new_homework_enabled, homework_deadline_enabled, grades_enabled, updated_at)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())
-             ON CONFLICT (user_id) DO UPDATE SET
-                all_enabled = EXCLUDED.all_enabled,
-                chat_enabled = EXCLUDED.chat_enabled,
-                schedule_enabled = EXCLUDED.schedule_enabled,
-                lesson_reminder_enabled = EXCLUDED.lesson_reminder_enabled,
-                new_homework_enabled = EXCLUDED.new_homework_enabled,
-                homework_deadline_enabled = EXCLUDED.homework_deadline_enabled,
-                grades_enabled = EXCLUDED.grades_enabled,
-                updated_at = NOW()
+             ON CONFLICT (user_id) DO UPDATE SET all_enabled = EXCLUDED.all_enabled, chat_enabled = EXCLUDED.chat_enabled, schedule_enabled = EXCLUDED.schedule_enabled, lesson_reminder_enabled = EXCLUDED.lesson_reminder_enabled, new_homework_enabled = EXCLUDED.new_homework_enabled, homework_deadline_enabled = EXCLUDED.homework_deadline_enabled, grades_enabled = EXCLUDED.grades_enabled, updated_at = NOW()
              RETURNING *`,
             [req.userId, all_enabled !== false, chat_enabled !== false, schedule_enabled !== false, lesson_reminder_enabled !== false, new_homework_enabled !== false, homework_deadline_enabled !== false, grades_enabled !== false]
         );
@@ -1326,26 +1067,16 @@ app.post('/api/notification-prefs', verifyJWT, async (req, res) => {
     } catch (e) { res.status(500).json({ error: 'Ошибка' }); }
 });
 
-// ================= ПРИСУТСТВИЕ =================
 app.post('/api/presence/active', verifyJWT, async (req, res) => {
-    await pool.query(
-        `INSERT INTO user_presence (user_id, last_seen_at, is_active) VALUES ($1, NOW(), TRUE)
-         ON CONFLICT (user_id) DO UPDATE SET last_seen_at = NOW(), is_active = TRUE`,
-        [req.userId]
-    );
+    await pool.query(`INSERT INTO user_presence (user_id, last_seen_at, is_active) VALUES ($1, NOW(), TRUE) ON CONFLICT (user_id) DO UPDATE SET last_seen_at = NOW(), is_active = TRUE`, [req.userId]);
     res.json({ ok: true });
 });
 
 app.post('/api/presence/inactive', verifyJWT, async (req, res) => {
-    await pool.query(
-        `INSERT INTO user_presence (user_id, last_seen_at, is_active) VALUES ($1, NOW(), FALSE)
-         ON CONFLICT (user_id) DO UPDATE SET last_seen_at = NOW(), is_active = FALSE`,
-        [req.userId]
-    );
+    await pool.query(`INSERT INTO user_presence (user_id, last_seen_at, is_active) VALUES ($1, NOW(), FALSE) ON CONFLICT (user_id) DO UPDATE SET last_seen_at = NOW(), is_active = FALSE`, [req.userId]);
     res.json({ ok: true });
 });
 
-// ================= ФАЙЛЫ / EXCEL / ЖУРНАЛ / СКРЫТИЕ =================
 registerFileRoutes(app, pool, verifyJWT, requireSpaceAccess);
 registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin);
 registerJournalRoutes(app, pool, verifyJWT, requireSpaceAccess);
@@ -1356,22 +1087,13 @@ const VALID_GAMES = ['2048', 'snake-arena', 'rpg-clicker', 'memory', 'reaction']
 
 app.get('/api/games-global/:gameId/leaderboard', verifyJWT, async (req, res) => {
     if (!VALID_GAMES.includes(req.params.gameId)) return res.json([]);
-    const r = await pool.query(
-        `SELECT u.id, u.full_name, u.username, MAX(gs.score)::int AS score
-         FROM game_scores gs JOIN users u ON u.id = gs.user_id
-         WHERE gs.game_id = $1 GROUP BY u.id, u.full_name, u.username
-         ORDER BY score DESC LIMIT 20`,
-        [req.params.gameId]
-    );
+    const r = await pool.query(`SELECT u.id, u.full_name, u.username, MAX(gs.score)::int AS score FROM game_scores gs JOIN users u ON u.id = gs.user_id WHERE gs.game_id = $1 GROUP BY u.id, u.full_name, u.username ORDER BY score DESC LIMIT 20`, [req.params.gameId]);
     res.json(r.rows);
 });
 
 app.get('/api/games/:spaceId/:gameId/leaderboard', verifyJWT, requireSpaceAccess, async (req, res) => {
     if (!VALID_GAMES.includes(req.params.gameId)) return res.json([]);
-    const r = await pool.query(
-        `SELECT gs.score, gs.updated_at, u.full_name, u.username FROM game_scores gs JOIN users u ON u.id = gs.user_id WHERE gs.space_id = $1 AND gs.game_id = $2 ORDER BY gs.score DESC LIMIT 20`,
-        [req.params.spaceId, req.params.gameId]
-    );
+    const r = await pool.query(`SELECT gs.score, gs.updated_at, u.full_name, u.username FROM game_scores gs JOIN users u ON u.id = gs.user_id WHERE gs.space_id = $1 AND gs.game_id = $2 ORDER BY gs.score DESC LIMIT 20`, [req.params.spaceId, req.params.gameId]);
     res.json(r.rows);
 });
 
@@ -1379,11 +1101,7 @@ app.post('/api/games/:spaceId/:gameId/score', verifyJWT, requireSpaceAccess, asy
     const { score } = req.body;
     if (!VALID_GAMES.includes(req.params.gameId)) return res.status(400).json({ error: 'Неизвестная игра' });
     if (typeof score !== 'number' || score < 0) return res.status(400).json({ error: 'Счёт' });
-    await pool.query(
-        `INSERT INTO game_scores (space_id, user_id, game_id, score) VALUES ($1,$2,$3,$4)
-         ON CONFLICT (space_id, user_id, game_id) DO UPDATE SET score = GREATEST(game_scores.score, EXCLUDED.score), updated_at = NOW()`,
-        [req.params.spaceId, req.currentUser.id, req.params.gameId, Math.floor(score)]
-    );
+    await pool.query(`INSERT INTO game_scores (space_id, user_id, game_id, score) VALUES ($1,$2,$3,$4) ON CONFLICT (space_id, user_id, game_id) DO UPDATE SET score = GREATEST(game_scores.score, EXCLUDED.score), updated_at = NOW()`, [req.params.spaceId, req.currentUser.id, req.params.gameId, Math.floor(score)]);
     res.json({ message: 'Сохранено' });
 });
 
@@ -1423,9 +1141,7 @@ io.on('connection', async (socket) => {
         if (!socket.userId || !socket.spaceId) return;
         const user = await getUserById(socket.userId);
         if (!user) return;
-        socket.to(`space:${socket.spaceId}`).emit('user_typing', {
-            userId: user.id, nickname: user.username, fullName: user.full_name
-        });
+        socket.to(`space:${socket.spaceId}`).emit('user_typing', { userId: user.id, nickname: user.username, fullName: user.full_name });
     });
 
     socket.on('typing_stop', () => {
@@ -1438,47 +1154,29 @@ io.on('connection', async (socket) => {
         const user = await getUserById(socket.userId);
         const settings = (await pool.query('SELECT * FROM system_settings WHERE id = 1')).rows[0];
         if (settings.exams_mode && !user.is_teacher) return;
-
         const member = await pool.query('SELECT * FROM space_members WHERE space_id = $1 AND user_id = $2', [socket.spaceId, user.id]);
         if (member.rows[0]?.muted_until && new Date(member.rows[0].muted_until) > new Date()) return;
-
         const text = String(message).slice(0, 2000);
-        const r = await pool.query(
-            'INSERT INTO chat_messages (space_id, user_id, message, reply_to_id) VALUES ($1,$2,$3,$4) RETURNING *',
-            [socket.spaceId, user.id, text, replyToId || null]
-        );
-
+        const r = await pool.query('INSERT INTO chat_messages (space_id, user_id, message, reply_to_id) VALUES ($1,$2,$3,$4) RETURNING *', [socket.spaceId, user.id, text, replyToId || null]);
         const messageId = r.rows[0].id;
-
         if (Array.isArray(fileIds) && fileIds.length) {
-            await pool.query(
-                'UPDATE files SET message_id = $1 WHERE id = ANY($2::uuid[]) AND user_id = $3',
-                [messageId, fileIds, user.id]
-            );
+            await pool.query('UPDATE files SET message_id = $1 WHERE id = ANY($2::uuid[]) AND user_id = $3', [messageId, fileIds, user.id]);
         }
-
         let mentionedIds = [];
         if (Array.isArray(mentions) && mentions.length) {
             for (const uid of mentions) {
                 try {
-                    await pool.query(
-                        'INSERT INTO message_mentions (message_id, mentioned_user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-                        [messageId, uid]
-                    );
+                    await pool.query('INSERT INTO message_mentions (message_id, mentioned_user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [messageId, uid]);
                     mentionedIds.push(uid);
                 } catch (e) {}
             }
         }
-
-        const files = fileIds && fileIds.length
-            ? (await pool.query('SELECT id, original_name, mime, size, key FROM files WHERE message_id = $1', [messageId])).rows
-            : [];
+        const files = fileIds && fileIds.length ? (await pool.query('SELECT id, original_name, mime, size, key FROM files WHERE message_id = $1', [messageId])).rows : [];
         const filesWithUrls = [];
         for (const f of files) {
             const url = await storage.getSignedFileUrl(f.key);
             filesWithUrls.push({ id: f.id, name: f.original_name, mime: f.mime, size: f.size, url });
         }
-
         let replyTo = null;
         if (replyToId) {
             const parent = await pool.query('SELECT id, message, user_id FROM chat_messages WHERE id = $1', [replyToId]);
@@ -1487,19 +1185,13 @@ io.on('connection', async (socket) => {
                 replyTo = { id: parent.rows[0].id, full_name: parentUser?.full_name, message: parent.rows[0].message };
             }
         }
-
         const fullMessage = {
-            ...r.rows[0],
-            full_name: user.full_name, username: user.username,
+            ...r.rows[0], full_name: user.full_name, username: user.username,
             is_teacher: user.is_teacher, avatar_emoji: user.avatar_emoji,
             reactions: [], files: filesWithUrls, reply_to: replyTo
         };
-
         io.to(`space:${socket.spaceId}`).emit('new_message', fullMessage);
-
-        push.notifyChatMessage(pool, socket.spaceId, user, text, {
-            replyToId, mentionedIds, messageId
-        }).catch(e => console.error('push chat:', e.message));
+        push.notifyChatMessage(pool, socket.spaceId, user, text, { replyToId, mentionedIds, messageId }).catch(e => console.error('push chat:', e.message));
     });
 
     socket.on('delete_message', async ({ messageId }) => {
@@ -1523,14 +1215,8 @@ app.get('/api/health', async (req, res) => {
     try {
         await pool.query('SELECT 1');
         const mem = process.memoryUsage();
-        res.json({
-            ok: true, db: 'ok',
-            memory: { rss: Math.round(mem.rss / 1024 / 1024) + ' MB', heap: Math.round(mem.heapUsed / 1024 / 1024) + ' MB' },
-            uptime: Math.round(process.uptime()) + ' s'
-        });
-    } catch (e) {
-        res.status(500).json({ ok: false, error: e.message });
-    }
+        res.json({ ok: true, db: 'ok', memory: { rss: Math.round(mem.rss / 1024 / 1024) + ' MB', heap: Math.round(mem.heapUsed / 1024 / 1024) + ' MB' }, uptime: Math.round(process.uptime()) + ' s' });
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 async function cleanupOldMessages() {
@@ -1542,27 +1228,18 @@ async function cleanupOldMessages() {
 setInterval(cleanupOldMessages, 24 * 60 * 60 * 1000);
 
 async function cleanupOldResetRequests() {
-    try {
-        await pool.query("DELETE FROM password_reset_requests WHERE created_at < NOW() - INTERVAL '24 hours' AND status != 'resolved'");
-    } catch (e) {}
+    try { await pool.query("DELETE FROM password_reset_requests WHERE created_at < NOW() - INTERVAL '24 hours' AND status != 'resolved'"); } catch (e) {}
 }
 setInterval(cleanupOldResetRequests, 60 * 60 * 1000);
 
-process.on('unhandledRejection', (err) => {
-    console.error('❌ UNHANDLED REJECTION:', err?.message || err);
-});
-process.on('uncaughtException', (err) => {
-    console.error('❌ UNCAUGHT EXCEPTION:', err?.message || err);
-});
+process.on('unhandledRejection', (err) => { console.error('❌ UNHANDLED REJECTION:', err?.message || err); });
+process.on('uncaughtException', (err) => { console.error('❌ UNCAUGHT EXCEPTION:', err?.message || err); });
 
 async function ensureSchema() {
     try {
         const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
         await pool.query(schema);
-    } catch (e) {
-        console.warn('⚠️ schema.sql не применён целиком:', e.message);
-    }
-
+    } catch (e) { console.warn('⚠️ schema.sql не применён целиком:', e.message); }
     const migrations = [
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT TRUE`,
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token VARCHAR(100)`,
