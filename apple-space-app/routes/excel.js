@@ -4,6 +4,7 @@
 const express = require('express');
 const ExcelJS = require('exceljs');
 const multer = require('multer');
+const JSZip = require('jszip');
 
 const upload = multer({
     storage: multer.memoryStorage(),
@@ -38,6 +39,66 @@ function parseCellValue(raw) {
     return { grade, attendance: att };
 }
 
+// ============================================================================
+//  Загрузка Excel с защитой от багов ExcelJS
+//  1) пробуем обычный load
+//  2) если упало — чистим буфер через jszip (удаляем comments/persons)
+//     и пробуем снова с ignoreNodes
+// ============================================================================
+async function safeLoadWorkbook(buffer) {
+    // Попытка 1: обычная загрузка
+    try {
+        const wb = new ExcelJS.Workbook();
+        await wb.xlsx.load(buffer);
+        return wb;
+    } catch (e) {
+        console.warn('ExcelJS load attempt 1 failed:', e.message);
+    }
+
+    // Попытка 2: с ignoreNodes
+    try {
+        const wb = new ExcelJS.Workbook();
+        await wb.xlsx.load(buffer, {
+            ignoreNodes: ['extLst', 'dataValidations']
+        });
+        return wb;
+    } catch (e) {
+        console.warn('ExcelJS load attempt 2 failed:', e.message);
+    }
+
+    // Попытка 3: чистим xlsx через jszip
+    try {
+        const zip = await JSZip.loadAsync(buffer);
+        const problematicParts = [
+            'xl/persons/person.xml',
+            'xl/threadedComments/threadedComment1.xml',
+            'xl/threadedComments/threadedComment2.xml'
+        ];
+        for (const path of Object.keys(zip.files)) {
+            // Удаляем всё, что связано с комментариями и persons
+            if (
+                path.includes('persons') ||
+                path.includes('threadedComment') ||
+                path.includes('comments') ||
+                path === 'xl/persons/person.xml'
+            ) {
+                zip.remove(path);
+            }
+        }
+        // Также удалим ссылки на них из [Content_Types].xml и workbook
+        const cleanedBuffer = await zip.generateAsync({ type: 'nodebuffer' });
+        const wb = new ExcelJS.Workbook();
+        await wb.xlsx.load(cleanedBuffer, {
+            ignoreNodes: ['extLst', 'dataValidations']
+        });
+        return wb;
+    } catch (e) {
+        console.warn('ExcelJS load attempt 3 failed:', e.message);
+    }
+
+    throw new Error('Не удалось прочитать Excel-файл. Попробуйте сохранить его заново в формате .xlsx через Excel или LibreOffice.');
+}
+
 function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
 
     // ========================================================================
@@ -70,7 +131,7 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
             const monthStart = `${year}-${String(m).padStart(2, '0')}-01`;
             const monthEnd = `${year}-${String(m).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
 
-            // ВАЖНО: TO_CHAR → дата приходит строкой "YYYY-MM-DD" без сдвигов
+            // Даты приходят строками без сдвигов
             const grades = (await pool.query(
                 `SELECT id, space_id, student_user_id, student_name, subject_name, teacher_id,
                         grade_value, attendance,
@@ -82,7 +143,11 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                 [spaceId, subject, monthStart, monthEnd]
             )).rows;
 
-            // Ученики: активные + виртуальные. Скрытые — только для Root.
+            console.log('excel export:', { spaceId, subject, month, gradesFound: grades.length });
+            if (grades.length) {
+                console.log('sample dates:', grades.slice(0, 3).map(g => g.lesson_date_str));
+            }
+
             const membersQuery = isRoot
                 ? `SELECT u.full_name FROM space_members sm
                    JOIN users u ON u.id = sm.user_id
@@ -99,7 +164,6 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                 [spaceId, subject]
             )).rows.map(r => r.student_name);
 
-            // Фильтр оценок скрытых учеников (для не-root)
             let filteredGrades = grades;
             if (!isRoot) {
                 const hiddenNames = (await pool.query(
@@ -219,7 +283,7 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
     });
 
     // ========================================================================
-    //  POST /api/grades/:spaceId/import — без изменений
+    //  POST /api/grades/:spaceId/import
     // ========================================================================
     app.post('/api/grades/:spaceId/import',
         verifyJWT,
@@ -234,8 +298,8 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
 
                 const { spaceId } = req.params;
 
-                const wb = new ExcelJS.Workbook();
-                await wb.xlsx.load(req.file.buffer);
+                // === Безопасная загрузка с fallback ===
+                const wb = await safeLoadWorkbook(req.file.buffer);
                 const ws = wb.worksheets[0];
                 if (!ws) return res.status(400).json({ error: 'Пустой файл' });
 
