@@ -26,11 +26,8 @@
         </div>
     </div>
 
-    <button class="theme-toggle-btn" id="themeToggle" title="Сменить тему">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-        </svg>
-    </button>
+    <!-- Круглая кнопка темы — видна только на ПК -->
+    <button class="theme-toggle-btn" id="themeToggle" title="Сменить тему">🌙</button>
 
     <div class="maintenance-screen" id="maintenanceScreen">
         <div class="icon">
@@ -210,9 +207,9 @@
 
                 <div class="settings-card">
                     <h3>Подтвердить нового коллегу</h3>
-                    <p style="color:var(--text-secondary); font-size:0.9rem;">Попросите коллегу назвать 4-значный код (T-8492) и введите его.</p>
+                    <p style="color:var(--text-secondary); font-size:0.9rem;">Попросите коллегу назвать 4 цифры кода. Буквы «T-» подставятся автоматически.</p>
                     <div style="display:flex; gap:10px; max-width: 320px;">
-                        <input type="text" id="colleagueCode" class="form-control" placeholder="T-0000">
+                        <input type="text" id="colleagueCode" class="form-control" placeholder="0000" maxlength="4" inputmode="numeric" style="text-align:center; letter-spacing:6px; font-weight:700;">
                         <button class="btn-primary" style="margin:0; width: 140px;" onclick="verifyColleague()">Подтвердить</button>
                     </div>
                 </div>
@@ -241,11 +238,29 @@
                     <button class="btn-secondary" onclick="openEditProfile()">Редактировать профиль</button>
                 </div>
 
+                <!-- КАРТОЧКА ТЕМЫ -->
+                <div class="settings-card" id="themeSettingsCard">
+                    <h3>Тема оформления</h3>
+                    <p style="color:var(--text-secondary); font-size:0.85rem; margin-top:0;">Выберите тему для этого устройства.</p>
+                    <div style="display:flex; gap:8px; margin-top:10px;">
+                        <button class="theme-option" data-theme-val="auto" style="flex:1;">Авто</button>
+                        <button class="theme-option" data-theme-val="light" style="flex:1;">Светлая</button>
+                        <button class="theme-option" data-theme-val="dark" style="flex:1;">Тёмная</button>
+                    </div>
+                </div>
+
                 <div class="settings-card">
                     <h3>Настройки пространства</h3>
                     <p style="color:var(--text-secondary); font-size:0.85rem;">Для выбранного пространства</p>
                     <button class="btn-secondary" style="margin-bottom:8px;" onclick="rotateInviteCode()">Сменить код приглашения</button>
                     <button class="btn-secondary" onclick="openBlacklist()">Чёрный список</button>
+                </div>
+
+                <!-- УДАЛЕНИЕ ПРОСТРАНСТВА — только для root_teacher -->
+                <div class="settings-card" id="deleteSpaceCard" style="display:none;">
+                    <h3 style="color:var(--danger);">Опасная зона</h3>
+                    <p style="color:var(--text-secondary); font-size:0.85rem;">Удаление пространства необратимо: все ученики будут исключены, файлы, сообщения, оценки и ДЗ удалены.</p>
+                    <button class="btn-danger" id="deleteSpaceBtn" style="margin-top:8px;">Удалить это пространство</button>
                 </div>
 
                 <div class="settings-card" id="pushSettingsContainer"></div>
@@ -287,8 +302,8 @@
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.5 3-6 6.5-6s6.5 2.5 6.5 6"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14c2.5 0 4.5 1.8 4.5 4"/></svg>
                 <span>Люди</span>
             </button>
-            <button class="tab-btn" data-tab="tab-auths" onclick="showTab('tab-auths', this)">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-4z"/><path d="M9 12l2 2 4-4"/></svg>
+            <button class="tab-btn" onclick="openMoreSheet()">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/></svg>
                 <span>Ещё</span>
             </button>
         </nav>
@@ -399,10 +414,21 @@
 
         // ===== Верификация =====
         async function verifyColleague() {
-            const code = document.getElementById('colleagueCode').value.trim(); if (!code) return;
-            try { const d = await apiPost('/api/teach/verify-colleague', { code }); showToast(d.message, 'success'); document.getElementById('colleagueCode').value = ''; }
+            let code = document.getElementById('colleagueCode').value.trim();
+            if (!code) return;
+            // Если введены только цифры — сервер сам добавит T-
+            try {
+                const d = await apiPost('/api/teach/verify-colleague', { code });
+                showToast(d.message, 'success');
+                document.getElementById('colleagueCode').value = '';
+            }
             catch (d) { showToast(d.error || 'Ошибка', 'error'); }
         }
+
+        // Автоочистка поля при вводе: только цифры
+        document.getElementById('colleagueCode')?.addEventListener('input', (e) => {
+            e.target.value = e.target.value.replace(/\D/g, '').slice(0, 4);
+        });
 
         async function loadResetRequests() {
             try {
@@ -438,7 +464,6 @@
                         </div>
                     `;
                 }
-                // Студент
                 return `
                     <div style="padding:12px;background:var(--input-bg);border-radius:12px;margin-bottom:8px;">
                         <div style="font-weight:600;margin-bottom:6px;">${escapeHtml(r.display_name)} ${r.username ? '(@' + escapeHtml(r.username) + ')' : ''}</div>
@@ -457,7 +482,6 @@
                 const r = await approvePasswordReset(id);
                 if (r.link) {
                     const fullUrl = location.origin + r.link;
-                    // Показываем окно со ссылкой
                     const root = document.getElementById('dynamicSheetRoot');
                     root.innerHTML = `
                         <div class="sheet show" id="dynamicSheet">
@@ -488,11 +512,10 @@
             navigator.clipboard.writeText(link).then(() => showToast('Скопировано', 'success')).catch(() => showToast('Ошибка копирования', 'error'));
         }
 
-        // Live-обновления
         socket.on('password_reset_request', () => { loadResetRequests(); });
         socket.on('password_reset_updated', () => { loadResetRequests(); });
 
-        // ===== Остальные вкладки =====
+        // ===== Вкладки =====
         function showTab(tabId, el) {
             document.querySelectorAll('.tab-section').forEach(s => s.classList.remove('active'));
             document.querySelectorAll('.sidebar-item, .bottom-tabbar .tab-btn').forEach(s => s.classList.remove('active'));
@@ -501,14 +524,68 @@
             loadTabContent(tabId);
         }
 
+        // ===== Bottom-sheet «Ещё» для мобильной навигации =====
+        function openMoreSheet() {
+            const root = document.getElementById('dynamicSheetRoot');
+            const tabs = [
+                { id: 'tab-spaces',   icon: '📁', label: 'Пространства' },
+                { id: 'tab-auths',    icon: '🛡️', label: 'Верификация' },
+                { id: 'tab-settings', icon: '⚙️', label: 'Настройки' }
+            ];
+            const currentActive = document.querySelector('.tab-section.active')?.id || '';
+
+            root.innerHTML = `
+                <div class="sheet show" id="dynamicSheet">
+                    <div class="sheet-handle"></div>
+                    <h2 class="app-title" style="font-size:1.2rem;margin-bottom:14px;">Все разделы</h2>
+                    <div style="display:flex;flex-direction:column;gap:6px;" id="moreSheetList">
+                        ${tabs.map(t => `
+                            <button class="btn-secondary" data-more-tab="${t.id}" style="margin:0;display:flex;align-items:center;gap:10px;justify-content:flex-start;${t.id === currentActive ? 'background:var(--accent-blue);color:#fff;' : ''}">
+                                <span style="font-size:1.2rem;">${t.icon}</span>
+                                <span>${t.label}</span>
+                            </button>
+                        `).join('')}
+                    </div>
+                    <button class="btn-secondary" style="margin-top:14px;" onclick="closeDynamicSheet()">Закрыть</button>
+                </div>`;
+            document.getElementById('sheetOverlay').classList.add('show');
+
+            root.querySelectorAll('[data-more-tab]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const tabId = btn.dataset.moreTab;
+                    closeDynamicSheet();
+                    showTab(tabId);
+                });
+            });
+        }
+
         function loadTabContent(tabId) {
             const spaceId = currentSpace?.id;
             if (tabId === 'tab-schedule') renderScheduleUnified(document.getElementById('tab-schedule'), spaceId, true);
             if (tabId === 'tab-hw') renderHomeworkTab(document.getElementById('tab-hw'), spaceId, true);
             if (tabId === 'tab-grades') renderGradesTab(document.getElementById('tab-grades'), spaceId, true);
             if (tabId === 'tab-members') renderMembersTab(document.getElementById('tab-members'), spaceId, true);
-            if (tabId === 'tab-settings') renderPushSettingsCard();
+            if (tabId === 'tab-settings') {
+                renderPushSettingsCard();
+                refreshThemeButtons();
+                renderDeleteSpaceCard();
+            }
             if (tabId === 'tab-auths') loadResetRequests();
+        }
+
+        // Показать карточку удаления пространства для root_teacher
+        function renderDeleteSpaceCard() {
+            const card = document.getElementById('deleteSpaceCard');
+            const btn = document.getElementById('deleteSpaceBtn');
+            if (!card || !btn) return;
+            if (!currentUser?.isRoot || !currentSpace) {
+                card.style.display = 'none';
+                return;
+            }
+            card.style.display = 'block';
+            btn.textContent = `Удалить «${currentSpace.name}»`;
+            // Обработчик назначаем один раз
+            btn.onclick = () => deleteSpace(currentSpace.id, currentSpace.name);
         }
 
         async function reloadSpaces() {
@@ -544,10 +621,14 @@
         function renderAllSpacesList() {
             const box = document.getElementById('allSpacesList');
             if (!mySpaces.length) { box.innerHTML = '<p class="empty-state">Пока нет ни одной группы.</p>'; return; }
+            const isRoot = !!currentUser?.isRoot;
             box.innerHTML = mySpaces.map(s => `
                 <div class="space-card" style="${currentSpace?.id === s.id ? 'border-color:#0088cc; border-width:2px;' : ''}" onclick="switchSpace('${s.id}')">
                     <span>${currentSpace?.id === s.id ? '● ' : ''}${escapeHtml(s.name)}</span>
-                    <span class="code-pill">${s.invite_code}</span>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span class="code-pill">${s.invite_code}</span>
+                        ${isRoot ? `<button class="btn-small" style="background:#ff453a;color:#fff;padding:4px 8px;font-size:0.75rem;" onclick="event.stopPropagation(); deleteSpace('${s.id}', '${escapeHtml(s.name).replace(/'/g, "\\'")}')">Удалить</button>` : ''}
+                    </div>
                 </div>`).join('');
         }
 
@@ -597,7 +678,6 @@
         }
 
         async function boot() {
-            // Сначала проверяем magic-ссылку
             if (location.search.includes('reset=')) {
                 document.getElementById('loginWrapper').style.display = 'flex';
                 await checkResetTokenInUrl();
