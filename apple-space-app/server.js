@@ -287,9 +287,12 @@ app.post('/api/auth/update-profile', verifyJWT, async (req, res) => {
 app.post('/api/teach/verify-colleague', verifyJWT, async (req, res) => {
     const verifier = await getUserById(req.userId);
     if (!isSuperAdmin(verifier)) return res.status(403).json({ error: 'Только подтверждённые' });
-    const { code } = req.body;
+    let { code } = req.body;
     if (!code) return res.status(400).json({ error: 'Введите код' });
-    const target = await pool.query('SELECT * FROM users WHERE verification_code = $1 AND is_teacher = true', [code.trim().toUpperCase()]);
+    code = String(code).trim().toUpperCase();
+    // Автоподстановка T- если пользователь ввёл только цифры
+    if (/^\d{4}$/.test(code)) code = 'T-' + code;
+    const target = await pool.query('SELECT * FROM users WHERE verification_code = $1 AND is_teacher = true', [code]);
     if (!target.rows.length) return res.status(400).json({ error: 'Код не найден' });
     if (target.rows[0].is_teacher_verified) return res.status(400).json({ error: 'Уже подтверждён' });
     await pool.query('UPDATE users SET is_teacher_verified = true, verified_by = $1 WHERE id = $2', [verifier.id, target.rows[0].id]);
@@ -444,6 +447,44 @@ app.post('/api/spaces', verifyJWT, async (req, res) => {
     const r = await pool.query('INSERT INTO spaces (name, invite_code, created_by) VALUES ($1, $2, $3) RETURNING *', [name.trim(), inviteCode, user.id]);
     await pool.query("INSERT INTO space_members (space_id, user_id, role) VALUES ($1, $2, 'admin')", [r.rows[0].id, user.id]);
     res.json(r.rows[0]);
+});
+
+// УДАЛЕНИЕ ПРОСТРАНСТВА — только root_teacher, с уведомлением участников
+app.delete('/api/spaces/:spaceId', verifyJWT, async (req, res) => {
+    const user = await getUserById(req.userId);
+    if (!isRoot(user)) return res.status(403).json({ error: 'Только Root может удалять пространства' });
+    const spaceId = req.params.spaceId;
+    const exists = await pool.query('SELECT id, name FROM spaces WHERE id = $1', [spaceId]);
+    if (!exists.rows.length) return res.status(404).json({ error: 'Пространство не найдено' });
+
+    // Собираем ключи файлов, чтобы почистить Object Storage
+    let fileKeys = [];
+    try {
+        const files = await pool.query('SELECT key FROM files WHERE space_id = $1', [spaceId]);
+        fileKeys = files.rows.map(r => r.key);
+    } catch (e) { /* тихо */ }
+
+    // Уведомляем участников ДО удаления (пока socket.io ещё может отправить)
+    io.to(`space:${spaceId}`).emit('space_deleted', { spaceId, name: exists.rows[0].name });
+
+    try {
+        // Каскадное удаление (в schema.sql все ссылки на spaces ON DELETE CASCADE)
+        await pool.query('DELETE FROM spaces WHERE id = $1', [spaceId]);
+    } catch (e) {
+        console.error('delete space:', e.message);
+        return res.status(500).json({ error: 'Ошибка удаления: ' + e.message });
+    }
+
+    // Асинхронно удаляем файлы из Object Storage (не блокируем ответ)
+    if (fileKeys.length) {
+        (async () => {
+            for (const key of fileKeys) {
+                try { await storage.deleteFile(key); } catch (e) {}
+            }
+        })();
+    }
+
+    res.json({ ok: true });
 });
 
 app.post('/api/spaces/join', verifyJWT, async (req, res) => {
@@ -814,7 +855,6 @@ app.get('/api/grades/:spaceId', verifyJWT, requireSpaceAccess, async (req, res) 
     const subject = req.query.subject;
     const ownerUserId = req.query.ownerUserId;
 
-    // ============ СТУДЕНТ ============
     if (!user.is_teacher) {
         if (ownerUserId && ownerUserId !== user.id) {
             const share = await pool.query(
@@ -836,7 +876,6 @@ app.get('/api/grades/:spaceId', verifyJWT, requireSpaceAccess, async (req, res) 
             if (!hasShare.rows.length) return res.status(403).json({ error: 'hidden', message: 'Вы скрыты. Нажмите «Начать делиться», чтобы восстановить доступ к своим оценкам.' });
         }
 
-        // Авто-привязка через SQL-функцию name_key
         try {
             await pool.query(
                 `UPDATE grades SET student_user_id = $1, updated_at = NOW()
@@ -844,9 +883,7 @@ app.get('/api/grades/:spaceId', verifyJWT, requireSpaceAccess, async (req, res) 
                    AND name_key(student_name) = name_key($3)`,
                 [user.id, spaceId, user.full_name]
             );
-        } catch (e) {
-            console.warn('auto-link grades:', e.message);
-        }
+        } catch (e) { console.warn('auto-link grades:', e.message); }
 
         const r = await pool.query(
             `SELECT g.*, u.full_name AS teacher_name
@@ -865,7 +902,6 @@ app.get('/api/grades/:spaceId', verifyJWT, requireSpaceAccess, async (req, res) 
         return res.json(r.rows);
     }
 
-    // ============ УЧИТЕЛЬ ============
     const root = isRoot(user);
     const hiddenFilter = root ? '' : `AND (sm.hidden_from_journal = FALSE OR sm.hidden_from_journal IS NULL)`;
 
@@ -918,8 +954,11 @@ app.post('/api/grades', verifyJWT, async (req, res) => {
         let checkUserId = studentUserId;
         if (!checkUserId) {
             const m = await pool.query(
-                `SELECT id FROM users WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1)) AND is_teacher = FALSE LIMIT 1`,
-                [studentName]
+                `SELECT u.id FROM users u
+                 JOIN space_members sm ON sm.user_id = u.id AND sm.space_id = $1
+                 WHERE u.is_teacher = FALSE AND name_key(u.full_name) = name_key($2)
+                 LIMIT 1`,
+                [spaceId, studentName]
             );
             checkUserId = m.rows[0]?.id;
         }
@@ -1131,6 +1170,7 @@ registerFileRoutes(app, pool, verifyJWT, requireSpaceAccess);
 registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin);
 registerJournalRoutes(app, pool, verifyJWT, requireSpaceAccess);
 registerHiddenRoutes(app, pool, verifyJWT, requireSpaceAccess, requireSpaceAdmin);
+push.registerPushRoutes(app, pool, verifyJWT, requireSpaceAccess);
 
 // ================= ИГРЫ =================
 const VALID_GAMES = ['2048', 'snake-arena', 'rpg-clicker', 'memory', 'reaction'];
