@@ -3,55 +3,90 @@
 // ---- Socket.io с токеном ----
 const socket = io({ query: { token: localStorage.getItem('token') || '' } });
 
-// ---- Тема: авто на телефоне, сохранённая в аккаунте на ПК ----
-(function initTheme() {
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+// ============================================================================
+//  ТЕМА
+//  - на ПК плавающая круглая кнопка #themeToggle (см. index.html)
+//  - на мобилке и для всех — карточка «Тема оформления» в Настройках
+// ============================================================================
+const _THEME_QUERY = window.matchMedia('(prefers-color-scheme: dark)');
 
-    function applyTheme(theme) {
-        document.documentElement.setAttribute('data-theme', theme);
-        const btn = document.getElementById('themeToggle');
-        if (btn) btn.textContent = theme === 'dark' ? '☀️' : '🌙';
-    }
+function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+}
 
-    function getEffectiveTheme() {
+function getUserTheme() {
+    try {
         const user = JSON.parse(localStorage.getItem('user') || '{}');
-        const userTheme = user.theme || 'auto';
+        return user.theme || 'auto';
+    } catch (e) { return 'auto'; }
+}
 
-        if (isMobile) {
-            return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-        }
-        if (userTheme === 'light' || userTheme === 'dark') return userTheme;
-        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-    }
+function getEffectiveTheme() {
+    const userTheme = getUserTheme();
+    if (userTheme === 'light' || userTheme === 'dark') return userTheme;
+    return _THEME_QUERY.matches ? 'dark' : 'light';
+}
 
+// Применяем сразу, чтобы не мигало
+applyTheme(getEffectiveTheme());
+
+_THEME_QUERY.addEventListener('change', () => {
+    if (getUserTheme() === 'auto') applyTheme(getEffectiveTheme());
+});
+
+// Переключение темы (из карточки Настроек или из круглой кнопки)
+async function setUserTheme(newTheme) {
+    if (!['auto', 'light', 'dark'].includes(newTheme)) return;
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    user.theme = newTheme;
+    localStorage.setItem('user', JSON.stringify(user));
     applyTheme(getEffectiveTheme());
-
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-        applyTheme(getEffectiveTheme());
-    });
-
-    document.addEventListener('DOMContentLoaded', () => {
-        const btn = document.getElementById('themeToggle');
-        if (!btn) return;
-        btn.addEventListener('click', async () => {
-            const current = document.documentElement.getAttribute('data-theme');
-            const next = current === 'dark' ? 'light' : 'dark';
-            applyTheme(next);
-            const user = JSON.parse(localStorage.getItem('user') || '{}');
-            user.theme = next;
-            localStorage.setItem('user', JSON.stringify(user));
-            try {
-                await apiPost('/api/auth/update-profile', {
-                    firstName: (user.fullName || '').split(' ')[0] || '',
-                    lastName: (user.fullName || '').split(' ').slice(1).join(' ') || '',
-                    nickname: user.isTeacher ? null : user.username,
-                    avatarEmoji: user.avatarEmoji,
-                    theme: next
-                });
-            } catch (e) { /* тихо */ }
+    refreshThemeButtons();
+    try {
+        await apiPost('/api/auth/update-profile', {
+            firstName: (user.fullName || '').split(' ')[0] || '',
+            lastName: (user.fullName || '').split(' ').slice(1).join(' ') || '',
+            nickname: user.isTeacher ? null : user.username,
+            avatarEmoji: user.avatarEmoji,
+            theme: newTheme
         });
+        showToast('Тема сохранена', 'success');
+    } catch (e) { /* тихо */ }
+}
+
+function refreshThemeButtons() {
+    const current = getUserTheme();
+    document.querySelectorAll('.theme-option').forEach(btn => {
+        const isActive = btn.dataset.themeVal === current;
+        btn.style.background = isActive ? 'var(--accent-blue)' : 'var(--input-bg)';
+        btn.style.color = isActive ? '#fff' : 'var(--text)';
+        btn.style.borderColor = isActive ? 'var(--accent-blue)' : 'var(--card-border)';
     });
-})();
+}
+
+function initThemeButtons() {
+    document.querySelectorAll('.theme-option').forEach(btn => {
+        btn.addEventListener('click', () => setUserTheme(btn.dataset.themeVal));
+    });
+    refreshThemeButtons();
+}
+
+// Круглая кнопка на ПК: тап — переключение light↔dark
+function initThemeToggleButton() {
+    const btn = document.getElementById('themeToggle');
+    if (!btn) return;
+    const updateIcon = () => {
+        const current = document.documentElement.getAttribute('data-theme');
+        btn.textContent = current === 'dark' ? '☀️' : '🌙';
+    };
+    updateIcon();
+    btn.addEventListener('click', async () => {
+        const current = document.documentElement.getAttribute('data-theme');
+        const next = current === 'dark' ? 'light' : 'dark';
+        await setUserTheme(next);
+        updateIcon();
+    });
+}
 
 // ---- API helpers ----
 function authHeaders() {
@@ -97,6 +132,17 @@ async function apiDelete(url) {
         throw err;
     }
     return res.json();
+}
+
+// Устойчивый JSON-геттер: не падает, если сервер вернул HTML/404
+async function apiGetJSON(url, fallback = null) {
+    try {
+        const r = await fetch(url, { headers: authHeaders() });
+        if (!r.ok) return fallback;
+        const ct = r.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) return fallback;
+        return await r.json();
+    } catch (e) { return fallback; }
 }
 
 // ---- Self-ping ----
@@ -424,15 +470,11 @@ async function uploadFiles(files, spaceId) {
 }
 
 // ============================================================================
-//  ВОССТАНОВЛЕНИЕ ПАРОЛЯ (локально, через учителей)
+//  ВОССТАНОВЛЕНИЕ ПАРОЛЯ
 // ============================================================================
-
-// Запрос на восстановление — со страницы входа
 async function requestPasswordReset(login) {
     return apiPost('/api/auth/request-password-reset', { login });
 }
-
-// Проверка статуса запроса (для polling на странице ввода кода)
 async function getPasswordResetStatus(login) {
     try {
         const res = await fetch(`/api/auth/password-reset-status/${encodeURIComponent(login)}`);
@@ -440,18 +482,12 @@ async function getPasswordResetStatus(login) {
         return await res.json();
     } catch (e) { return { status: 'none' }; }
 }
-
-// Ученик сбрасывает пароль по коду
 async function resetPasswordWithCode(login, code, newPassword) {
     return apiPost('/api/auth/reset-password-with-code', { login, code, newPassword });
 }
-
-// Учитель сбрасывает пароль по токену (после подтверждения коллегой)
 async function resetPasswordWithToken(token, newPassword) {
     return apiPost('/api/auth/reset-password-with-token', { token, newPassword });
 }
-
-// Проверка magic-токена (для страницы reset учителя)
 async function checkResetToken(token) {
     try {
         const res = await fetch(`/api/auth/check-reset-token/${encodeURIComponent(token)}`);
@@ -459,18 +495,12 @@ async function checkResetToken(token) {
         return await res.json();
     } catch (e) { return { valid: false }; }
 }
-
-// Учитель получает список pending-запросов
 async function getPasswordResetRequests() {
     return apiGet('/api/password-reset-requests');
 }
-
-// Учитель подтверждает запрос
 async function approvePasswordReset(requestId) {
     return apiPost(`/api/password-reset-requests/${requestId}/approve`, {});
 }
-
-// Учитель отклоняет запрос
 async function declinePasswordReset(requestId) {
     return apiDelete(`/api/password-reset-requests/${requestId}`);
 }
@@ -486,13 +516,25 @@ function urlBase64ToUint8Array(base64) {
 }
 
 function pushSupported() {
-    return ('serviceWorker' in navigator) && ('PushManager' in window);
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
+    // Push API требует secure context (HTTPS или localhost)
+    if (location.protocol !== 'https:' &&
+        location.hostname !== 'localhost' &&
+        location.hostname !== '127.0.0.1') {
+        return false;
+    }
+    return true;
 }
 
 async function getPushPublicKey() {
-    const r = await fetch('/api/push/public-key');
-    const j = await r.json();
-    return j.key;
+    try {
+        const r = await fetch('/api/push/public-key');
+        if (!r.ok) return null;
+        const ct = r.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) return null;
+        const j = await r.json();
+        return j.key || null;
+    } catch (e) { return null; }
 }
 
 async function isPushEnabled() {
@@ -506,13 +548,13 @@ async function isPushEnabled() {
 }
 
 async function enablePush() {
-    if (!pushSupported()) throw new Error('Браузер не поддерживает пуши');
+    if (!pushSupported()) throw new Error('Браузер не поддерживает пуши (нужен HTTPS)');
     const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
     await navigator.serviceWorker.ready;
     const perm = await Notification.requestPermission();
     if (perm !== 'granted') throw new Error('Разрешение не выдано');
     const key = await getPushPublicKey();
-    if (!key) throw new Error('Публичный ключ не получен');
+    if (!key) throw new Error('Пуши не настроены на сервере. Обратитесь к администратору.');
 
     let sub = await reg.pushManager.getSubscription();
     if (!sub) {
@@ -535,22 +577,19 @@ async function disablePush() {
 }
 
 async function getPushMute() {
-    try { return await apiGet('/api/push/mute'); }
-    catch (e) { return { muted_until: null, muted_forever: false }; }
+    return (await apiGetJSON('/api/push/mute')) || { muted_until: null, muted_forever: false };
 }
 async function setPushMute(duration) { return apiPost('/api/push/mute', { duration }); }
 async function clearPushMute() { return apiDelete('/api/push/mute'); }
 
 async function getChatMute(spaceId) {
-    try { return await apiGet(`/api/spaces/${spaceId}/chat-mute`); }
-    catch (e) { return { muted_until: null, muted_forever: false }; }
+    return (await apiGetJSON(`/api/spaces/${spaceId}/chat-mute`)) || { muted_until: null, muted_forever: false };
 }
 async function setChatMute(spaceId, duration) { return apiPost(`/api/spaces/${spaceId}/chat-mute`, { duration }); }
 async function clearChatMute(spaceId) { return apiDelete(`/api/spaces/${spaceId}/chat-mute`); }
 
 async function getNotificationPrefs() {
-    try { return await apiGet('/api/notification-prefs'); }
-    catch (e) { return null; }
+    return await apiGetJSON('/api/notification-prefs');
 }
 async function saveNotificationPrefs(prefs) {
     return apiPost('/api/notification-prefs', prefs);
@@ -612,11 +651,29 @@ async function updateBadges() {
 
 socket.on('unread_count_update', () => { updateBadges(); });
 
+// Автоматически убираем пользователя из "своей группы", если пространство удалили
+socket.on('space_deleted', ({ spaceId, name }) => {
+    try {
+        const activeId = localStorage.getItem('activeSpaceId');
+        if (activeId === spaceId) {
+            localStorage.removeItem('activeSpaceId');
+        }
+        showToast(`Пространство «${name || ''}» удалено администратором`, 'warning', 6000);
+        setTimeout(() => location.reload(), 1200);
+    } catch (e) {}
+});
+
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
     });
 }
+
+// Инициализация кнопок после загрузки DOM
+document.addEventListener('DOMContentLoaded', () => {
+    initThemeToggleButton();
+    initThemeButtons();
+});
 
 // CSS-анимации
 (function injectToastStyles() {
