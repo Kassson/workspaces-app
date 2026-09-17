@@ -22,7 +22,6 @@
     --success: #30d158;
     --warning: #ff9f0a;
 
-    /* Плашки-предупреждения (светлая тема) */
     --warning-bg: #fff3cd;
     --warning-text: #664d03;
 
@@ -58,7 +57,6 @@
     --success: #30d158;
     --warning: #ff9f0a;
 
-    /* Плашки-предупреждения (тёмная тема) */
     --warning-bg: #4a3a10;
     --warning-text: #ffd166;
 
@@ -109,7 +107,7 @@ a {
 
 .hidden { display: none !important; }
 
-/* ===================== ТЕМА ===================== */
+/* ===================== КРУГЛАЯ КНОПКА ТЕМЫ (только на ПК) ===================== */
 .theme-toggle-btn {
     position: fixed;
     top: 16px;
@@ -125,6 +123,7 @@ a {
     justify-content: center;
     box-shadow: var(--shadow-sm);
     transition: transform var(--transition), background var(--transition);
+    font-size: 20px;
 }
 .theme-toggle-btn:active { transform: scale(0.9); }
 
@@ -526,6 +525,20 @@ a {
     font-size: 0.95rem;
 }
 
+/* ===================== КАРТОЧКА «ТЕМА ОФОРМЛЕНИЯ» ===================== */
+.theme-option {
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px solid var(--card-border);
+    background: var(--input-bg);
+    color: var(--text);
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition);
+    font-size: 0.9rem;
+}
+.theme-option:active { transform: scale(0.97); }
+
 /* ===================== РАСПИСАНИЕ ===================== */
 .segmented-control {
     display: inline-flex;
@@ -666,6 +679,24 @@ a {
     gap: 8px;
     flex-wrap: wrap;
     align-items: center;
+}
+
+/* ===================== МЕНЮ «ОТМЕТИТЬ ВЫПОЛНЕННЫМ» ===================== */
+.hw-done-menu {
+    position: relative;
+    display: inline-block;
+}
+.hw-done-dropdown {
+    animation: hwMenuFade 0.15s ease;
+}
+@keyframes hwMenuFade {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.hw-done-dropdown button:hover,
+.hw-done-dropdown label:hover {
+    background: var(--accent-blue-light);
+    color: var(--accent-blue);
 }
 
 .hw-photo-preview {
@@ -1095,7 +1126,8 @@ a {
 }
 .day-header.today {
     color: #30d158 !important;
-    background: rgba(48, 209, 88, 0.12) !important;
+    background: rgba(48, 209, 88, 0.18) !important;
+    font-weight: 800;
 }
 .day-header.future {
     color: var(--accent-blue);
@@ -1196,7 +1228,9 @@ a {
 
     .main-content { padding: 16px 14px 90px; }
     .page-title { font-size: 1.3rem; }
-    .theme-toggle-btn { display: none; }
+
+    /* На мобилке круглая кнопка темы СКРЫТА — тема переключается через Настройки */
+    .theme-toggle-btn { display: none !important; }
 
     .chat-wrap {
         height: calc(100vh - 250px);
@@ -1212,6 +1246,7 @@ a {
 }
 
 @media (min-width: 769px) {
+    /* Круглая кнопка темы только на ПК */
     .theme-toggle-btn { display: flex; }
 
     .sheet {
