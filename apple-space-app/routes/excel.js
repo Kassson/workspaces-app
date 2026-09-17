@@ -28,10 +28,59 @@ function formatMonthLabel(mk) {
 }
 
 // ============================================================================
+//  СЛОВАРЬ СИНОНИМОВ ИМЁН
+//  Даня → даниил, Саша → александр, Паша → павел, ...
+//  Применяется при дедупликации, чтобы «Даня Иванов» и «Даниил Иванов»
+//  считались одним учеником.
+// ============================================================================
+const NAME_ALIASES = {
+    'даня': 'даниил', 'данила': 'даниил', 'даниил': 'даниил',
+    'саша': 'александр', 'шура': 'александр', 'александр': 'александр',
+    'паша': 'павел', 'павел': 'павел',
+    'дима': 'дмитрий', 'митя': 'дмитрий', 'дмитрий': 'дмитрий',
+    'костя': 'константин', 'константин': 'константин',
+    'леша': 'алексей', 'лёша': 'алексей', 'алексей': 'алексей',
+    'макс': 'максим', 'максим': 'максим',
+    'ваня': 'иван', 'иван': 'иван',
+    'сережа': 'сергей', 'серёжа': 'сергей', 'сергей': 'сергей',
+    'рома': 'роман', 'ромка': 'роман', 'роман': 'роман',
+    'коля': 'николай', 'николай': 'николай',
+    'вася': 'василий', 'василий': 'василий',
+    'петя': 'петр', 'пётр': 'петр', 'петр': 'петр',
+    'егорка': 'егор', 'егор': 'егор',
+    'толя': 'анатолий', 'анатолий': 'анатолий',
+    'гриша': 'григорий', 'григорий': 'григорий',
+    'боря': 'борис', 'борис': 'борис',
+    'витя': 'виктор', 'виктор': 'виктор',
+    'влад': 'владислав', 'слава': 'владислав', 'владислав': 'владислав',
+    'гоша': 'георгий', 'георгий': 'георгий',
+    'женя': 'евгений', 'евгений': 'евгений',
+    'леня': 'леонид', 'леонид': 'леонид',
+    'матя': 'матвей', 'матвей': 'матвей',
+    'миша': 'михаил', 'михаил': 'михаил',
+    'настя': 'анастасия', 'анастасия': 'анастасия',
+    'наташа': 'наталья', 'наталья': 'наталья',
+    'оля': 'ольга', 'ольга': 'ольга',
+    'света': 'светлана', 'светлана': 'светлана',
+    'таня': 'татьяна', 'татьяна': 'татьяна',
+    'юля': 'юлия', 'юлия': 'юлия',
+    'ира': 'ирина', 'ирина': 'ирина',
+    'катя': 'екатерина', 'екатерина': 'екатерина',
+    'лена': 'елена', 'елена': 'елена',
+    'люда': 'людмила', 'людмила': 'людмила',
+    'маша': 'мария', 'мария': 'мария',
+    'софа': 'софья', 'сона': 'софья', 'софья': 'софья'
+};
+
+function normalizeWord(w) {
+    const low = String(w).toLowerCase().replace(/ё/g, 'е');
+    return NAME_ALIASES[low] || low;
+}
+
+// ============================================================================
 //  nameKey() — КЛЮЧ ДЛЯ ДЕДУПЛИКАЦИИ
-//  Первые два слова, регистр вниз, ё→е, первые два слова сортируются
-//  между собой. Задача — чтобы «Гордеев Семён» и «Семён Гордеев» дали
-//  ОДИН ключ. НЕ использовать для сортировки A-Z — см. surnameSortKey.
+//  Первые два слова, регистр вниз, ё→е, синонимы имён, сортировка первых
+//  двух слов между собой. НЕ для сортировки A-Z!
 // ============================================================================
 function nameKey(fullName) {
     if (!fullName) return '';
@@ -43,16 +92,16 @@ function nameKey(fullName) {
         .split(' ')
         .filter(Boolean);
     if (!parts.length) return '';
-    if (parts.length === 1) return parts[0];
-    const firstTwo = [parts[0], parts[1]].sort();
+    const first = normalizeWord(parts[0]);
+    if (parts.length === 1) return first;
+    const second = normalizeWord(parts[1]);
+    const firstTwo = [first, second].sort();
     return firstTwo.join(' ');
 }
 
 // ============================================================================
 //  surnameSortKey() — КЛЮЧ ДЛЯ СОРТИРОВКИ A-Z ПО ФАМИЛИИ
-//  НЕ переставляет первые два слова. В русской школе ФИО = «Фамилия Имя
-//  Отчество», поэтому сортировка по строке = сортировка по фамилии.
-//  "Гордеев Семен Валерьевич" → "гордеев семен валерьевич"
+//  Первое слово = фамилия. Без перестановки слов.
 // ============================================================================
 function surnameSortKey(fullName) {
     if (!fullName) return '';
@@ -153,7 +202,6 @@ function buildJournalWorkbook({ subject, month, students = [], grades = [], incl
         ws.getColumn(1 + d).width = 5;
     }
 
-    // Пустой шаблон — только шапка
     if (!includeStudents) {
         for (let c = 1; c <= avgCellCol; c++) {
             ws.getCell(headerRow, c).border = {
@@ -173,8 +221,6 @@ function buildJournalWorkbook({ subject, month, students = [], grades = [], incl
         ws.getCell(row, 1).value = st;
         ws.getCell(row, 1).font = { bold: true };
 
-        // Оценки ищем по дедуп-ключу nameKey — чтобы поймать варианты
-        // написания имени одного и того же ученика
         const stKey = nameKey(st);
         const studentGrades = gradesList.filter(g => nameKey(g.student_name) === stKey);
 
@@ -275,8 +321,6 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                      WHERE sm.space_id = $1 AND u.is_teacher = FALSE AND sm.hidden_from_journal = TRUE`,
                     [spaceId]
                 )).rows.map(r => r.full_name);
-                // Скрытых сравниваем по дедуп-ключу nameKey — чтобы «Гордеев Семён»
-                // и «Гордеев Семен Валерьевич» считались одним учеником
                 const hiddenKeys = new Set(hiddenNames.map(n => nameKey(n)));
                 filteredGrades = grades.filter(g => !hiddenKeys.has(nameKey(g.student_name)));
             }
@@ -292,8 +336,9 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
 
             // ================================================================
             //  АВТОСОРТИРОВКА A→Я ПО ФАМИЛИИ
-            //  Дедуп по nameKey (ловит «Гордеев Семён» / «Семён Гордеев»),
+            //  Дедуп по nameKey (ловит «Даня Иванов» / «Даниил Иванов»),
             //  финальная сортировка по surnameSortKey (первое слово = фамилия).
+            //  Прямое < / > вместо localeCompare — идентично на всех браузерах.
             // ================================================================
             const seenKeys = new Set();
             const orderedStudents = [];
@@ -305,9 +350,11 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                 orderedStudents.push(n);
             }
 
-            orderedStudents.sort((a, b) =>
-                surnameSortKey(a).localeCompare(surnameSortKey(b), 'ru')
-            );
+            orderedStudents.sort((a, b) => {
+                const ka = surnameSortKey(a);
+                const kb = surnameSortKey(b);
+                return ka < kb ? -1 : ka > kb ? 1 : 0;
+            });
 
             const wb = buildJournalWorkbook({
                 subject,
@@ -422,7 +469,6 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                     }
                 }
 
-                // Участники пространства — для привязки user_id
                 const spaceMembers = (await pool.query(
                     `SELECT u.id, u.full_name FROM space_members sm
                      JOIN users u ON u.id = sm.user_id
@@ -430,7 +476,6 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                     [spaceId]
                 )).rows;
 
-                // Хелпер: ищет участника по дедуп-ключу name_key
                 function localNameKey(fullName) {
                     if (!fullName) return '';
                     const parts = String(fullName)
@@ -439,8 +484,11 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                         .replace(/\s+/g, ' ')
                         .split(' ')
                         .filter(Boolean);
-                    if (parts.length < 2) return parts.join(' ');
-                    const firstTwo = [parts[0], parts[1]].sort();
+                    if (!parts.length) return '';
+                    const first = normalizeWord(parts[0]);
+                    if (parts.length === 1) return first;
+                    const second = normalizeWord(parts[1]);
+                    const firstTwo = [first, second].sort();
                     return firstTwo.join(' ');
                 }
                 function findMemberByKey(name) {
@@ -465,7 +513,6 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                     let studentName = String(ws.getCell(r, 1).value || '').trim();
                     if (!studentName) continue;
 
-                    // Нормализация имени по дедуп-ключу
                     const existingJournalName = await pool.query(
                         `SELECT student_name,
                                 LENGTH(student_name) - LENGTH(REPLACE(student_name, ' ', '')) AS word_count
@@ -555,18 +602,16 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                 }
 
                 // ============================================================
-                //  АВТОСОРТИРОВКА A→Я ПО ФАМИЛИИ после импорта
-                //  Пересчёт sort_order в journal_students по полной строке
-                //  (первое слово = фамилия) — синхронизирует БД с веб-журналом
-                //  и с последующим экспортом.
+                //  АВТОСОРТИРОВКА A→Я ПО ФАМИЛИИ после импорта.
+                //  COLLATE "C" — побайтовая сортировка, совпадает с JS < / >.
                 // ============================================================
                 try {
                     await pool.query(
                         `WITH ordered AS (
                             SELECT id,
                                    ROW_NUMBER() OVER (
-                                       ORDER BY LOWER(REPLACE(student_name, 'ё', 'е')) ASC,
-                                                student_name ASC
+                                       ORDER BY LOWER(REPLACE(student_name, 'ё', 'е')) COLLATE "C" ASC,
+                                                student_name COLLATE "C" ASC
                                    ) AS rn
                             FROM journal_students
                             WHERE space_id = $1 AND subject_name = $2
