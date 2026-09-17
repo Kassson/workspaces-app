@@ -27,11 +27,8 @@
         </div>
     </div>
 
-    <button class="theme-toggle-btn" id="themeToggle" title="Сменить тему">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-        </svg>
-    </button>
+    <!-- Круглая кнопка темы — видна только на ПК -->
+    <button class="theme-toggle-btn" id="themeToggle" title="Сменить тему">🌙</button>
 
     <div class="maintenance-screen" id="maintenanceScreen">
         <div class="icon">
@@ -159,6 +156,17 @@
                         </div>
                     </div>
                     <button class="btn-secondary" onclick="openEditProfile()">Редактировать профиль</button>
+                </div>
+
+                <!-- КАРТОЧКА ТЕМЫ -->
+                <div class="settings-card" id="themeSettingsCard">
+                    <h3>Тема оформления</h3>
+                    <p style="color:var(--text-secondary); font-size:0.85rem; margin-top:0;">Выберите тему для этого устройства.</p>
+                    <div style="display:flex; gap:8px; margin-top:10px;">
+                        <button class="theme-option" data-theme-val="auto" style="flex:1;">Авто</button>
+                        <button class="theme-option" data-theme-val="light" style="flex:1;">Светлая</button>
+                        <button class="theme-option" data-theme-val="dark" style="flex:1;">Тёмная</button>
+                    </div>
                 </div>
 
                 <div class="settings-card" id="spaceActionsCard">
@@ -332,7 +340,7 @@
             if (tabId === 'tab-members') renderMembersTab(document.getElementById('tab-members'), spaceId, isAdmin);
             if (tabId === 'tab-chat') renderChatTab(document.getElementById('tab-chat'), spaceId, isAdmin, currentUser?.id);
             if (tabId === 'tab-games') { if (!window.activeGame) renderGamesMenu(document.getElementById('tab-games')); }
-            if (tabId === 'tab-settings') { renderSpaceActions(); renderPushSettingsCard(); }
+            if (tabId === 'tab-settings') { renderSpaceActions(); renderPushSettingsCard(); refreshThemeButtons(); }
         }
 
         async function reloadSpaces() {
