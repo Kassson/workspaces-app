@@ -1,30 +1,24 @@
 // ============================================================================
 //  sw.js — Service Worker
-//  HTML и JS — network-first (всегда свежие).
-//  CSS, иконки — cache-first с фоновым обновлением.
-//  Новый SW активируется мгновенно + оповещает клиентов.
+//  Network-first для ВСЕГО. Мгновенная активация. Оповещение клиентов.
 // ============================================================================
-const CACHE_NAME = 'workspaces-v7';
-
-const OFFLINE_URLS = [
-    '/style.css',
-    '/manifest.json',
-    '/icon.svg'
-];
+const CACHE_NAME = 'workspaces-v9';
 
 self.addEventListener('install', (event) => {
+    // Не ждём закрытия вкладок — активируемся сразу
     self.skipWaiting();
-    event.waitUntil(
-        caches.open(CACHE_NAME).then((cache) => cache.addAll(OFFLINE_URLS).catch(() => {}))
-    );
+    event.waitUntil(Promise.resolve());
 });
 
 self.addEventListener('activate', (event) => {
     event.waitUntil(
         (async () => {
+            // Удаляем все старые кэши
             const names = await caches.keys();
             await Promise.all(names.filter(n => n !== CACHE_NAME).map(n => caches.delete(n)));
+            // Забираем контроль над всеми вкладками
             await self.clients.claim();
+            // Оповещаем клиентов — пусть перезагрузятся
             const clients = await self.clients.matchAll({ type: 'window' });
             clients.forEach(client => {
                 try { client.postMessage({ type: 'SW_UPDATED', version: CACHE_NAME }); } catch (e) {}
@@ -36,43 +30,28 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
     const url = new URL(event.request.url);
 
-    // API и sockets — не кэшируем
+    // API и sockets — не трогаем
     if (url.pathname.startsWith('/socket.io/') || url.pathname.startsWith('/api/')) return;
     if (event.request.method !== 'GET') return;
     if (url.origin !== self.location.origin) return;
 
-    const isHTML = event.request.mode === 'navigate' || url.pathname === '/' || url.pathname.endsWith('.html');
-    const isJS = url.pathname.endsWith('.js');
-
-    // HTML и JS — network-first (всегда свежие, кэш только как fallback)
-    if (isHTML || isJS) {
-        event.respondWith(
-            fetch(event.request)
-                .then((response) => {
-                    if (response && response.status === 200) {
-                        const clone = response.clone();
-                        caches.open(CACHE_NAME).then(c => c.put(event.request, clone)).catch(() => {});
-                    }
-                    return response;
-                })
-                .catch(() => caches.match(event.request).then(r => r || (isHTML ? caches.match('/') : undefined)))
-        );
-        return;
-    }
-
-    // CSS / иконки / манифест — cache-first с фоновым обновлением
+    // ВСЁ остальное — network-first. Кэш только как fallback оффлайн.
     event.respondWith(
-        caches.match(event.request).then((cached) => {
-            const fetchPromise = fetch(event.request).then((response) => {
+        fetch(event.request)
+            .then((response) => {
                 if (response && response.status === 200 && response.type === 'basic') {
                     const clone = response.clone();
-                    caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone)).catch(() => {});
+                    caches.open(CACHE_NAME).then(c => c.put(event.request, clone)).catch(() => {});
                 }
                 return response;
-            }).catch(() => cached);
-
-            return cached || fetchPromise;
-        })
+            })
+            .catch(() => {
+                return caches.match(event.request).then(cached => {
+                    if (cached) return cached;
+                    if (event.request.mode === 'navigate') return caches.match('/');
+                    return new Response('Offline', { status: 503 });
+                });
+            })
     );
 });
 
