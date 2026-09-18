@@ -85,7 +85,6 @@ function initThemeToggleButton() {
 
 // ============================================================================
 //  СКРЫТИЕ/ПОКАЗ БОКОВОГО МЕНЮ (только ПК)
-//  Состояние сохраняется в localStorage.sidebarHidden
 // ============================================================================
 function initSidebarToggle() {
     const dashboard = document.getElementById('dashboard');
@@ -97,7 +96,6 @@ function initSidebarToggle() {
         }
     } catch (e) {}
 
-    // Все кнопки с классом .sidebar-toggle (внутри сайдбара) — сворачивают
     document.querySelectorAll('.sidebar-toggle').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -106,7 +104,6 @@ function initSidebarToggle() {
         });
     });
 
-    // Все кнопки .sidebar-show-btn (плавающие) — разворачивают
     document.querySelectorAll('.sidebar-show-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -114,6 +111,18 @@ function initSidebarToggle() {
             try { localStorage.setItem('sidebarHidden', '0'); } catch (err) {}
         });
     });
+}
+
+// ============================================================================
+//  ЭКРАН ЗАГРУЗКИ — доступно до загрузки portal.js
+// ============================================================================
+function showLoadingScreen() {
+    const el = document.getElementById('loadingScreen');
+    if (el) el.classList.add('show');
+}
+function hideLoadingScreen() {
+    const el = document.getElementById('loadingScreen');
+    if (el) el.classList.remove('show');
 }
 
 // ============================================================================
@@ -187,7 +196,7 @@ async function apiGetJSON(url, fallback = null) {
     } catch (e) { return fallback; }
 }
 
-// ---- Self-ping (реже, чтобы не грузить сервер) ----
+// ---- Self-ping ----
 function startSelfPing() {
     const ping = () => fetch('/api/ping').catch(() => {});
     ping();
