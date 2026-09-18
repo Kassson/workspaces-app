@@ -1,39 +1,12 @@
 /* ===================== ОБЩАЯ ЛОГИКА ПОРТАЛА ===================== */
 
-let systemSettings = {};
 let currentSpace = null;
 window._hwStudents = [];
 window._currentHwStatsId = null;
 let _memberForStatusEdit = null;
 
-// showLoadingScreen / hideLoadingScreen теперь в shared.js
-
-async function loadAndApplySettings(user) {
-    try { systemSettings = await apiGet('/api/settings'); } catch (e) { systemSettings = {}; }
-    applyGlobalSettings(user);
-}
-socket.on('settings_updated', (s) => { systemSettings = s; applyGlobalSettings(window.__currentUser); });
-
-function applyGlobalSettings(user) {
-    window.__currentUser = user;
-    const banner = document.getElementById('announcementBanner');
-    if (banner) {
-        if (systemSettings.global_announcement) { banner.textContent = systemSettings.global_announcement; banner.classList.add('show'); }
-        else banner.classList.remove('show');
-    }
-    const maint = document.getElementById('maintenanceScreen');
-    const isPrivileged = user && user.isTeacher;
-    if (maint) {
-        if (systemSettings.maintenance_mode && !isPrivileged) maint.classList.add('show');
-        else maint.classList.remove('show');
-    }
-    document.querySelectorAll('.chat-input-row').forEach(el => {
-        el.classList.toggle('hidden', !!systemSettings.exams_mode && user && !user.isTeacher);
-    });
-    document.querySelectorAll('.chat-blocked-notice').forEach(el => {
-        el.classList.toggle('hidden', !(systemSettings.exams_mode && user && !user.isTeacher));
-    });
-}
+// systemSettings / loadAndApplySettings / applyGlobalSettings — в shared.js
+// showLoadingScreen / hideLoadingScreen — в shared.js
 
 // ===================== РАСПИСАНИЕ =====================
 let _scheduleViewMode = 'today';
