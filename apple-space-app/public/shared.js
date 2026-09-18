@@ -5,8 +5,6 @@ const socket = io({ query: { token: localStorage.getItem('token') || '' } });
 
 // ============================================================================
 //  ТЕМА
-//  - на ПК плавающая круглая кнопка #themeToggle (см. index.html)
-//  - на мобилке и для всех — карточка «Тема оформления» в Настройках
 // ============================================================================
 const _THEME_QUERY = window.matchMedia('(prefers-color-scheme: dark)');
 
@@ -27,14 +25,12 @@ function getEffectiveTheme() {
     return _THEME_QUERY.matches ? 'dark' : 'light';
 }
 
-// Применяем сразу, чтобы не мигало
 applyTheme(getEffectiveTheme());
 
 _THEME_QUERY.addEventListener('change', () => {
     if (getUserTheme() === 'auto') applyTheme(getEffectiveTheme());
 });
 
-// Переключение темы (из карточки Настроек или из круглой кнопки)
 async function setUserTheme(newTheme) {
     if (!['auto', 'light', 'dark'].includes(newTheme)) return;
     const user = JSON.parse(localStorage.getItem('user') || '{}');
@@ -71,7 +67,6 @@ function initThemeButtons() {
     refreshThemeButtons();
 }
 
-// Круглая кнопка на ПК: тап — переключение light↔dark
 function initThemeToggleButton() {
     const btn = document.getElementById('themeToggle');
     if (!btn) return;
@@ -85,6 +80,54 @@ function initThemeToggleButton() {
         const next = current === 'dark' ? 'light' : 'dark';
         await setUserTheme(next);
         updateIcon();
+    });
+}
+
+// ============================================================================
+//  СКРЫТИЕ/ПОКАЗ БОКОВОГО МЕНЮ (только ПК)
+//  Состояние сохраняется в localStorage.sidebarHidden
+// ============================================================================
+function initSidebarToggle() {
+    const dashboard = document.getElementById('dashboard');
+    if (!dashboard) return;
+
+    try {
+        if (localStorage.getItem('sidebarHidden') === '1') {
+            dashboard.classList.add('sidebar-hidden');
+        }
+    } catch (e) {}
+
+    // Все кнопки с классом .sidebar-toggle (внутри сайдбара) — сворачивают
+    document.querySelectorAll('.sidebar-toggle').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            dashboard.classList.add('sidebar-hidden');
+            try { localStorage.setItem('sidebarHidden', '1'); } catch (err) {}
+        });
+    });
+
+    // Все кнопки .sidebar-show-btn (плавающие) — разворачивают
+    document.querySelectorAll('.sidebar-show-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            dashboard.classList.remove('sidebar-hidden');
+            try { localStorage.setItem('sidebarHidden', '0'); } catch (err) {}
+        });
+    });
+}
+
+// ============================================================================
+//  ДИНАМИЧЕСКАЯ ЗАГРУЗКА portal.js
+//  Вызывается из boot() после успешной авторизации
+// ============================================================================
+function loadPortalJs() {
+    return new Promise((resolve, reject) => {
+        if (window.__portalLoaded) return resolve();
+        const s = document.createElement('script');
+        s.src = '/portal.js';
+        s.onload = () => { window.__portalLoaded = true; resolve(); };
+        s.onerror = () => reject(new Error('Не удалось загрузить portal.js'));
+        document.head.appendChild(s);
     });
 }
 
@@ -134,7 +177,6 @@ async function apiDelete(url) {
     return res.json();
 }
 
-// Устойчивый JSON-геттер: не падает, если сервер вернул HTML/404
 async function apiGetJSON(url, fallback = null) {
     try {
         const r = await fetch(url, { headers: authHeaders() });
@@ -149,7 +191,7 @@ async function apiGetJSON(url, fallback = null) {
 function startSelfPing() {
     const ping = () => fetch('/api/ping').catch(() => {});
     ping();
-    setInterval(ping, 25 * 60 * 1000); // было 10 мин, стало 25
+    setInterval(ping, 25 * 60 * 1000);
 }
 
 // ============================================================================
@@ -517,7 +559,6 @@ function urlBase64ToUint8Array(base64) {
 
 function pushSupported() {
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
-    // Push API требует secure context (HTTPS или localhost)
     if (location.protocol !== 'https:' &&
         location.hostname !== 'localhost' &&
         location.hostname !== '127.0.0.1') {
@@ -651,7 +692,6 @@ async function updateBadges() {
 
 socket.on('unread_count_update', () => { updateBadges(); });
 
-// Автоматически убираем пользователя из "своей группы", если пространство удалили
 socket.on('space_deleted', ({ spaceId, name }) => {
     try {
         const activeId = localStorage.getItem('activeSpaceId');
@@ -671,14 +711,12 @@ if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
     });
 
-    // Слушаем сообщения от SW
     navigator.serviceWorker.addEventListener('message', (event) => {
         if (event.data && event.data.type === 'SW_UPDATED') {
             showUpdateToast();
         }
     });
 
-    // Раз в час проверяем наличие новой версии SW
     setInterval(() => {
         navigator.serviceWorker.getRegistration('/').then(reg => {
             if (reg) reg.update().catch(() => {});
@@ -687,7 +725,6 @@ if ('serviceWorker' in navigator) {
 }
 
 function showUpdateToast() {
-    // Не показываем повторно в течение 5 минут
     const lastShown = parseInt(sessionStorage.getItem('sw_update_shown') || '0', 10);
     if (Date.now() - lastShown < 5 * 60 * 1000) return;
     sessionStorage.setItem('sw_update_shown', String(Date.now()));
@@ -725,8 +762,6 @@ function showUpdateToast() {
         location.reload();
     });
 
-    // Если пользователь не нажал — прячем через 15 секунд, но при следующем открытии
-    // SW снова вызовет SW_UPDATED и тост покажется опять
     setTimeout(() => {
         toast.style.opacity = '0';
         toast.style.transform = 'translateY(20px)';
@@ -734,10 +769,11 @@ function showUpdateToast() {
     }, 15000);
 }
 
-// Инициализация кнопок после загрузки DOM
+// Инициализация после загрузки DOM
 document.addEventListener('DOMContentLoaded', () => {
     initThemeToggleButton();
     initThemeButtons();
+    initSidebarToggle();
 });
 
 // CSS-анимации
