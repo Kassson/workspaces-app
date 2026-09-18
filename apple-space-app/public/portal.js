@@ -5,8 +5,7 @@ window._hwStudents = [];
 window._currentHwStatsId = null;
 let _memberForStatusEdit = null;
 
-// systemSettings / loadAndApplySettings / applyGlobalSettings — в shared.js
-// showLoadingScreen / hideLoadingScreen — в shared.js
+// systemSettings / loadAndApplySettings / applyGlobalSettings / showLoadingScreen / hideLoadingScreen — в shared.js
 
 // ===================== РАСПИСАНИЕ =====================
 let _scheduleViewMode = 'today';
@@ -149,7 +148,6 @@ function homeworkCardHtml(hw, isAdmin, spaceId) {
         : '';
     const isTeacher = !!currentUser?.isTeacher;
 
-    // Массив URL фото: новый формат attachment_urls, старый — attachment_url
     const photoUrls = Array.isArray(hw.attachment_urls) && hw.attachment_urls.length
         ? hw.attachment_urls.filter(u => !!u)
         : (hw.attachment_url ? [hw.attachment_url] : []);
@@ -212,7 +210,6 @@ function homeworkCardHtml(hw, isAdmin, spaceId) {
     </div>`;
 }
 
-// Открыть галерею фото ДЗ по клику на превью
 function openHwGallery(imgEl) {
     try {
         const raw = imgEl.getAttribute('data-photos');
@@ -299,7 +296,6 @@ async function openHomeworkStats(homeworkId) {
         const dash = (s.percentage / 100) * c;
         const canGrade = !!currentUser?.isTeacher;
 
-        // Собираем все фото со всех учеников в один список для навигации
         const allPhotoUrls = [];
         const perStudentUrls = {};
         s.students.forEach(st => {
@@ -413,9 +409,6 @@ function monthKeyOf(dateStr) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-// ============================================================================
-//  СИНОНИМЫ ИМЁН
-// ============================================================================
 const NAME_ALIASES = {
     'даня': 'даниил', 'данила': 'даниил', 'даниил': 'даниил',
     'саша': 'александр', 'шура': 'александр', 'александр': 'александр',
@@ -509,7 +502,7 @@ function buildMonthRange(minMonth, maxMonth) {
     return months;
 }
 
-window.__journal = { spaceId: null, subject: null, month: null, subjects: [], months: [], students: [], allGrades: [], subjGrades: [] };
+window.__journal = { spaceId: null, subject: null, month: null, subjects: [], months: [], students: [], allGrades: [], subjGrades: [], searchQuery: '' };
 window.__studentJournal = {};
 
 async function renderGradesTab(container, spaceId, isAdmin) {
@@ -562,9 +555,9 @@ async function renderTeacherJournal(container, spaceId) {
         }
 
         container.innerHTML = renderTeacherJournalHtml();
-        attachJournalHandlers();
         await loadJournalStudents(spaceId);
-        renderJournalTable();
+        renderJournalTable(window.__journal.searchQuery || '');
+        attachJournalHandlers();
     } catch (e) {
         container.innerHTML = `<p class="empty-state">Ошибка: ${escapeHtml(e.error || e.message)}</p>`;
     }
@@ -602,6 +595,14 @@ function renderTeacherJournalHtml() {
         <button class="btn-small" onclick="downloadJournalTemplate(window.__journal.spaceId)">Скачать шаблон</button>
         <button class="btn-small" onclick="importJournalExcel(window.__journal.spaceId)">Импорт Excel</button>
     </div>`;
+
+    // Поле поиска ученика
+    html += `<div class="journal-search">
+        <input type="text" id="journalSearch" class="journal-search-input" placeholder="🔍 Поиск ученика по ФИО…" autocomplete="off">
+        <button type="button" id="journalSearchClear" class="journal-search-clear" title="Очистить" style="display:none;">✕</button>
+    </div>`;
+    html += `<div id="journalSearchInfo" class="journal-search-info" style="display:none;"></div>`;
+
     html += `<div id="journalTableWrap" class="journal-table-wrap"></div>`;
     return html;
 }
@@ -611,6 +612,9 @@ function attachJournalHandlers() {
         btn.addEventListener('click', () => {
             const s = btn.dataset.subj;
             if (s === '__add__') { addJournalSubject(window.__journal.spaceId); return; }
+            // Сохраняем поиск
+            const si = document.getElementById('journalSearch');
+            window.__journal.searchQuery = si ? si.value : '';
             window.__journal.subject = s;
             window.__journal.month = null;
             renderTeacherJournal(document.getElementById('tab-grades'), window.__journal.spaceId);
@@ -619,6 +623,8 @@ function attachJournalHandlers() {
 
     document.querySelectorAll('[data-month]').forEach(btn => {
         btn.addEventListener('click', () => {
+            const si = document.getElementById('journalSearch');
+            window.__journal.searchQuery = si ? si.value : '';
             window.__journal.month = btn.dataset.month;
             renderTeacherJournal(document.getElementById('tab-grades'), window.__journal.spaceId);
         });
@@ -630,6 +636,8 @@ function attachJournalHandlers() {
             const months = window.__journal.months || [];
             const idx = months.indexOf(window.__journal.month);
             if (idx > 0) {
+                const si = document.getElementById('journalSearch');
+                window.__journal.searchQuery = si ? si.value : '';
                 window.__journal.month = months[idx - 1];
                 renderTeacherJournal(document.getElementById('tab-grades'), window.__journal.spaceId);
             }
@@ -642,9 +650,41 @@ function attachJournalHandlers() {
             const months = window.__journal.months || [];
             const idx = months.indexOf(window.__journal.month);
             if (idx < months.length - 1) {
+                const si = document.getElementById('journalSearch');
+                window.__journal.searchQuery = si ? si.value : '';
                 window.__journal.month = months[idx + 1];
                 renderTeacherJournal(document.getElementById('tab-grades'), window.__journal.spaceId);
             }
+        });
+    }
+
+    // Поиск ученика
+    const searchInput = document.getElementById('journalSearch');
+    const searchClear = document.getElementById('journalSearchClear');
+    if (searchInput) {
+        let searchTimeout = null;
+        searchInput.addEventListener('input', (e) => {
+            const v = e.target.value;
+            if (searchClear) searchClear.style.display = v ? 'flex' : 'none';
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                window.__journal.searchQuery = v;
+                renderJournalTable(v);
+            }, 150);
+        });
+        // Восстанавливаем значение
+        if (window.__journal.searchQuery) {
+            searchInput.value = window.__journal.searchQuery;
+            if (searchClear) searchClear.style.display = 'flex';
+        }
+    }
+    if (searchClear) {
+        searchClear.addEventListener('click', () => {
+            if (searchInput) searchInput.value = '';
+            searchClear.style.display = 'none';
+            window.__journal.searchQuery = '';
+            renderJournalTable('');
+            if (searchInput) searchInput.focus();
         });
     }
 }
@@ -656,6 +696,7 @@ async function addJournalSubject(spaceId) {
         await apiPost('/api/teacher-subjects', { spaceId, subjectName: name.trim() });
         window.__journal.subject = name.trim();
         window.__journal.month = null;
+        window.__journal.searchQuery = '';
         await renderTeacherJournal(document.getElementById('tab-grades'), spaceId);
     } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
 }
@@ -711,10 +752,10 @@ async function loadJournalStudents(spaceId) {
     }
 }
 
-function renderJournalTable() {
+function renderJournalTable(filterQuery = '') {
     const wrap = document.getElementById('journalTableWrap');
     if (!wrap) return;
-    const students = window.__journal.students || [];
+    const allStudents = window.__journal.students || [];
     const subjGrades = window.__journal.subjGrades || [];
     const month = window.__journal.month;
     if (!month) { wrap.innerHTML = '<p class="empty-state" style="padding:24px;">Выберите месяц</p>'; return; }
@@ -722,7 +763,40 @@ function renderJournalTable() {
     const days = getDaysOfMonth(month);
     const today = new Date();
     const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    if (!students.length) { wrap.innerHTML = '<p class="empty-state" style="padding:24px;">Нет учеников. Нажмите «+ ученик», чтобы добавить.</p>'; return; }
+    if (!allStudents.length) { wrap.innerHTML = '<p class="empty-state" style="padding:24px;">Нет учеников. Нажмите «+ ученик», чтобы добавить.</p>'; return; }
+
+    // Фильтр по запросу
+    const q = String(filterQuery || '').trim().toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ');
+    let students = allStudents;
+    if (q) {
+        const queryParts = q.split(' ').filter(Boolean);
+        students = allStudents.filter(name => {
+            const norm = String(name).toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ');
+            return queryParts.every(part => norm.includes(part));
+        });
+    }
+
+    // Информация о найденных
+    const infoBox = document.getElementById('journalSearchInfo');
+    if (infoBox) {
+        if (q) {
+            infoBox.style.display = 'block';
+            if (students.length) {
+                infoBox.textContent = `Найдено: ${students.length} из ${allStudents.length}`;
+                infoBox.style.color = 'var(--text-secondary)';
+            } else {
+                infoBox.textContent = 'Ученик не найден';
+                infoBox.style.color = 'var(--danger)';
+            }
+        } else {
+            infoBox.style.display = 'none';
+        }
+    }
+
+    if (!students.length) {
+        wrap.innerHTML = '<p class="empty-state" style="padding:24px;">Никого не найдено по запросу</p>';
+        return;
+    }
 
     let html = `<table><thead><tr><th style="min-width:180px;">Ученик</th>`;
     for (const d of days) {
@@ -765,6 +839,7 @@ function renderJournalTable() {
     html += `</tbody></table>`;
     wrap.innerHTML = html;
 
+    // Обводка сегодня
     const todayIdx = days.findIndex(d => d.date === todayStr);
     if (todayIdx >= 0) {
         const table = wrap.querySelector('table');
@@ -936,7 +1011,7 @@ async function journalAddStudent() {
     try {
         await apiPost('/api/journal-students', { spaceId, subjectName: subject, studentName: name.trim() });
         await loadJournalStudents(spaceId);
-        renderJournalTable();
+        renderJournalTable(window.__journal.searchQuery || '');
         showToast('Ученик добавлен', 'success');
     } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
 }
@@ -1342,8 +1417,11 @@ function renderChatTab(container, spaceId, isAdmin, currentUserId) {
         <div style="display:flex; gap:8px; margin-bottom:10px;">
             <input type="text" id="chatSearch" class="form-control" placeholder="Поиск по сообщениям..." style="flex:1;">
         </div>
-        <div class="chat-wrap">
+        <div class="chat-wrap" style="position:relative;">
             <div class="chat-messages" id="chatMessages"></div>
+            <button class="chat-scroll-down-btn" id="chatScrollDownBtn" title="Вниз" style="display:none;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
             <div id="typingIndicator" style="padding:4px 12px; font-size:12px; color:var(--text-secondary); min-height:18px;"></div>
             <div id="filePreviewContainer" style="padding:0 12px;"></div>
             <div class="chat-input-row">
@@ -1401,10 +1479,36 @@ function renderChatTab(container, spaceId, isAdmin, currentUserId) {
     };
     input.onblur = () => { clearTimeout(typingStopTimer); socket.emit('typing_stop'); };
 
+    // Кнопка «вниз»
+    const box = document.getElementById('chatMessages');
+    const scrollBtn = document.getElementById('chatScrollDownBtn');
+
+    function updateScrollBtn() {
+        if (!box || !scrollBtn) return;
+        const distFromBottom = box.scrollHeight - box.scrollTop - box.clientHeight;
+        scrollBtn.style.display = distFromBottom > 200 ? 'flex' : 'none';
+    }
+
+    if (box) box.addEventListener('scroll', updateScrollBtn, { passive: true });
+
+    if (scrollBtn) {
+        scrollBtn.addEventListener('click', () => {
+            if (box) box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
+        });
+    }
+
     socket.off('new_message'); socket.off('message_deleted'); socket.off('reaction_updated');
     socket.off('user_typing'); socket.off('user_stopped_typing');
-    socket.on('new_message', (msg) => { if (msg.space_id === spaceId) appendChatMessage(msg, isAdmin, currentUserId); });
-    socket.on('message_deleted', ({ messageId }) => { document.getElementById('msg-' + messageId)?.remove(); });
+    socket.on('new_message', (msg) => {
+        if (msg.space_id !== spaceId) return;
+        const wasNearBottom = box ? (box.scrollHeight - box.scrollTop - box.clientHeight < 150) : true;
+        appendChatMessage(msg, isAdmin, currentUserId);
+        if (wasNearBottom && box) {
+            setTimeout(() => box.scrollTop = box.scrollHeight, 0);
+        }
+        updateScrollBtn();
+    });
+    socket.on('message_deleted', ({ messageId }) => { document.getElementById('msg-' + messageId)?.remove(); updateScrollBtn(); });
     socket.on('reaction_updated', ({ messageId }) => { reloadMessageReactions(messageId); });
     socket.on('user_typing', ({ userId, nickname }) => { typingUsers.set(userId, { nickname }); renderTypingIndicator(); });
     socket.on('user_stopped_typing', ({ userId }) => { typingUsers.delete(userId); renderTypingIndicator(); });
@@ -1440,7 +1544,11 @@ async function loadChatHistory(spaceId, isAdmin, currentUserId, search = '') {
         if (!box) return;
         box.innerHTML = '';
         rows.forEach(m => appendChatMessage(m, isAdmin, currentUserId));
-        box.scrollTop = box.scrollHeight;
+        requestAnimationFrame(() => {
+            box.scrollTop = box.scrollHeight;
+            const scrollBtn = document.getElementById('chatScrollDownBtn');
+            if (scrollBtn) scrollBtn.style.display = 'none';
+        });
     } catch (e) {}
 }
 
