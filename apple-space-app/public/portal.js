@@ -1552,6 +1552,15 @@ async function loadChatHistory(spaceId, isAdmin, currentUserId, search = '') {
     } catch (e) {}
 }
 
+// Если пользователь и так был у низа чата, подтягиваем вниз после догрузки картинки
+// (её высота меняет scrollHeight уже после того, как мы проскроллили).
+function _pinChatBottomIfNear() {
+    const box = document.getElementById('chatMessages');
+    if (!box) return;
+    const distFromBottom = box.scrollHeight - box.scrollTop - box.clientHeight;
+    if (distFromBottom < 300) box.scrollTop = box.scrollHeight;
+}
+
 function appendChatMessage(m, isAdmin, currentUserId) {
     const box = document.getElementById('chatMessages');
     if (!box) return;
@@ -1565,7 +1574,7 @@ function appendChatMessage(m, isAdmin, currentUserId) {
         if (f.mime.startsWith('image/')) {
             const allUrls = m.files.filter(x => x.mime.startsWith('image/')).map(x => x.url);
             const myIdx = allUrls.indexOf(f.url);
-            return `<img src="${f.url}" style="max-width:200px;border-radius:10px;margin-top:6px;cursor:pointer;display:block;" onclick="openImageViewer(${JSON.stringify(allUrls).replace(/"/g, '&quot;')}, ${myIdx})">`;
+            return `<img src="${f.url}" style="max-width:200px;border-radius:10px;margin-top:6px;cursor:pointer;display:block;" onclick="openImageViewer(${JSON.stringify(allUrls).replace(/"/g, '&quot;')}, ${myIdx})" onload="_pinChatBottomIfNear()">`;
         }
         return `<a href="${f.url}" target="_blank" style="display:inline-block;padding:6px 10px;background:rgba(0,0,0,0.05);border-radius:8px;margin-top:6px;text-decoration:none;color:inherit;font-size:0.85rem;">${escapeHtml(f.name)} (${formatBytes(f.size)})</a>`;
     }).join('') : '';
@@ -1583,7 +1592,6 @@ function appendChatMessage(m, isAdmin, currentUserId) {
             ${isAdmin ? `<button class="btn-tiny" onclick="deleteChatMessage('${m.id}')">Удалить</button>` : ''}
         </div>`;
     box.appendChild(el);
-    box.scrollTop = box.scrollHeight;
 }
 
 function renderReactions(reactions, messageId) {
