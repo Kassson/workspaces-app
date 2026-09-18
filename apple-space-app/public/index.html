@@ -96,10 +96,12 @@
 
     <!-- Дашборд -->
     <div class="app-dashboard" id="dashboard">
+        <button class="sidebar-show-btn" id="sidebarShowBtn" title="Показать меню">›</button>
         <aside class="sidebar">
             <div class="sidebar-logo">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="28" height="28"><circle cx="256" cy="256" r="256" fill="#0088cc"/><g transform="translate(64, 64) scale(16)" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></g></svg>
-                Workspaces
+                <span>Workspaces</span>
+                <button class="sidebar-toggle" id="sidebarToggle" title="Скрыть меню">‹</button>
             </div>
             <div id="currentSpaceLabel" class="current-space-label">— выберите группу —</div>
 
@@ -158,7 +160,6 @@
                     <button class="btn-secondary" onclick="openEditProfile()">Редактировать профиль</button>
                 </div>
 
-                <!-- КАРТОЧКА ТЕМЫ -->
                 <div class="settings-card" id="themeSettingsCard">
                     <h3>Тема оформления</h3>
                     <p style="color:var(--text-secondary); font-size:0.85rem; margin-top:0;">Выберите тему для этого устройства.</p>
@@ -229,7 +230,6 @@
 
     <script src="/socket.io/socket.io.js"></script>
     <script src="shared.js"></script>
-    <script src="portal.js"></script>
     <script src="game.js"></script>
     <script>
         const errorMsg = document.getElementById('errorMsg');
@@ -290,7 +290,6 @@
             setTimeout(() => { localStorage.clear(); location.reload(); }, 150);
         }
 
-        // ===== Восстановление пароля =====
         function openForgotPassword() {
             document.getElementById('forgotLogin').value = document.getElementById('logInput').value || '';
             switchView('viewForgot');
@@ -411,15 +410,28 @@
                 hideLoadingScreen();
                 return;
             }
+            let user;
             try {
-                const { user } = await apiGet('/api/auth/me');
+                const r = await apiGet('/api/auth/me');
+                user = r.user;
                 currentUser = user;
                 localStorage.setItem('user', JSON.stringify(user));
             } catch (e) { logout(); return; }
 
+            // Грузим portal.js только теперь, когда авторизация подтверждена
+            try {
+                await loadPortalJs();
+            } catch (e) {
+                console.error('portal.js load failed:', e);
+                showToast('Не удалось загрузить портал', 'error');
+                hideLoadingScreen();
+                return;
+            }
+
             document.getElementById('loginWrapper').style.display = 'none';
             document.getElementById('dashboard').style.display = 'flex';
             renderProfile();
+            initSidebarToggle();
 
             await loadAndApplySettings(currentUser);
             await reloadSpaces();
