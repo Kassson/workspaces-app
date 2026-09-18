@@ -1,10 +1,9 @@
 /* ===================== ОБЩИЕ УТИЛИТЫ (студент + преподаватель) ===================== */
 
-// ---- Socket.io с токеном ----
 const socket = io({ query: { token: localStorage.getItem('token') || '' } });
 
 // ============================================================================
-//  ГЛОБАЛЬНЫЕ НАСТРОЙКИ (доступно до загрузки portal.js)
+//  ГЛОБАЛЬНЫЕ НАСТРОЙКИ
 // ============================================================================
 let systemSettings = {};
 
@@ -120,7 +119,7 @@ function initThemeToggleButton() {
 }
 
 // ============================================================================
-//  СКРЫТИЕ/ПОКАЗ БОКОВОГО МЕНЮ (только ПК)
+//  СКРЫТИЕ/ПОКАЗ БОКОВОГО МЕНЮ (ПК)
 // ============================================================================
 function initSidebarToggle() {
     const dashboard = document.getElementById('dashboard');
@@ -162,16 +161,90 @@ function hideLoadingScreen() {
 }
 
 // ============================================================================
-//  ДИНАМИЧЕСКАЯ ЗАГРУЗКА portal.js
+//  ДИНАМИЧЕСКАЯ ЗАГРУЗКА portal.js (с версией, чтобы не цеплялся кэш)
 // ============================================================================
+const APP_ASSET_VERSION = '9';
+
 function loadPortalJs() {
     return new Promise((resolve, reject) => {
         if (window.__portalLoaded) return resolve();
         const s = document.createElement('script');
-        s.src = '/portal.js';
+        s.src = '/portal.js?v=' + APP_ASSET_VERSION;
         s.onload = () => { window.__portalLoaded = true; resolve(); };
         s.onerror = () => reject(new Error('Не удалось загрузить portal.js'));
         document.head.appendChild(s);
+    });
+}
+
+// ============================================================================
+//  АВТООБНОВЛЕНИЕ SERVICE WORKER
+//  При обнаружении нового SW — сразу активируем и перезагружаем страницу.
+// ============================================================================
+let _swReloading = false;
+
+function reloadOnce() {
+    if (_swReloading) return;
+    _swReloading = true;
+    setTimeout(() => { location.reload(); }, 100);
+}
+
+if ('serviceWorker' in navigator) {
+    // 1) Регистрируем SW — сразу после загрузки страницы
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' })
+            .then(reg => {
+                // Проверяем обновление сразу же
+                reg.update().catch(() => {});
+
+                // Слушаем нахождение нового SW
+                reg.addEventListener('updatefound', () => {
+                    const newWorker = reg.installing;
+                    if (!newWorker) return;
+                    newWorker.addEventListener('statechange', () => {
+                        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                            // Новый SW готов, старый ещё работает → форсируем активацию
+                            try { newWorker.postMessage({ type: 'SKIP_WAITING' }); } catch (e) {}
+                        }
+                    });
+                });
+            })
+            .catch(() => {});
+    });
+
+    // 2) Слушаем сообщения от SW — при SW_UPDATED перезагружаемся
+    navigator.serviceWorker.addEventListener('message', (event) => {
+        if (event.data && event.data.type === 'SW_UPDATED') {
+            reloadOnce();
+        }
+    });
+
+    // 3) Если сменился контроллер SW — перезагружаемся
+    let _refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (_refreshing) return;
+        _refreshing = true;
+        reloadOnce();
+    });
+
+    // 4) Проверяем обновления каждые 3 минуты
+    setInterval(() => {
+        navigator.serviceWorker.getRegistration('/').then(reg => {
+            if (reg) reg.update().catch(() => {});
+        }).catch(() => {});
+    }, 3 * 60 * 1000);
+
+    // 5) Проверяем при возврате на вкладку (focus) и при visibilitychange
+    window.addEventListener('focus', () => {
+        navigator.serviceWorker.getRegistration('/').then(reg => {
+            if (reg) reg.update().catch(() => {});
+        }).catch(() => {});
+    });
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            navigator.serviceWorker.getRegistration('/').then(reg => {
+                if (reg) reg.update().catch(() => {});
+            }).catch(() => {});
+        }
     });
 }
 
@@ -231,7 +304,6 @@ async function apiGetJSON(url, fallback = null) {
     } catch (e) { return fallback; }
 }
 
-// ---- Self-ping ----
 function startSelfPing() {
     const ping = () => fetch('/api/ping').catch(() => {});
     ping();
@@ -399,7 +471,6 @@ function showPrompt(title, placeholder = '', defaultValue = '') {
     });
 }
 
-// ---- Sheet modal ----
 function openSheet(id) {
     document.getElementById('sheetOverlay')?.classList.add('show');
     document.getElementById(id)?.classList.add('show');
@@ -409,7 +480,6 @@ function closeSheet(id) {
     document.getElementById(id)?.classList.remove('show');
 }
 
-// ---- Сжатие фото ----
 function compressImageFile(file, maxSize = 1000, quality = 0.7) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -438,30 +508,21 @@ function escapeHtml(str) {
 
 // ============================================================================
 //  ФОРМАТИРОВАНИЕ ВРЕМЕНИ (универсальное)
-//  Принимает:
-//   - строку "09:00:00" или "09:00"
-//   - Date-объект
-//   - объект {hours, minutes} (pg-интервал)
-//   - null / undefined
-//  Возвращает "HH:MM" либо "--:--" при невалидном значении.
 // ============================================================================
 function fmtTime(t) {
     if (t === null || t === undefined || t === '') return '--:--';
 
-    // Строка "HH:MM:SS" или "HH:MM"
     if (typeof t === 'string') {
         const m = t.match(/^(\d{1,2}):(\d{2})/);
         if (m) return String(m[1]).padStart(2, '0') + ':' + m[2];
         return t;
     }
 
-    // Date-объект
     if (t instanceof Date) {
         if (isNaN(t.getTime())) return '--:--';
         return String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
     }
 
-    // Объект с hours/minutes (например, pg-интервал)
     if (typeof t === 'object') {
         const h = parseInt(t.hours ?? t.h ?? 0, 10) || 0;
         const m = parseInt(t.minutes ?? t.m ?? 0, 10) || 0;
@@ -477,9 +538,6 @@ const WEEKDAY_SHORT = ['', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс
 function isoDowFromDate(date) { const d = date.getDay(); return d === 0 ? 7 : d; }
 function ymd(date) { return date.toISOString().slice(0, 10); }
 
-// ============================================================================
-//  FORMAT helpers
-// ============================================================================
 function formatBytes(bytes) {
     if (!bytes) return '0 Б';
     if (bytes < 1024) return bytes + ' Б';
@@ -497,9 +555,6 @@ function timeAgo(dateStr) {
     return date.toLocaleDateString('ru-RU');
 }
 
-// ============================================================================
-//  IMAGE VIEWER
-// ============================================================================
 function openImageViewer(urls, startIndex = 0) {
     if (!urls || !urls.length) return;
     let current = Math.max(0, Math.min(startIndex, urls.length - 1));
@@ -566,9 +621,6 @@ function openImageViewer(urls, startIndex = 0) {
     document.body.appendChild(overlay);
 }
 
-// ============================================================================
-//  FILE UPLOAD helper
-// ============================================================================
 async function uploadFiles(files, spaceId) {
     if (!files || !files.length) return [];
     const formData = new FormData();
@@ -713,9 +765,6 @@ async function saveNotificationPrefs(prefs) {
     return apiPost('/api/notification-prefs', prefs);
 }
 
-// ============================================================================
-//  PRESENCE
-// ============================================================================
 let _presenceInterval = null;
 function startPresenceTracking() {
     if (_presenceInterval) return;
@@ -732,9 +781,6 @@ function startPresenceTracking() {
     _presenceInterval = setInterval(setActive, 60000);
 }
 
-// ============================================================================
-//  UNREAD COUNTER
-// ============================================================================
 async function getUnreadCounts() {
     try { return await apiGet('/api/chat/unread'); }
     catch (e) { return {}; }
@@ -780,80 +826,12 @@ socket.on('space_deleted', ({ spaceId, name }) => {
     } catch (e) {}
 });
 
-// ============================================================================
-//  SERVICE WORKER: автообновление
-// ============================================================================
-if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
-    });
-
-    navigator.serviceWorker.addEventListener('message', (event) => {
-        if (event.data && event.data.type === 'SW_UPDATED') {
-            showUpdateToast();
-        }
-    });
-
-    setInterval(() => {
-        navigator.serviceWorker.getRegistration('/').then(reg => {
-            if (reg) reg.update().catch(() => {});
-        }).catch(() => {});
-    }, 60 * 60 * 1000);
-}
-
-function showUpdateToast() {
-    const lastShown = parseInt(sessionStorage.getItem('sw_update_shown') || '0', 10);
-    if (Date.now() - lastShown < 5 * 60 * 1000) return;
-    sessionStorage.setItem('sw_update_shown', String(Date.now()));
-
-    const container = ensureToastContainer();
-    const toast = document.createElement('div');
-    toast.style.cssText = `
-        background: #0a84ff;
-        color: #fff;
-        padding: 12px 16px;
-        border-radius: 12px;
-        font-size: 14px;
-        font-weight: 500;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.18);
-        pointer-events: auto;
-        opacity: 0;
-        transform: translateY(20px);
-        transition: all 0.25s ease;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    `;
-    toast.innerHTML = `
-        <span style="font-size:16px;">⬆</span>
-        <span style="flex:1;">Доступно обновление приложения</span>
-        <button class="sw-reload-btn" style="background:rgba(255,255,255,0.2); border:none; color:#fff; padding:6px 12px; border-radius:8px; font-weight:600; cursor:pointer; font-size:13px;">Обновить</button>
-    `;
-    container.appendChild(toast);
-    requestAnimationFrame(() => {
-        toast.style.opacity = '1';
-        toast.style.transform = 'translateY(0)';
-    });
-
-    toast.querySelector('.sw-reload-btn').addEventListener('click', () => {
-        location.reload();
-    });
-
-    setTimeout(() => {
-        toast.style.opacity = '0';
-        toast.style.transform = 'translateY(20px)';
-        setTimeout(() => toast.remove(), 250);
-    }, 15000);
-}
-
-// Инициализация после загрузки DOM
 document.addEventListener('DOMContentLoaded', () => {
     initThemeToggleButton();
     initThemeButtons();
     initSidebarToggle();
 });
 
-// CSS-анимации
 (function injectToastStyles() {
     if (document.getElementById('toastStyles')) return;
     const style = document.createElement('style');
