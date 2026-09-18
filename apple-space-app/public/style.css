@@ -336,6 +336,17 @@ a {
     position: sticky;
     top: 0;
     overflow-y: auto;
+    overflow-x: hidden;
+    white-space: nowrap;
+    transition: width var(--transition), padding var(--transition), border-right-color var(--transition);
+}
+
+/* Скрытое состояние сайдбара */
+.app-dashboard.sidebar-hidden .sidebar {
+    width: 0;
+    padding-left: 0;
+    padding-right: 0;
+    border-right-color: transparent;
 }
 
 .sidebar-logo {
@@ -347,6 +358,55 @@ a {
     padding: 6px 10px 16px;
     color: var(--text);
 }
+
+.sidebar-logo span { flex: 1; }
+
+/* Кнопка «‹» — свернуть сайдбар (только ПК) */
+.sidebar-toggle {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background var(--transition), color var(--transition);
+    flex-shrink: 0;
+    font-size: 18px;
+    line-height: 1;
+    font-weight: 700;
+}
+.sidebar-toggle:hover {
+    background: var(--input-bg);
+    color: var(--text);
+}
+
+/* Плавающая кнопка «›» — показать сайдбар (только ПК, когда скрыт) */
+.sidebar-show-btn {
+    display: none;
+    position: fixed;
+    top: 16px;
+    left: 16px;
+    z-index: 1000;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--bg-card);
+    border: 1px solid var(--card-border);
+    box-shadow: var(--shadow-sm);
+    color: var(--text);
+    font-size: 22px;
+    line-height: 1;
+    font-weight: 700;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: transform var(--transition), background var(--transition);
+}
+.sidebar-show-btn:hover { background: var(--input-bg); }
+.sidebar-show-btn:active { transform: scale(0.92); }
 
 .current-space-label {
     font-size: 0.8rem;
@@ -1061,8 +1121,11 @@ a {
 .emoji-btn:active { transform: scale(0.9); background: var(--accent-blue-light); }
 
 /* ===================== ЖУРНАЛ ===================== */
+/* Скроллится внутри своего контейнера — шапка с датами sticky и всегда видна */
 .journal-table-wrap {
-    overflow-x: auto;
+    overflow: auto;
+    max-height: calc(100vh - 260px);
+    min-height: 240px;
     border-radius: var(--radius-md);
     border: 1px solid var(--card-border);
     background: var(--bg-card);
@@ -1135,8 +1198,6 @@ a {
 }
 
 /* ===== Обводка столбца «сегодня» ===== */
-/* box-shadow: inset рисуется ПОВЕРХ inline background (красный/оранжевый),
-   поэтому цвет ячейки сохраняется, а зелёный контур остаётся виден. */
 .journal-table-wrap thead th.today-col-header {
     background: rgba(48, 209, 88, 0.22) !important;
     color: #30d158 !important;
@@ -1145,14 +1206,11 @@ a {
 }
 
 .journal-table-wrap tbody td.today-col {
-    /* Только боковые линии — фон не трогаем, чтобы не перебивать
-       красный/оранжевый при отсутствии/опоздании. */
     box-shadow: inset 2px 0 0 0 rgba(48, 209, 88, 0.7),
                 inset -2px 0 0 0 rgba(48, 209, 88, 0.7);
 }
 
 .journal-table-wrap tbody tr:last-child td.today-col {
-    /* Нижняя граница только у последней строки — «закрываем» столбец снизу */
     box-shadow: inset 2px 0 0 0 rgba(48, 209, 88, 0.7),
                 inset -2px 0 0 0 rgba(48, 209, 88, 0.7),
                 inset 0 -2px 0 0 rgba(48, 209, 88, 0.7);
@@ -1256,6 +1314,10 @@ a {
     /* На мобилке круглая кнопка темы СКРЫТА — тема переключается через Настройки */
     .theme-toggle-btn { display: none !important; }
 
+    /* Кнопки сворачивания сайдбара на мобилке не нужны */
+    .sidebar-toggle,
+    .sidebar-show-btn { display: none !important; }
+
     .chat-wrap {
         height: calc(100vh - 250px);
         border-radius: var(--radius-md);
@@ -1267,11 +1329,21 @@ a {
     .games-grid {
         grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
     }
+
+    /* Журнал на мобилке — на весь экран */
+    .journal-table-wrap {
+        max-height: calc(100vh - 300px);
+    }
 }
 
 @media (min-width: 769px) {
     /* Круглая кнопка темы только на ПК */
     .theme-toggle-btn { display: flex; }
+
+    /* Плавающая кнопка «показать сайдбар» — только когда он скрыт */
+    .app-dashboard.sidebar-hidden .sidebar-show-btn {
+        display: flex;
+    }
 
     .sheet {
         max-width: 520px;
@@ -1340,86 +1412,4 @@ a {
     background: var(--accent-blue);
     color: #fff;
     border-color: var(--accent-blue);
-}
-
-/* ============================================================================
-   Кнопка скрытия/показа бокового меню (ПК)
-   ============================================================================ */
-
-/* Сайдбар — анимация ширины */
-.sidebar {
-    transition: width var(--transition), padding var(--transition), border-right-color var(--transition);
-    overflow-x: hidden;
-    white-space: nowrap;
-}
-
-/* Скрытое состояние */
-.app-dashboard.sidebar-hidden .sidebar {
-    width: 0;
-    padding-left: 0;
-    padding-right: 0;
-    border-right-color: transparent;
-}
-
-/* Кнопка «‹» внутри sidebar-logo */
-.sidebar-toggle {
-    margin-left: auto;
-    width: 30px;
-    height: 30px;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--text-secondary);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: background var(--transition), color var(--transition);
-    flex-shrink: 0;
-    font-size: 18px;
-    line-height: 1;
-}
-.sidebar-toggle:hover {
-    background: var(--input-bg);
-    color: var(--text);
-}
-
-/* Плавающая кнопка «›» — появляется, когда сайдбар скрыт */
-.sidebar-show-btn {
-    display: none;
-    position: fixed;
-    top: 16px;
-    left: 16px;
-    z-index: 1000;
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    background: var(--bg-card);
-    border: 1px solid var(--card-border);
-    box-shadow: var(--shadow-sm);
-    color: var(--text);
-    font-size: 20px;
-    line-height: 1;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: transform var(--transition), background var(--transition);
-}
-.sidebar-show-btn:hover { background: var(--input-bg); }
-.sidebar-show-btn:active { transform: scale(0.92); }
-
-/* Показываем плавающую кнопку, только когда сайдбар скрыт (на ПК) */
-@media (min-width: 769px) {
-    .app-dashboard.sidebar-hidden .sidebar-show-btn {
-        display: flex;
-    }
-    /* Когда сайдбар скрыт, освобождаем место для плавающей кнопки */
-    .app-dashboard.sidebar-hidden .main-content {
-        padding-top: 22px;
-    }
-}
-
-/* На мобилке ничего не показываем — сайдбар и так скрыт */
-@media (max-width: 768px) {
-    .sidebar-toggle,
-    .sidebar-show-btn { display: none !important; }
 }
