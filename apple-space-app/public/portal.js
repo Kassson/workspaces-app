@@ -178,43 +178,57 @@ async function renderHomeworkTab(container, spaceId, isAdmin) {
 
 function homeworkCardHtml(hw, isAdmin, spaceId) {
     const due = new Date(hw.due_date).toLocaleDateString('ru-RU');
-    const remote = systemSettings.remote_mode;
     const gradeHtml = hw.grade_value
         ? `<span class="grade-badge" style="background:#30d158;color:#fff;padding:3px 10px;border-radius:8px;font-weight:700;">${hw.grade_value}</span>`
         : '';
     const isTeacher = !!currentUser?.isTeacher;
 
-    // --- Персональные действия (отметить/прикрепить/отменить СВОЁ ДЗ) ---
-    // Учителю НЕ показываем — он не пишется в статистике как ученик.
-    // Ученику и ученику-админу — показываем.
+    // Массив URL фото: новый формат attachment_urls, старый — attachment_url
+    const photoUrls = Array.isArray(hw.attachment_urls) && hw.attachment_urls.length
+        ? hw.attachment_urls.filter(u => !!u)
+        : (hw.attachment_url ? [hw.attachment_url] : []);
+
     let personalActions = '';
     if (!isTeacher) {
         if (hw.is_done) {
+            const photosJson = JSON.stringify(photoUrls).replace(/"/g, '&quot;');
+            const previewHtml = photoUrls.length
+                ? `<div style="display:inline-flex; align-items:center; gap:6px; vertical-align:middle;">
+                    <img src="${photoUrls[0]}" class="hw-photo-preview" data-photos="${photosJson}" onclick="openHwGallery(this)" style="max-width:64px;max-height:64px;object-fit:cover;border-radius:8px;cursor:pointer;display:block;">
+                    ${photoUrls.length > 1 ? `<span style="font-size:0.75rem;color:var(--text-secondary);font-weight:600;">+${photoUrls.length - 1}</span>` : ''}
+                   </div>`
+                : '';
             personalActions = `
                 <span class="badge badge-green">Сдано</span>
                 ${gradeHtml}
-                ${hw.attachment_url ? `<img src="${hw.attachment_url}" class="hw-photo-preview" style="max-width:80px;border-radius:8px;cursor:pointer;" onclick="openImageViewer(['${hw.attachment_url}'], 0)">` : ''}
+                ${previewHtml}
                 <button class="btn-small" onclick="uncompleteHomework('${hw.id}','${spaceId}')">Отменить</button>
             `;
         } else {
+            const remote = !!systemSettings.remote_mode;
+            const doneOption = remote ? '' : `
+                <button class="btn-small" style="display:block;width:100%;text-align:left;border-radius:0;padding:10px 14px;" onclick="closeHwDoneMenu('${hw.id}'); completeHomework('${hw.id}','${spaceId}')">
+                    ✅ Выполнено
+                </button>
+            `;
+            const photoOption = `
+                <label class="btn-small" style="display:block;width:100%;text-align:left;border-radius:0;padding:10px 14px;cursor:pointer;box-sizing:border-box;">
+                    📷 Прикрепить фото
+                    <input type="file" accept="image/*" multiple style="display:none" onchange="closeHwDoneMenu('${hw.id}'); submitHomeworkPhoto('${hw.id}','${spaceId}', this)">
+                </label>
+            `;
             personalActions = `
                 <div class="hw-done-menu" style="position:relative;display:inline-block;">
                     <button class="btn-small" onclick="toggleHwDoneMenu(event, '${hw.id}')">Отметить выполненным ▾</button>
                     <div class="hw-done-dropdown" id="hwMenu-${hw.id}" style="display:none;position:absolute;top:calc(100% + 4px);left:0;background:var(--bg-card);border:1px solid var(--card-border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.18);min-width:220px;z-index:50;overflow:hidden;">
-                        <button class="btn-small" style="display:block;width:100%;text-align:left;border-radius:0;padding:10px 14px;" onclick="closeHwDoneMenu('${hw.id}'); completeHomework('${hw.id}','${spaceId}')">
-                            ✅ Просто отметить
-                        </button>
-                        <label class="btn-small" style="display:block;width:100%;text-align:left;border-radius:0;padding:10px 14px;cursor:pointer;box-sizing:border-box;">
-                            📷 Прикрепить фото
-                            <input type="file" accept="image/*" style="display:none" onchange="closeHwDoneMenu('${hw.id}'); submitHomeworkPhoto('${hw.id}','${spaceId}', this)">
-                        </label>
+                        ${doneOption}
+                        ${photoOption}
                     </div>
                 </div>
             `;
         }
     }
 
-    // --- Админские кнопки (только для админов — учителя и ученика-админа) ---
     const adminActions = isAdmin
         ? `
             <button class="btn-small" onclick="openHomeworkStats('${hw.id}')">Статистика</button>
@@ -232,7 +246,18 @@ function homeworkCardHtml(hw, isAdmin, spaceId) {
     </div>`;
 }
 
-// Выпадающее меню «Отметить выполненным»
+// Открыть галерею фото ДЗ по клику на превью
+function openHwGallery(imgEl) {
+    try {
+        const raw = imgEl.getAttribute('data-photos');
+        if (!raw) return;
+        const urls = JSON.parse(raw.replace(/&quot;/g, '"'));
+        if (Array.isArray(urls) && urls.length) {
+            openImageViewer(urls, 0);
+        }
+    } catch (e) { /* тихо */ }
+}
+
 function toggleHwDoneMenu(event, homeworkId) {
     event.stopPropagation();
     const menu = document.getElementById('hwMenu-' + homeworkId);
@@ -245,7 +270,6 @@ function closeHwDoneMenu(homeworkId) {
     const menu = document.getElementById('hwMenu-' + homeworkId);
     if (menu) menu.style.display = 'none';
 }
-// Единый обработчик закрытия при клике вне
 if (!window.__hwMenuClickHandlerInstalled) {
     window.__hwMenuClickHandlerInstalled = true;
     document.addEventListener('click', (e) => {
@@ -270,12 +294,14 @@ async function uncompleteHomework(id, spaceId) {
     } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
 }
 async function submitHomeworkPhoto(id, spaceId, input) {
-    const file = input.files[0]; if (!file) return;
+    const files = Array.from(input.files || []);
+    if (!files.length) return;
     try {
-        const uploaded = await uploadFiles([file], spaceId);
-        if (!uploaded.length || uploaded[0].error) throw new Error(uploaded[0]?.error || 'Ошибка загрузки');
-        await apiPost(`/api/homework/${id}/complete`, { attachment: uploaded[0].url });
-        showToast('Фото загружено', 'success');
+        const uploaded = await uploadFiles(files, spaceId);
+        const urls = uploaded.filter(f => f && f.url).map(f => f.url);
+        if (!urls.length) throw new Error('Не удалось загрузить фото');
+        await apiPost(`/api/homework/${id}/complete`, { attachments: urls });
+        showToast(urls.length > 1 ? `Загружено фото: ${urls.length}` : 'Фото загружено', 'success');
         renderHomeworkTab(document.getElementById(currentHwContainerId()), spaceId, !!currentSpace?.is_admin);
     } catch (e) { showToast(e.error || 'Не удалось загрузить фото', 'error'); }
 }
@@ -307,6 +333,17 @@ async function openHomeworkStats(homeworkId) {
         const dash = (s.percentage / 100) * c;
         const canGrade = !!currentUser?.isTeacher;
 
+        // Собираем все фото со всех учеников в один список для навигации
+        const allPhotoUrls = [];
+        const perStudentUrls = {};
+        s.students.forEach(st => {
+            const arr = Array.isArray(st.attachmentUrls) && st.attachmentUrls.length
+                ? st.attachmentUrls.filter(u => !!u)
+                : (st.attachmentUrl ? [st.attachmentUrl] : []);
+            perStudentUrls[st.id] = arr;
+            arr.forEach(u => allPhotoUrls.push(u));
+        });
+
         let html = `
             <h2 class="app-title" style="font-size:1.3rem;">Статистика ДЗ</h2>
             <div style="text-align:center; margin:14px 0;">
@@ -324,7 +361,6 @@ async function openHomeworkStats(homeworkId) {
         if (!s.students.length) {
             html += `<p class="empty-state" style="padding:20px 0;">В группе нет учеников</p>`;
         } else {
-            const allPhotoUrls = s.students.filter(st => st.attachmentUrl).map(st => st.attachmentUrl);
             s.students.forEach((st) => {
                 let borderColor = '#9ca3af';
                 let label = 'Не сдано';
@@ -334,12 +370,15 @@ async function openHomeworkStats(homeworkId) {
                 else if (st.status === 'overdue') { borderColor = '#ff453a'; label = 'Просрочено'; labelColor = '#ff453a'; opacity = 0.85; }
                 else { opacity = 0.8; }
 
-                const photoIdx = st.attachmentUrl ? allPhotoUrls.indexOf(st.attachmentUrl) : -1;
-                const photoPreview = st.attachmentUrl
-                    ? `<img src="${st.attachmentUrl}" style="width:44px;height:44px;object-fit:cover;border-radius:8px;cursor:pointer;" onclick="event.stopPropagation();openImageViewer(${JSON.stringify(allPhotoUrls).replace(/"/g, '&quot;')}, ${photoIdx})">`
+                const urls = perStudentUrls[st.id] || [];
+                const photosJson = JSON.stringify(urls).replace(/"/g, '&quot;');
+                const photoPreview = urls.length
+                    ? `<div style="position:relative; display:inline-block;">
+                        <img src="${urls[0]}" class="hw-photo-preview" data-photos="${photosJson}" onclick="event.stopPropagation();openHwGallery(this)" style="width:44px;height:44px;object-fit:cover;border-radius:8px;cursor:pointer;display:block;">
+                        ${urls.length > 1 ? `<span style="position:absolute;bottom:-4px;right:-4px;background:#0088cc;color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px;">+${urls.length - 1}</span>` : ''}
+                       </div>`
                     : '';
 
-                // Оценки ставит ТОЛЬКО учитель. Ученик-админ видит цифру (если стоит), но не редактирует.
                 const gradeBlock = canGrade ? `
                     <select onchange="setGradeFromStats('${st.id}', '${escapeHtml(st.fullName).replace(/'/g, "\\'")}', this.value, '${homeworkId}')" style="padding:4px 8px;border-radius:8px;border:1px solid var(--card-border);background:var(--input-bg);color:var(--text);font-weight:700;">
                         <option value="">—</option>
@@ -369,7 +408,6 @@ async function openHomeworkStats(homeworkId) {
 
 async function setGradeFromStats(studentUserId, studentName, value, homeworkId) {
     if (!currentSpace) return;
-    // Оценки за ДЗ ставит только учитель
     if (!currentUser?.isTeacher) {
         showToast('Оценки выставляет только преподаватель', 'error');
         return;
@@ -410,7 +448,7 @@ function monthKeyOf(dateStr) {
 }
 
 // ============================================================================
-//  СИНОНИМЫ ИМЁН (Даня→Даниил, Саша→Александр, ...)
+//  СИНОНИМЫ ИМЁН
 // ============================================================================
 const NAME_ALIASES = {
     'даня': 'даниил', 'данила': 'даниил', 'даниил': 'даниил',
@@ -455,7 +493,6 @@ function normalizeWord(w) {
     return NAME_ALIASES[low] || low;
 }
 
-// nameKey — ДЛЯ ДЕДУПЛИКАЦИИ (не для сортировки!)
 function nameKey(fullName) {
     if (!fullName) return '';
     const parts = String(fullName)
@@ -473,7 +510,6 @@ function nameKey(fullName) {
     return firstTwo.join(' ');
 }
 
-// surnameSortKey — ДЛЯ СОРТИРОВКИ A→Я ПО ФАМИЛИИ
 function surnameSortKey(fullName) {
     if (!fullName) return '';
     return String(fullName)
@@ -658,9 +694,6 @@ async function addJournalSubject(spaceId) {
     } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
 }
 
-// ============================================================================
-//  ЗАГРУЗКА УЧЕНИКОВ — СОРТИРОВКА A→Я ПО ФАМИЛИИ
-// ============================================================================
 async function loadJournalStudents(spaceId) {
     try {
         let fromJournal = [];
@@ -674,7 +707,6 @@ async function loadJournalStudents(spaceId) {
 
         const fromGrades = window.__journal.subjGrades.map(g => g.student_name);
 
-        // Группировка по дедуп-ключу nameKey (учитывает синонимы: Даня=Даниил)
         const groups = {};
         const addToGroup = (name) => {
             if (!name || !name.trim()) return;
@@ -696,7 +728,6 @@ async function loadJournalStudents(spaceId) {
             allNames.push(canonicalByKey[key]);
         }
 
-        // ===== СОРТИРОВКА A→Я ПО ФАМИЛИИ =====
         allNames.sort((a, b) => {
             const ka = surnameSortKey(a);
             const kb = surnameSortKey(b);
@@ -768,12 +799,7 @@ function renderJournalTable() {
     html += `</tbody></table>`;
     wrap.innerHTML = html;
 
-    // ================================================================
-    //  ОБВОДКА СТОЛБЦА «СЕГОДНЯ»
-    //  Навешиваем .today-col на ВСЕ ячейки столбца, включая цветные
-    //  (absent/late). Обводка через box-shadow: inset рисуется поверх
-    //  inline background, поэтому красный/оранжевый остаются видны.
-    // ================================================================
+    // Обводка столбца «сегодня» — на ВСЕ ячейки, включая цветные
     const todayIdx = days.findIndex(d => d.date === todayStr);
     if (todayIdx >= 0) {
         const table = wrap.querySelector('table');
