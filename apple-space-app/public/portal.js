@@ -666,7 +666,6 @@ async function loadJournalStudents(spaceId) {
         let fromJournal = [];
         try {
             const resp = await apiGet(`/api/journal-students/${spaceId}?subject=${encodeURIComponent(window.__journal.subject || '')}`);
-            // Не полагаемся на sort_order — сортируем сами ниже
             fromJournal = resp.map(s => s.student_name);
         } catch (e) {}
 
@@ -698,7 +697,6 @@ async function loadJournalStudents(spaceId) {
         }
 
         // ===== СОРТИРОВКА A→Я ПО ФАМИЛИИ =====
-        // Первое слово = фамилия. Прямое < / > — идентично во всех браузерах.
         allNames.sort((a, b) => {
             const ka = surnameSortKey(a);
             const kb = surnameSortKey(b);
@@ -771,27 +769,23 @@ function renderJournalTable() {
     wrap.innerHTML = html;
 
     // ================================================================
-    //  ОБВОДКА СТОЛБЦА «СЕГОДНЯ» ПО КОНТУРУ
-    //  box-shadow: inset — не ломается на sticky-ячейках при скролле
+    //  ОБВОДКА СТОЛБЦА «СЕГОДНЯ»
+    //  Навешиваем .today-col на ВСЕ ячейки столбца, включая цветные
+    //  (absent/late). Обводка через box-shadow: inset рисуется поверх
+    //  inline background, поэтому красный/оранжевый остаются видны.
     // ================================================================
     const todayIdx = days.findIndex(d => d.date === todayStr);
     if (todayIdx >= 0) {
         const table = wrap.querySelector('table');
         if (table) {
             const headerCells = table.querySelectorAll('thead th');
-            const headerCell = headerCells[todayIdx + 1]; // +1 — сдвиг из-за колонки «Ученик»
-            if (headerCell) {
-                headerCell.style.boxShadow = 'inset 0 0 0 2px #30d158';
-                headerCell.style.background = 'rgba(48, 209, 88, 0.18)';
-                headerCell.style.fontWeight = '800';
-            }
+            const headerCell = headerCells[todayIdx + 1];
+            if (headerCell) headerCell.classList.add('today-col-header');
+
             const bodyRows = table.querySelectorAll('tbody tr');
             bodyRows.forEach(tr => {
                 const cell = tr.children[todayIdx + 1];
-                if (cell) {
-                    cell.style.boxShadow = 'inset 0 0 0 2px rgba(48, 209, 88, 0.55)';
-                    cell.style.background = 'rgba(48, 209, 88, 0.06)';
-                }
+                if (cell) cell.classList.add('today-col');
             });
         }
     }
