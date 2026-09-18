@@ -7,7 +7,30 @@
     <meta name="theme-color" content="#f5f7fa">
     <link rel="manifest" href="/manifest.json">
     <link rel="icon" href="/icon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/style.css?v=9">
+
+    <!-- Версия приложения — при смене чистим кэш и снимаем SW -->
+    <script>
+    (function(){
+        var APP_VERSION = '9';
+        try {
+            var saved = localStorage.getItem('appVersion');
+            if (saved !== APP_VERSION) {
+                localStorage.setItem('appVersion', APP_VERSION);
+                if ('caches' in window) {
+                    caches.keys().then(function(keys) {
+                        return Promise.all(keys.map(function(k) { return caches.delete(k); }));
+                    }).catch(function(){});
+                }
+                if ('serviceWorker' in navigator) {
+                    navigator.serviceWorker.getRegistrations().then(function(regs) {
+                        return Promise.all(regs.map(function(r) { return r.unregister(); }));
+                    }).catch(function(){});
+                }
+            }
+        } catch (e) {}
+    })();
+    </script>
 </head>
 <body>
     <div class="loading-screen show" id="loadingScreen">
@@ -26,7 +49,6 @@
         </div>
     </div>
 
-    <!-- Круглая кнопка темы — видна только на ПК -->
     <button class="theme-toggle-btn" id="themeToggle" title="Сменить тему">🌙</button>
 
     <div class="maintenance-screen" id="maintenanceScreen">
@@ -313,7 +335,7 @@
     <div id="dynamicSheetRoot"></div>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="/shared.js"></script>
+    <script src="/shared.js?v=9"></script>
     <script>
         const errorMsg = document.getElementById('errorMsg');
         function switchView(viewId) {
@@ -671,7 +693,6 @@
             if (ok) logout();
         }
 
-        // Скрыть «Панель управления» для нерут-преподавателей
         function hideSystemTabForNonRoot() {
             if (currentUser?.isRoot) return;
             const sidebarItem = document.getElementById('sidebarSystemItem');
@@ -706,7 +727,6 @@
                 return;
             }
 
-            // Грузим portal.js только теперь
             try {
                 await loadPortalJs();
             } catch (e) {
@@ -721,10 +741,8 @@
             renderTeacherProfile();
             initSidebarToggle();
 
-            // Скрываем Панель управления для нерутов и переключаемся на Расписание
             hideSystemTabForNonRoot();
             if (!user.isRoot) {
-                // Снять active с #tab-system, поставить на #tab-schedule
                 document.getElementById('tab-system').classList.remove('active');
                 document.getElementById('tab-schedule').classList.add('active');
                 document.querySelectorAll('.sidebar-item, .bottom-tabbar .tab-btn').forEach(s => s.classList.remove('active'));
