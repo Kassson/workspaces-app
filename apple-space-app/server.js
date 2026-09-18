@@ -60,7 +60,11 @@ app.use('/api/', generalLimiter);
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false }
+    ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false },
+    // Оптимизация под нагрузку: пул соединений
+    max: 20,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 5000
 });
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -457,31 +461,24 @@ app.delete('/api/spaces/:spaceId', verifyJWT, async (req, res) => {
     const exists = await pool.query('SELECT id, name FROM spaces WHERE id = $1', [spaceId]);
     if (!exists.rows.length) return res.status(404).json({ error: 'Пространство не найдено' });
 
-    // Собираем ключи файлов, чтобы почистить Object Storage
     let fileKeys = [];
     try {
         const files = await pool.query('SELECT key FROM files WHERE space_id = $1', [spaceId]);
         fileKeys = files.rows.map(r => r.key);
     } catch (e) { /* тихо */ }
 
-    // Уведомляем участников ДО удаления (пока socket.io ещё может отправить)
     io.to(`space:${spaceId}`).emit('space_deleted', { spaceId, name: exists.rows[0].name });
 
     try {
-        // Каскадное удаление (в schema.sql все ссылки на spaces ON DELETE CASCADE)
         await pool.query('DELETE FROM spaces WHERE id = $1', [spaceId]);
     } catch (e) {
         console.error('delete space:', e.message);
         return res.status(500).json({ error: 'Ошибка удаления: ' + e.message });
     }
 
-    // Асинхронно удаляем файлы из Object Storage (не блокируем ответ)
     if (fileKeys.length) {
-        (async () => {
-            for (const key of fileKeys) {
-                try { await storage.deleteFile(key); } catch (e) {}
-            }
-        })();
+        // Батчинг: удаляем файлы параллельно
+        Promise.all(fileKeys.map(k => storage.deleteFile(k).catch(() => {}))).catch(() => {});
     }
 
     res.json({ ok: true });
@@ -765,9 +762,11 @@ app.get('/api/schedule/:spaceId/ics', verifyJWT, requireSpaceAccess, async (req,
 });
 
 // ================= ДОМАШНИЕ ЗАДАНИЯ =================
+// Изменения: возвращаем attachment_urls (массив фото)
 app.get('/api/homework/:spaceId', verifyJWT, requireSpaceAccess, async (req, res) => {
     const hw = await pool.query(
-        `SELECT h.*, hc.attachment_url, hc.completed_at, (hc.id IS NOT NULL) AS is_done, g.grade_value
+        `SELECT h.*, hc.attachment_url, hc.attachment_urls, hc.completed_at,
+                (hc.id IS NOT NULL) AS is_done, g.grade_value
          FROM homeworks h
          LEFT JOIN homework_completions hc ON hc.homework_id = h.id AND hc.user_id = $2
          LEFT JOIN grades g ON g.homework_id = h.id AND g.student_user_id = $2
@@ -777,6 +776,7 @@ app.get('/api/homework/:spaceId', verifyJWT, requireSpaceAccess, async (req, res
     res.json(hw.rows);
 });
 
+// Изменения: возвращаем attachment_urls
 app.get('/api/homework/:id/stats', verifyJWT, async (req, res) => {
     const user = await getUserById(req.userId);
     const hw = await pool.query('SELECT * FROM homeworks WHERE id = $1', [req.params.id]);
@@ -793,7 +793,7 @@ app.get('/api/homework/:id/stats', verifyJWT, async (req, res) => {
     const isOverdue = dueDateObj < now;
     const r = await pool.query(
         `SELECT u.id, u.full_name, u.username, u.avatar_emoji,
-                hc.completed_at, hc.attachment_url,
+                hc.completed_at, hc.attachment_url, hc.attachment_urls,
                 (hc.id IS NOT NULL) AS is_done,
                 g.grade_value
          FROM space_members sm
@@ -808,7 +808,9 @@ app.get('/api/homework/:id/stats', verifyJWT, async (req, res) => {
     const students = r.rows.map(s => ({
         id: s.id, fullName: s.full_name, username: s.username,
         avatarEmoji: s.avatar_emoji || '👤',
-        isDone: !!s.is_done, completedAt: s.completed_at, attachmentUrl: s.attachment_url,
+        isDone: !!s.is_done, completedAt: s.completed_at,
+        attachmentUrl: s.attachment_url,
+        attachmentUrls: s.attachment_urls || [],
         gradeValue: s.grade_value,
         status: s.is_done ? 'done' : (isOverdue ? 'overdue' : 'pending')
     }));
@@ -835,10 +837,31 @@ app.delete('/api/homework/:id', verifyJWT, async (req, res) => {
     res.json({ message: 'Удалено' });
 });
 
+// Изменения: принимает attachments (массив URL)
+// Первый URL сохраняем в attachment_url (обратная совместимость), все — в attachment_urls
 app.post('/api/homework/:id/complete', verifyJWT, async (req, res) => {
     const user = await getUserById(req.userId);
-    const { attachment } = req.body;
-    const r = await pool.query(`INSERT INTO homework_completions (homework_id, user_id, attachment_url) VALUES ($1,$2,$3) ON CONFLICT (homework_id, user_id) DO UPDATE SET attachment_url = EXCLUDED.attachment_url, completed_at = NOW() RETURNING *`, [req.params.id, user.id, attachment || null]);
+    const { attachment, attachments } = req.body;
+
+    // Собираем все URL: либо массив attachments, либо одиночный attachment
+    let urls = [];
+    if (Array.isArray(attachments)) {
+        urls = attachments.filter(u => typeof u === 'string' && u.length > 0);
+    } else if (typeof attachment === 'string' && attachment.length > 0) {
+        urls = [attachment];
+    }
+    const firstUrl = urls.length > 0 ? urls[0] : null;
+
+    const r = await pool.query(
+        `INSERT INTO homework_completions (homework_id, user_id, attachment_url, attachment_urls)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (homework_id, user_id)
+         DO UPDATE SET attachment_url = EXCLUDED.attachment_url,
+                       attachment_urls = EXCLUDED.attachment_urls,
+                       completed_at = NOW()
+         RETURNING *`,
+        [req.params.id, user.id, firstUrl, urls]
+    );
     res.json(r.rows[0]);
 });
 
@@ -1060,6 +1083,7 @@ app.delete('/api/teacher-subjects/:id', verifyJWT, async (req, res) => {
 });
 
 // ================= ЧАТ =================
+// Оптимизация: файлы подписываются параллельно (Promise.all), а не в цикле
 app.get('/api/chat/:spaceId/messages', verifyJWT, requireSpaceAccess, async (req, res) => {
     const search = req.query.q;
     let query, params;
@@ -1074,14 +1098,20 @@ app.get('/api/chat/:spaceId/messages', verifyJWT, requireSpaceAccess, async (req
     const messages = r.rows.reverse();
     const ids = messages.map(m => m.id);
     if (ids.length) {
-        const reactions = await pool.query(`SELECT message_id, emoji, user_id FROM message_reactions WHERE message_id = ANY($1::uuid[])`, [ids]);
-        const files = await pool.query(`SELECT id, message_id, original_name, mime, size, key FROM files WHERE message_id = ANY($1::uuid[])`, [ids]);
+        const [reactions, files] = await Promise.all([
+            pool.query(`SELECT message_id, emoji, user_id FROM message_reactions WHERE message_id = ANY($1::uuid[])`, [ids]),
+            pool.query(`SELECT id, message_id, original_name, mime, size, key FROM files WHERE message_id = ANY($1::uuid[])`, [ids])
+        ]);
+
+        // Параллельное получение подписанных ссылок
+        const fileUrls = await Promise.all(files.rows.map(f => storage.getSignedFileUrl(f.key)));
+
         const filesMap = {};
-        for (const f of files.rows) {
+        files.rows.forEach((f, i) => {
             if (!filesMap[f.message_id]) filesMap[f.message_id] = [];
-            const url = await storage.getSignedFileUrl(f.key);
-            filesMap[f.message_id].push({ id: f.id, name: f.original_name, mime: f.mime, size: f.size, url });
-        }
+            filesMap[f.message_id].push({ id: f.id, name: f.original_name, mime: f.mime, size: f.size, url: fileUrls[i] });
+        });
+
         for (const m of messages) {
             m.reactions = reactions.rows.filter(r => r.message_id === m.id);
             m.files = filesMap[m.id] || [];
@@ -1105,12 +1135,32 @@ app.get('/api/chat/unread', verifyJWT, async (req, res) => {
     let spaces;
     if (isSuperAdmin(user)) spaces = (await pool.query('SELECT id FROM spaces')).rows;
     else spaces = (await pool.query('SELECT space_id AS id FROM space_members WHERE user_id = $1', [userId])).rows;
+
+    // Оптимизация: вместо цикла с 2 запросами на space — один батч
     const result = {};
-    for (const s of spaces) {
-        const state = await pool.query('SELECT last_read_at FROM chat_read_state WHERE user_id = $1 AND space_id = $2', [userId, s.id]);
-        const lastRead = state.rows[0]?.last_read_at || new Date(0);
-        const count = await pool.query('SELECT COUNT(*)::int AS c FROM chat_messages WHERE space_id = $1 AND created_at > $2 AND user_id != $3', [s.id, lastRead, userId]);
-        result[s.id] = count.rows[0].c;
+    if (spaces.length) {
+        const spaceIds = spaces.map(s => s.id);
+        // Читаем состояния и счётчики одним махом
+        const [states, counts] = await Promise.all([
+            pool.query('SELECT space_id, last_read_at FROM chat_read_state WHERE user_id = $1 AND space_id = ANY($2::uuid[])', [userId, spaceIds]),
+            pool.query(
+                `SELECT cm.space_id, COUNT(*)::int AS c
+                 FROM chat_messages cm
+                 LEFT JOIN chat_read_state crs ON crs.user_id = $1 AND crs.space_id = cm.space_id
+                 WHERE cm.space_id = ANY($2::uuid[])
+                   AND cm.user_id != $1
+                   AND (crs.last_read_at IS NULL OR cm.created_at > crs.last_read_at)
+                 GROUP BY cm.space_id`,
+                [userId, spaceIds]
+            )
+        ]);
+        const stateMap = {};
+        states.rows.forEach(s => { stateMap[s.space_id] = s.last_read_at; });
+        const countMap = {};
+        counts.rows.forEach(r => { countMap[r.space_id] = r.c; });
+        for (const s of spaces) {
+            result[s.id] = countMap[s.id] || 0;
+        }
     }
     res.json(result);
 });
@@ -1258,11 +1308,10 @@ io.on('connection', async (socket) => {
             }
         }
         const files = fileIds && fileIds.length ? (await pool.query('SELECT id, original_name, mime, size, key FROM files WHERE message_id = $1', [messageId])).rows : [];
-        const filesWithUrls = [];
-        for (const f of files) {
-            const url = await storage.getSignedFileUrl(f.key);
-            filesWithUrls.push({ id: f.id, name: f.original_name, mime: f.mime, size: f.size, url });
-        }
+        // Батчинг: подписанные ссылки параллельно
+        const fileUrls = await Promise.all(files.map(f => storage.getSignedFileUrl(f.key)));
+        const filesWithUrls = files.map((f, i) => ({ id: f.id, name: f.original_name, mime: f.mime, size: f.size, url: fileUrls[i] }));
+
         let replyTo = null;
         if (replyToId) {
             const parent = await pool.query('SELECT id, message, user_id FROM chat_messages WHERE id = $1', [replyToId]);
@@ -1326,6 +1375,7 @@ async function ensureSchema() {
         const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
         await pool.query(schema);
     } catch (e) { console.warn('⚠️ schema.sql не применён целиком:', e.message); }
+
     const migrations = [
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT TRUE`,
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token VARCHAR(100)`,
@@ -1340,7 +1390,15 @@ async function ensureSchema() {
         `ALTER TABLE space_members ADD COLUMN IF NOT EXISTS hidden_from_journal BOOLEAN DEFAULT FALSE`,
         `ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES chat_messages(id) ON DELETE SET NULL`,
         `ALTER TABLE journal_students ADD COLUMN IF NOT EXISTS sort_order INT DEFAULT 0`,
-        `CREATE INDEX IF NOT EXISTS idx_journal_students_order ON journal_students(space_id, subject_name, sort_order)`
+        // Новая миграция: массив фото
+        `ALTER TABLE homework_completions ADD COLUMN IF NOT EXISTS attachment_urls TEXT[] DEFAULT '{}'`,
+        // Оптимизация: индексы
+        `CREATE INDEX IF NOT EXISTS idx_journal_students_order ON journal_students(space_id, subject_name, sort_order)`,
+        `CREATE INDEX IF NOT EXISTS idx_grades_date_space ON grades(space_id, lesson_date DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_grades_space_subject ON grades(space_id, subject_name)`,
+        `CREATE INDEX IF NOT EXISTS idx_journal_students_name ON journal_students(space_id, subject_name, student_name)`,
+        `CREATE INDEX IF NOT EXISTS idx_hw_space_due ON homeworks(space_id, due_date)`,
+        `CREATE INDEX IF NOT EXISTS idx_hw_completions_hw_user ON homework_completions(homework_id, user_id)`
     ];
     for (const sql of migrations) {
         try { await pool.query(sql); } catch (e) { console.warn('Миграция:', e.message); }
