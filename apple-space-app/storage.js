@@ -22,7 +22,6 @@ const SIGNED_URL_TTL = 60 * 60 * 24; // 24 часа
 
 // === Лимиты ===
 const MAX_FILE_SIZE = 10 * 1024 * 1024;  // 10 МБ
-const MAX_IMAGES_PER_MESSAGE = 10;
 
 // === Разрешённые MIME-типы ===
 const ALLOWED_MIME = {
@@ -154,31 +153,12 @@ async function getSignedFileUrl(key) {
     }
 }
 
-// ============================================================================
-//  Подписанные ссылки для массива ключей
-// ============================================================================
-async function getSignedUrls(keys) {
-    if (!keys || !keys.length) return [];
-    return Promise.all(keys.map(k => getSignedFileUrl(k)));
-}
-
-// ============================================================================
-//  Presigned PUT (для прямой загрузки с клиента)
-// ============================================================================
-async function getUploadUrl(key, mime) {
-    const command = new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: mime });
-    return await getSignedUrl(S3, command, { expiresIn: 600 });
-}
-
 module.exports = {
     initStorage,
     uploadFile,
     deleteFile,
     getSignedFileUrl,
-    getSignedUrls,
-    getUploadUrl,
     validateFile,
     ALLOWED_MIME,
-    MAX_FILE_SIZE,
-    MAX_IMAGES_PER_MESSAGE
+    MAX_FILE_SIZE
 };
