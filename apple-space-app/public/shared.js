@@ -145,11 +145,11 @@ async function apiGetJSON(url, fallback = null) {
     } catch (e) { return fallback; }
 }
 
-// ---- Self-ping ----
+// ---- Self-ping (реже, чтобы не грузить сервер) ----
 function startSelfPing() {
     const ping = () => fetch('/api/ping').catch(() => {});
     ping();
-    setInterval(ping, 10 * 60 * 1000);
+    setInterval(ping, 25 * 60 * 1000); // было 10 мин, стало 25
 }
 
 // ============================================================================
@@ -663,10 +663,75 @@ socket.on('space_deleted', ({ spaceId, name }) => {
     } catch (e) {}
 });
 
+// ============================================================================
+//  SERVICE WORKER: автообновление
+// ============================================================================
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
     });
+
+    // Слушаем сообщения от SW
+    navigator.serviceWorker.addEventListener('message', (event) => {
+        if (event.data && event.data.type === 'SW_UPDATED') {
+            showUpdateToast();
+        }
+    });
+
+    // Раз в час проверяем наличие новой версии SW
+    setInterval(() => {
+        navigator.serviceWorker.getRegistration('/').then(reg => {
+            if (reg) reg.update().catch(() => {});
+        }).catch(() => {});
+    }, 60 * 60 * 1000);
+}
+
+function showUpdateToast() {
+    // Не показываем повторно в течение 5 минут
+    const lastShown = parseInt(sessionStorage.getItem('sw_update_shown') || '0', 10);
+    if (Date.now() - lastShown < 5 * 60 * 1000) return;
+    sessionStorage.setItem('sw_update_shown', String(Date.now()));
+
+    const container = ensureToastContainer();
+    const toast = document.createElement('div');
+    toast.style.cssText = `
+        background: #0a84ff;
+        color: #fff;
+        padding: 12px 16px;
+        border-radius: 12px;
+        font-size: 14px;
+        font-weight: 500;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+        pointer-events: auto;
+        opacity: 0;
+        transform: translateY(20px);
+        transition: all 0.25s ease;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    `;
+    toast.innerHTML = `
+        <span style="font-size:16px;">⬆</span>
+        <span style="flex:1;">Доступно обновление приложения</span>
+        <button class="sw-reload-btn" style="background:rgba(255,255,255,0.2); border:none; color:#fff; padding:6px 12px; border-radius:8px; font-weight:600; cursor:pointer; font-size:13px;">Обновить</button>
+    `;
+    container.appendChild(toast);
+    requestAnimationFrame(() => {
+        toast.style.opacity = '1';
+        toast.style.transform = 'translateY(0)';
+    });
+
+    toast.querySelector('.sw-reload-btn').addEventListener('click', () => {
+        location.reload();
+    });
+
+    // Если пользователь не нажал — прячем через 15 секунд, но при следующем открытии
+    // SW снова вызовет SW_UPDATED и тост покажется опять
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(20px)';
+        setTimeout(() => toast.remove(), 250);
+    }, 15000);
 }
 
 // Инициализация кнопок после загрузки DOM
