@@ -4,6 +4,42 @@
 const socket = io({ query: { token: localStorage.getItem('token') || '' } });
 
 // ============================================================================
+//  ГЛОБАЛЬНЫЕ НАСТРОЙКИ (доступно до загрузки portal.js)
+// ============================================================================
+let systemSettings = {};
+
+async function loadAndApplySettings(user) {
+    try { systemSettings = await apiGet('/api/settings'); } catch (e) { systemSettings = {}; }
+    applyGlobalSettings(user);
+}
+
+socket.on('settings_updated', (s) => {
+    systemSettings = s;
+    applyGlobalSettings(window.__currentUser);
+});
+
+function applyGlobalSettings(user) {
+    window.__currentUser = user;
+    const banner = document.getElementById('announcementBanner');
+    if (banner) {
+        if (systemSettings.global_announcement) { banner.textContent = systemSettings.global_announcement; banner.classList.add('show'); }
+        else banner.classList.remove('show');
+    }
+    const maint = document.getElementById('maintenanceScreen');
+    const isPrivileged = user && user.isTeacher;
+    if (maint) {
+        if (systemSettings.maintenance_mode && !isPrivileged) maint.classList.add('show');
+        else maint.classList.remove('show');
+    }
+    document.querySelectorAll('.chat-input-row').forEach(el => {
+        el.classList.toggle('hidden', !!systemSettings.exams_mode && user && !user.isTeacher);
+    });
+    document.querySelectorAll('.chat-blocked-notice').forEach(el => {
+        el.classList.toggle('hidden', !(systemSettings.exams_mode && user && !user.isTeacher));
+    });
+}
+
+// ============================================================================
 //  ТЕМА
 // ============================================================================
 const _THEME_QUERY = window.matchMedia('(prefers-color-scheme: dark)');
@@ -114,7 +150,7 @@ function initSidebarToggle() {
 }
 
 // ============================================================================
-//  ЭКРАН ЗАГРУЗКИ — доступно до загрузки portal.js
+//  ЭКРАН ЗАГРУЗКИ
 // ============================================================================
 function showLoadingScreen() {
     const el = document.getElementById('loadingScreen');
@@ -127,7 +163,6 @@ function hideLoadingScreen() {
 
 // ============================================================================
 //  ДИНАМИЧЕСКАЯ ЗАГРУЗКА portal.js
-//  Вызывается из boot() после успешной авторизации
 // ============================================================================
 function loadPortalJs() {
     return new Promise((resolve, reject) => {
