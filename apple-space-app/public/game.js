@@ -1,5 +1,6 @@
 /* ============================================================================
    Игры — одиночные. Canvas-игры ждут layout.
+   Лидерборд + синхронизация кликера + таймер памяти + ускорение реакции с бомбами.
    ============================================================================ */
 
 let activeGame = null;
@@ -14,7 +15,6 @@ function stopActiveGame() {
     document.querySelectorAll('.game-fullscreen').forEach(el => el.remove());
 }
 
-// Ждём, пока элемент получит реальные размеры
 function waitForLayout(area, callback, attempts = 0) {
     if (attempts > 60) { console.warn('game layout timeout'); return; }
     requestAnimationFrame(() => {
@@ -31,18 +31,36 @@ const GAMES = [
     { id: 'snake-arena',  name: 'Змейка',      desc: 'Классика: собирай яблоки' },
     { id: '2048',         name: '2048',        desc: 'Собери плитку 2048' },
     { id: 'memory',       name: 'Найди пару',  desc: 'Открывай карточки, находи пары' },
-    { id: 'reaction',     name: 'Реакция',     desc: 'Успей тапнуть по мишеням' }
+    { id: 'reaction',     name: 'Реакция',     desc: 'Лови цели, не попадай по бомбам' }
 ];
 
+function fmtScore(n) {
+    if (!isFinite(n)) return '0';
+    return Math.floor(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+}
+
+function fmtTime(sec) {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+// ============================================================================
+//  МЕНЮ ИГР
+// ============================================================================
 function renderGamesMenu(container) {
     stopActiveGame();
-    let html = '<h1 class="page-title">Игровой центр</h1><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;">';
+    let html = '<h1 class="page-title">Игровой центр</h1><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;">';
     for (const g of GAMES) {
         html += `
-            <div class="game-card" onclick="startGame('${g.id}')" style="background:var(--bg-card);border-radius:16px;padding:18px;border:1px solid var(--card-border);cursor:pointer;text-align:center;">
+            <div style="background:var(--bg-card);border-radius:16px;padding:18px;border:1px solid var(--card-border);text-align:center;position:relative;">
                 <div style="font-size:2.2rem;margin-bottom:10px;">${gameIcon(g.id)}</div>
                 <div style="font-weight:700;font-size:1rem;margin-bottom:4px;">${g.name}</div>
-                <div style="color:var(--text-secondary);font-size:0.8rem;">${g.desc}</div>
+                <div style="color:var(--text-secondary);font-size:0.8rem;margin-bottom:12px;">${g.desc}</div>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn-small" onclick="startGame('${g.id}')" style="flex:1;">Играть</button>
+                    <button class="btn-small" onclick="openLeaderboard('${g.id}')" title="Таблица лидеров" style="padding:7px 12px;">🏆</button>
+                </div>
             </div>`;
     }
     html += '</div>';
@@ -62,13 +80,17 @@ function gameIcon(id) {
 
 function startGame(gameId) {
     stopActiveGame();
+    const gameInfo = GAMES.find(g => g.id === gameId);
     const overlay = document.createElement('div');
     overlay.className = 'game-fullscreen';
     overlay.style.cssText = 'position:fixed;inset:0;background:var(--bg);z-index:9000;display:flex;flex-direction:column;';
     overlay.innerHTML = `
         <div style="padding:12px 16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--card-border);background:var(--bg-card);">
-            <div style="font-weight:700;font-size:1.05rem;">${GAMES.find(g=>g.id===gameId).name}</div>
-            <button onclick="stopActiveGame()" style="background:var(--input-bg);border:none;padding:8px 14px;border-radius:10px;font-weight:600;cursor:pointer;color:var(--text);">Закрыть</button>
+            <div style="font-weight:700;font-size:1.05rem;">${gameInfo ? gameInfo.name : gameId}</div>
+            <div style="display:flex; gap:8px;">
+                <button onclick="openLeaderboard('${gameId}')" style="background:var(--input-bg);border:none;padding:8px 14px;border-radius:10px;font-weight:600;cursor:pointer;color:var(--text);">🏆 Рейтинг</button>
+                <button onclick="stopActiveGame()" style="background:var(--input-bg);border:none;padding:8px 14px;border-radius:10px;font-weight:600;cursor:pointer;color:var(--text);">Закрыть</button>
+            </div>
         </div>
         <div id="gameArea" style="flex:1;position:relative;overflow:hidden;"></div>
     `;
@@ -85,18 +107,166 @@ function startGame(gameId) {
     });
 }
 
-/* ============================================================================
-   RPG-КЛИКЕР (оставлен без изменений)
-   ============================================================================ */
-function startRpgClicker(area) {
-    const state = loadRpgState();
+// ============================================================================
+//  ТАБЛИЦА ЛИДЕРОВ
+// ============================================================================
+async function openLeaderboard(gameId) {
+    const gameInfo = GAMES.find(g => g.id === gameId);
+    const gameName = gameInfo ? gameInfo.name : gameId;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'leaderboardOverlay';
+    overlay.style.cssText = `
+        position: fixed; inset: 0;
+        background: rgba(0,0,0,0.6);
+        z-index: 9500;
+        display: flex; align-items: center; justify-content: center;
+        padding: 20px;
+        animation: fadeIn 0.15s ease;
+    `;
+
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+        background: var(--bg-card);
+        border-radius: 16px;
+        width: 100%;
+        max-width: 480px;
+        max-height: 90vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+    `;
+
+    modal.innerHTML = `
+        <div style="padding:16px 18px;border-bottom:1px solid var(--divider);display:flex;justify-content:space-between;align-items:center;">
+            <div style="font-weight:700;font-size:1.1rem;">🏆 ${gameName}</div>
+            <button class="lb-close-btn" style="background:var(--input-bg);border:none;width:32px;height:32px;border-radius:50%;font-size:16px;cursor:pointer;color:var(--text);">✕</button>
+        </div>
+        <div style="display:flex;gap:4px;padding:10px 14px 0;">
+            <button class="lb-tab lb-tab-active" data-tab="local" style="flex:1;padding:9px;border-radius:9px;border:none;background:var(--accent-blue);color:#fff;font-weight:600;cursor:pointer;font-size:0.9rem;">Моя группа</button>
+            <button class="lb-tab" data-tab="global" style="flex:1;padding:9px;border-radius:9px;border:none;background:var(--input-bg);color:var(--text);font-weight:600;cursor:pointer;font-size:0.9rem;">Глобальный</button>
+        </div>
+        <div id="lbBody" style="padding:8px 14px 14px;overflow-y:auto;flex:1;">
+            <p style="text-align:center;padding:40px 0;color:var(--text-secondary);">Загрузка…</p>
+        </div>
+    `;
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    modal.querySelector('.lb-close-btn').addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+    let localData = [];
+    let globalData = [];
+    const hasSpace = (typeof currentSpace !== 'undefined' && currentSpace && currentSpace.id);
+
+    const [localRes, globalRes] = await Promise.all([
+        hasSpace ? apiGet(`/api/games/${currentSpace.id}/${gameId}/leaderboard`).catch(() => []) : Promise.resolve([]),
+        apiGet(`/api/games-global/${gameId}/leaderboard`).catch(() => [])
+    ]);
+    localData = localRes || [];
+    globalData = globalRes || [];
+
+    const tabs = modal.querySelectorAll('.lb-tab');
+    const body = document.getElementById('lbBody');
+
+    function renderTab(tabId) {
+        tabs.forEach(t => {
+            const active = t.dataset.tab === tabId;
+            t.classList.toggle('lb-tab-active', active);
+            t.style.background = active ? 'var(--accent-blue)' : 'var(--input-bg)';
+            t.style.color = active ? '#fff' : 'var(--text)';
+        });
+        const rows = tabId === 'local' ? localData : globalData;
+        if (!rows || !rows.length) {
+            const msg = tabId === 'local'
+                ? (hasSpace ? 'Пока никто из группы не играл' : 'Нет активной группы')
+                : 'Пока никто не играл';
+            body.innerHTML = `<p style="text-align:center;padding:40px 0;color:var(--text-secondary);">${msg}</p>`;
+            return;
+        }
+        body.innerHTML = rows.map((r, i) => renderLeaderboardRow(r, i, gameId)).join('');
+    }
+
+    tabs.forEach(t => t.addEventListener('click', () => renderTab(t.dataset.tab)));
+    renderTab('local');
+}
+
+function renderLeaderboardRow(row, idx, gameId) {
+    const place = idx + 1;
+    let medal = '';
+    let medalColor = 'var(--text-secondary)';
+    if (place === 1) { medal = '🥇'; medalColor = '#ffcc00'; }
+    else if (place === 2) { medal = '🥈'; medalColor = '#c0c0c0'; }
+    else if (place === 3) { medal = '🥉'; medalColor = '#cd7f32'; }
+    else { medal = `#${place}`; }
+
+    const name = escapeHtml(row.full_name || row.username || 'Аноним');
+    const username = escapeHtml(row.username || '');
+    const emoji = row.avatar_emoji || '👤';
+    const score = row.score || 0;
+
+    let detailsHtml = '';
+    if (gameId === 'rpg-clicker') {
+        const lvl = row.level || 1;
+        const kills = row.kills_total || 0;
+        const coins = Number(row.coins) || 0;
+        detailsHtml = `<div style="font-size:0.75rem; color:var(--text-secondary); margin-top:2px;">
+            Ур. ${lvl} · Убито ${fmtScore(kills)} · 🪙 ${fmtScore(coins)}
+        </div>`;
+    }
+
+    return `
+        <div style="display:flex; gap:12px; padding:10px 4px; border-bottom:1px solid var(--divider); align-items:center;">
+            <div style="font-size:1.4rem; min-width:38px; text-align:center; color:${medalColor}; font-weight:800;">${medal}</div>
+            <div style="width:36px; height:36px; border-radius:50%; background:var(--input-bg); display:flex; align-items:center; justify-content:center; font-size:1.2rem; flex-shrink:0;">${emoji}</div>
+            <div style="flex:1; min-width:0;">
+                <div style="font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${name}</div>
+                <div style="font-size:0.8rem; color:var(--text-secondary);">@${username}</div>
+                ${detailsHtml}
+            </div>
+            <div style="text-align:right; flex-shrink:0;">
+                <div style="font-weight:800; color:var(--accent-blue); font-size:1.05rem;">${fmtScore(score)}</div>
+                <div style="font-size:0.7rem; color:var(--text-secondary);">очков</div>
+            </div>
+        </div>`;
+}
+
+// ============================================================================
+//  ОТПРАВКА СЧЁТА
+// ============================================================================
+async function submitGameScore(gameId, score) {
+    if (typeof currentSpace === 'undefined' || !currentSpace || !currentSpace.id) return;
+    if (typeof score !== 'number' || !isFinite(score) || score < 0) return;
+    try {
+        await apiPost(`/api/games/${currentSpace.id}/${gameId}/score`, { score: Math.floor(score) });
+    } catch (e) { /* тихо */ }
+}
+
+// ============================================================================
+//  RPG-КЛИКЕР
+// ============================================================================
+async function startRpgClicker(area) {
+    area.innerHTML = '<p style="text-align:center;padding:60px 20px;color:#8d99a5;">Загрузка прогресса…</p>';
+
+    let state;
+    try {
+        state = await loadRpgStateAsync();
+    } catch (e) {
+        state = loadRpgState();
+    }
+    if (typeof state.killsTotal !== 'number') state.killsTotal = 0;
+    if (typeof state.killsOnLevel !== 'number') state.killsOnLevel = 0;
+    if (typeof state.level !== 'number' || state.level < 1) state.level = 1;
 
     area.innerHTML = `
         <div style="display:flex;flex-direction:column;height:100%;background:linear-gradient(180deg,#1a1f2e,#0f1419);color:#fff;">
             <div style="padding:14px;display:flex;justify-content:space-between;">
                 <div>
                     <div style="font-size:0.75rem;opacity:0.7;">Монеты</div>
-                    <div style="font-size:1.5rem;font-weight:800;" id="rpgCoins">${fmt(state.coins)}</div>
+                    <div style="font-size:1.5rem;font-weight:800;" id="rpgCoins">${fmtScore(state.coins)}</div>
                 </div>
                 <div style="text-align:right;">
                     <div style="font-size:0.75rem;opacity:0.7;">Уровень</div>
@@ -110,6 +280,7 @@ function startRpgClicker(area) {
                 </div>
                 <div style="margin-top:8px;font-size:0.9rem;" id="rpgMonsterName">Слизень</div>
                 <div style="margin-top:4px;font-size:0.8rem;opacity:0.7;" id="rpgMonsterInfo"></div>
+                <div style="margin-top:6px;font-size:0.75rem;opacity:0.6;" id="rpgKillsInfo">Убито: 0</div>
             </div>
             <div style="padding:12px;background:rgba(0,0,0,0.3);">
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;font-size:0.8rem;">
@@ -123,7 +294,7 @@ function startRpgClicker(area) {
         </div>
     `;
 
-       const monsterTypes = [
+    const monsterTypes = [
         { name: 'Слизень',   emoji: '🟢', hp: 10,   reward: 5,    weight: 30 },
         { name: 'Крыса',     emoji: '🐀', hp: 25,   reward: 12,   weight: 25 },
         { name: 'Гоблин',    emoji: '👺', hp: 60,   reward: 30,   weight: 18 },
@@ -152,9 +323,10 @@ function startRpgClicker(area) {
     const hpBar = document.getElementById('rpgMonsterHp');
     const nameEl = document.getElementById('rpgMonsterName');
     const infoEl = document.getElementById('rpgMonsterInfo');
+    const killsEl = document.getElementById('rpgKillsInfo');
 
     function updateUI() {
-        document.getElementById('rpgCoins').textContent = fmt(Math.floor(state.coins));
+        document.getElementById('rpgCoins').textContent = fmtScore(state.coins);
         document.getElementById('rpgLevel').textContent = state.level;
         document.getElementById('rpgDmg').textContent = state.sword;
         document.getElementById('rpgDps').textContent = Math.floor((state.guilds * 2 + state.warriors * 1) * state.level);
@@ -162,7 +334,24 @@ function startRpgClicker(area) {
         hpBar.style.width = Math.max(0, (monsterHp / maxMonsterHp) * 100) + '%';
         nameEl.textContent = monsterTypes[monsterIdx].name;
         infoEl.textContent = `HP: ${Math.max(0, Math.floor(monsterHp))} / ${Math.floor(maxMonsterHp)}`;
+        killsEl.textContent = `Убито: ${fmtScore(state.killsTotal)}`;
         monsterEl.textContent = monsterTypes[monsterIdx].emoji;
+    }
+
+    function onMonsterKilled() {
+        const armorMultiplier = 1 + state.armor * 0.15;
+        state.coins += monsterTypes[monsterIdx].reward * (1 + state.level * 0.3) * armorMultiplier;
+        state.killsTotal++;
+        state.killsOnLevel++;
+        while (state.killsOnLevel >= 5) {
+            state.level++;
+            state.killsOnLevel -= 5;
+        }
+        monsterIdx = pickRandomMonster();
+        state.monsterIdx = monsterIdx;
+        maxMonsterHp = monsterTypes[monsterIdx].hp * (1 + state.level * 0.5);
+        monsterHp = maxMonsterHp;
+        saveRpgState(state);
     }
 
     function tapMonster(e) {
@@ -184,15 +373,7 @@ function startRpgClicker(area) {
         area.querySelector('#rpgMonster')?.parentElement?.appendChild(particle);
         setTimeout(() => particle.remove(), 600);
 
-        if (monsterHp <= 0) {
-            const armorMultiplier = 1 + state.armor * 0.15; // +15% за каждый уровень доспехов
-            state.coins += monsterTypes[monsterIdx].reward * (1 + state.level * 0.3) * armorMultiplier;
-            monsterIdx = pickRandomMonster();
-            state.monsterIdx = monsterIdx;
-            maxMonsterHp = monsterTypes[monsterIdx].hp * (1 + state.level * 0.5);
-            monsterHp = maxMonsterHp;
-            saveRpgState(state);
-        }
+        if (monsterHp <= 0) onMonsterKilled();
         updateUI();
     }
 
@@ -237,7 +418,7 @@ function startRpgClicker(area) {
                     <div style="font-weight:700;">${name}</div>
                     <div style="font-size:0.8rem;opacity:0.7;">${desc}</div>
                 </div>
-                <button onclick="${action}()" ${!canAfford ? 'disabled' : ''} style="background:linear-gradient(90deg,#0088cc,#00b4ff);color:#fff;border:none;padding:10px 16px;border-radius:10px;font-weight:700;cursor:pointer;">${fmt(cost)}</button>
+                <button onclick="${action}()" ${!canAfford ? 'disabled' : ''} style="background:linear-gradient(90deg,#0088cc,#00b4ff);color:#fff;border:none;padding:10px 16px;border-radius:10px;font-weight:700;cursor:pointer;">${fmtScore(cost)}</button>
             </div>`;
     }
 
@@ -271,28 +452,20 @@ function startRpgClicker(area) {
         const dps = (state.guilds * 2 + state.warriors * 1) * state.level;
         if (dps > 0) {
             monsterHp -= dps / 10;
-            if (monsterHp <= 0) {
-                const armorMultiplier = 1 + state.armor * 0.15; // +15% за каждый уровень доспехов
-               state.coins += monsterTypes[monsterIdx].reward * (1 + state.level * 0.3) * armorMultiplier;
-                monsterIdx = pickRandomMonster();
-                state.monsterIdx = monsterIdx;
-                maxMonsterHp = monsterTypes[monsterIdx].hp * (1 + state.level * 0.5);
-                monsterHp = maxMonsterHp;
-                saveRpgState(state);
-            }
+            if (monsterHp <= 0) onMonsterKilled();
         }
         state.coins += (state.guilds * 0.5 + state.warriors * 0.2) / 10;
         updateUI();
     }, 100);
 
     const now = Date.now();
-    if (state.lastOnline) {
+    if (state.lastOnline && state.lastOnline > 0) {
         const elapsed = Math.min((now - state.lastOnline) / 1000, 4 * 3600);
         const offlineIncome = (state.guilds * 0.5 + state.warriors * 0.2) * elapsed;
         if (offlineIncome > 1) {
             state.coins += offlineIncome;
             setTimeout(() => {
-                if (confirm(`Пока вас не было, гильдии заработали ${fmt(Math.floor(offlineIncome))} монет.`)) {
+                if (confirm(`Пока вас не было, гильдии заработали ${fmtScore(offlineIncome)} монет.`)) {
                     saveRpgState(state); updateUI();
                 } else {
                     state.coins -= offlineIncome; saveRpgState(state); updateUI();
@@ -303,9 +476,12 @@ function startRpgClicker(area) {
     state.lastOnline = now;
     saveRpgState(state);
 
+    const serverSyncTimer = setInterval(() => {
+        saveRpgStateToServer(state);
+    }, 15000);
+
     updateUI();
 
-    // Анимация частиц
     if (!document.getElementById('rpgStyles')) {
         const s = document.createElement('style');
         s.id = 'rpgStyles';
@@ -315,8 +491,10 @@ function startRpgClicker(area) {
 
     return () => {
         clearInterval(passiveTimer);
+        clearInterval(serverSyncTimer);
         state.lastOnline = Date.now();
         saveRpgState(state);
+        saveRpgStateToServer(state);
         window.rpgToggleShop = null;
         window.rpgBuySword = null;
         window.rpgBuyArmor = null;
@@ -328,24 +506,59 @@ function startRpgClicker(area) {
 
 function loadRpgState() {
     try {
-        return JSON.parse(localStorage.getItem('rpgClickerState')) || {
-            coins: 0, level: 1, sword: 1, armor: 0, guilds: 0, warriors: 0, artifacts: 0, monsterIdx: 0, lastOnline: 0
-        };
+        return JSON.parse(localStorage.getItem('rpgClickerState')) || defaultRpgState();
     } catch (e) {
-        return { coins: 0, level: 1, sword: 1, armor: 0, guilds: 0, warriors: 0, artifacts: 0, monsterIdx: 0, lastOnline: 0 };
+        return defaultRpgState();
     }
 }
-function saveRpgState(s) { try { localStorage.setItem('rpgClickerState', JSON.stringify(s)); } catch (e) {} }
-function fmt(n) {
-    if (n < 1000) return Math.floor(n).toString();
-    if (n < 1e6) return (n / 1000).toFixed(1) + 'K';
-    if (n < 1e9) return (n / 1e6).toFixed(1) + 'M';
-    return (n / 1e9).toFixed(1) + 'B';
+
+function defaultRpgState() {
+    return {
+        coins: 0, level: 1, sword: 1, armor: 0, guilds: 0, warriors: 0, artifacts: 0,
+        monsterIdx: 0, lastOnline: 0, killsTotal: 0, killsOnLevel: 0
+    };
 }
 
-/* ============================================================================
-   ЗМЕЙКА
-   ============================================================================ */
+function saveRpgState(s) {
+    try { localStorage.setItem('rpgClickerState', JSON.stringify(s)); } catch (e) {}
+}
+
+async function loadRpgStateAsync() {
+    const local = loadRpgState();
+    let server = null;
+    try {
+        server = await apiGet('/api/games/rpg-state');
+    } catch (e) { /* тихо */ }
+
+    if (!server) return local;
+
+    const localScore = (local.level || 1) * 10000 + (local.killsTotal || 0) * 100 + Math.floor((local.coins || 0) / 10);
+    const serverScore = (server.level || 1) * 10000 + (server.killsTotal || 0) * 100 + Math.floor((server.coins || 0) / 10);
+
+    if (serverScore > localScore) return server;
+    return local;
+}
+
+async function saveRpgStateToServer(s) {
+    try {
+        await apiPost('/api/games/rpg-state', {
+            coins: s.coins,
+            level: s.level,
+            sword: s.sword,
+            armor: s.armor,
+            guilds: s.guilds,
+            warriors: s.warriors,
+            artifacts: s.artifacts,
+            monsterIdx: s.monsterIdx,
+            killsTotal: s.killsTotal,
+            killsOnLevel: s.killsOnLevel
+        });
+    } catch (e) { /* тихо */ }
+}
+
+// ============================================================================
+//  ЗМЕЙКА
+// ============================================================================
 function startSnake(area) {
     const canvas = document.createElement('canvas');
     canvas.style.cssText = 'width:100%;height:100%;display:block;background:#0e1621;';
@@ -469,15 +682,21 @@ function startSnake(area) {
     function gameOver() {
         running = false;
         document.removeEventListener('keydown', onKey);
+        submitGameScore('snake-arena', score);
+
         const ov = document.createElement('div');
         ov.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,0.8);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;z-index:10;';
         ov.innerHTML = `
             <div style="font-size:2rem;font-weight:800;margin-bottom:10px;">Игра окончена</div>
             <div style="font-size:1.3rem;margin-bottom:24px;">Счёт: ${score}</div>
-            <button id="snRetry" style="padding:12px 30px;border-radius:12px;background:#30d158;color:#fff;font-weight:700;border:none;cursor:pointer;">Играть заново</button>
+            <div style="display:flex;gap:10px;">
+                <button id="snRating" style="padding:12px 24px;border-radius:12px;background:rgba(255,255,255,0.15);color:#fff;font-weight:700;border:none;cursor:pointer;">🏆 Рейтинг</button>
+                <button id="snRetry" style="padding:12px 30px;border-radius:12px;background:#30d158;color:#fff;font-weight:700;border:none;cursor:pointer;">Играть заново</button>
+            </div>
         `;
         area.appendChild(ov);
         ov.querySelector('#snRetry').addEventListener('click', () => { ov.remove(); startSnake(area); });
+        ov.querySelector('#snRating').addEventListener('click', () => openLeaderboard('snake-arena'));
     }
 
     spawnFood();
@@ -485,9 +704,9 @@ function startSnake(area) {
     return () => { running = false; document.removeEventListener('keydown', onKey); window.removeEventListener('resize', resize); };
 }
 
-/* ============================================================================
-   2048
-   ============================================================================ */
+// ============================================================================
+//  2048
+// ============================================================================
 function start2048(area) {
     area.innerHTML = `
         <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:20px;">
@@ -497,6 +716,7 @@ function start2048(area) {
     `;
     let board = Array(4).fill().map(() => Array(4).fill(0));
     let score = 0;
+    let gameEnded = false;
 
     function colors(v) {
         const map = { 0: 'rgba(0,0,0,0.05)', 2: '#eee4da', 4: '#ede0c8', 8: '#f2b179', 16: '#f59563', 32: '#f67c5f', 64: '#f65e3b', 128: '#edcf72', 256: '#edcc61', 512: '#edc850', 1024: '#edc53f', 2048: '#edc22e' };
@@ -527,13 +747,47 @@ function start2048(area) {
         return arr;
     }
 
+    function canMove() {
+        for (let i = 0; i < 4; i++) {
+            for (let j = 0; j < 4; j++) {
+                if (!board[i][j]) return true;
+                if (i < 3 && board[i][j] === board[i + 1][j]) return true;
+                if (j < 3 && board[i][j] === board[i][j + 1]) return true;
+            }
+        }
+        return false;
+    }
+
     function move(dir) {
+        if (gameEnded) return;
         const oldBoard = JSON.stringify(board);
         if (dir === 'left') for (let i = 0; i < 4; i++) { board[i] = slide(board[i]); }
         else if (dir === 'right') for (let i = 0; i < 4; i++) { board[i] = slide(board[i].reverse()).reverse(); }
         else if (dir === 'up') for (let j = 0; j < 4; j++) { const col = board.map(r => r[j]); const newCol = slide(col); for (let i = 0; i < 4; i++) board[i][j] = newCol[i]; }
         else if (dir === 'down') for (let j = 0; j < 4; j++) { const col = board.map(r => r[j]).reverse(); const newCol = slide(col).reverse(); for (let i = 0; i < 4; i++) board[i][j] = newCol[i]; }
-        if (JSON.stringify(board) !== oldBoard) { spawn(); render(); }
+        if (JSON.stringify(board) !== oldBoard) {
+            spawn();
+            render();
+            if (!canMove()) gameOver();
+        }
+    }
+
+    function gameOver() {
+        gameEnded = true;
+        submitGameScore('2048', score);
+        const ov = document.createElement('div');
+        ov.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,0.7);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;z-index:10;';
+        ov.innerHTML = `
+            <div style="font-size:1.8rem;font-weight:800;margin-bottom:10px;">Ходов больше нет</div>
+            <div style="font-size:1.2rem;margin-bottom:20px;">Счёт: ${score}</div>
+            <div style="display:flex;gap:10px;">
+                <button id="g2048Rating" style="padding:10px 20px;border-radius:10px;background:rgba(255,255,255,0.15);color:#fff;font-weight:700;border:none;cursor:pointer;">🏆 Рейтинг</button>
+                <button id="g2048Retry" style="padding:10px 24px;border-radius:10px;background:#30d158;color:#fff;font-weight:700;border:none;cursor:pointer;">Заново</button>
+            </div>
+        `;
+        area.appendChild(ov);
+        ov.querySelector('#g2048Retry').addEventListener('click', () => { ov.remove(); start2048(area); });
+        ov.querySelector('#g2048Rating').addEventListener('click', () => openLeaderboard('2048'));
     }
 
     const onKey = (e) => {
@@ -556,12 +810,16 @@ function start2048(area) {
 
     board[1][1] = 2; board[2][2] = 2;
     render();
-    return () => { document.removeEventListener('keydown', onKey); };
+
+    return () => {
+        document.removeEventListener('keydown', onKey);
+        if (!gameEnded && score > 0) submitGameScore('2048', score);
+    };
 }
 
-/* ============================================================================
-   НАЙДИ ПАРУ (Memory)
-   ============================================================================ */
+// ============================================================================
+//  НАЙДИ ПАРУ (Memory) — с таймером
+// ============================================================================
 function startMemory(area) {
     const emojis = ['🍎', '🍌', '🍇', '🍓', '🍉', '🥝', '🍒', '🍑'];
     const cards = [...emojis, ...emojis].sort(() => Math.random() - 0.5);
@@ -570,12 +828,17 @@ function startMemory(area) {
     let matched = 0;
     let moves = 0;
     let lock = false;
+    let startedAt = 0;
+    let timerInterval = null;
+    let elapsed = 0;
+    let finished = false;
 
     area.innerHTML = `
         <div style="display:flex;flex-direction:column;align-items:center;height:100%;padding:20px;">
             <div style="display:flex;gap:20px;margin-bottom:20px;font-weight:700;color:var(--text);">
                 <div>Пары: <span id="memPairs">0/8</span></div>
                 <div>Ходы: <span id="memMoves">0</span></div>
+                <div>⏱ <span id="memTime">00:00</span></div>
             </div>
             <div id="memGrid" style="display:grid;grid-template-columns:repeat(4,72px);grid-template-rows:repeat(4,72px);gap:8px;"></div>
         </div>
@@ -593,9 +856,36 @@ function startMemory(area) {
         grid.appendChild(card);
     });
 
+    // Таймер запускается при первом клике
+    function startTimer() {
+        if (timerInterval) return;
+        startedAt = Date.now();
+        timerInterval = setInterval(() => {
+            elapsed = Math.floor((Date.now() - startedAt) / 1000);
+            const el = document.getElementById('memTime');
+            if (el) el.textContent = fmtTime(elapsed);
+        }, 200);
+    }
+
+    function stopTimer() {
+        if (timerInterval) {
+            clearInterval(timerInterval);
+            timerInterval = null;
+        }
+    }
+
+    // Очки для рейтинга: чем быстрее и меньше ходов, тем больше.
+    // Формула: max(0, 10000 - seconds*30 - moves*50)
+    function computeScore() {
+        const s = Math.max(0, 10000 - elapsed * 30 - moves * 50);
+        return s;
+    }
+
     function flipCard(card) {
-        if (lock) return;
+        if (lock || finished) return;
         if (card.classList.contains('flipped') || card.classList.contains('matched')) return;
+
+        startTimer();
 
         card.classList.add('flipped');
         card.style.background = 'var(--bg-card)';
@@ -620,9 +910,26 @@ function startMemory(area) {
                 lock = false;
 
                 if (matched === 8) {
+                    finished = true;
+                    stopTimer();
+                    const finalScore = computeScore();
+                    submitGameScore('memory', finalScore);
                     setTimeout(() => {
-                        alert(`Победа! Ходов: ${moves}`);
-                        startMemory(area);
+                        const ov = document.createElement('div');
+                        ov.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,0.8);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;z-index:10;';
+                        ov.innerHTML = `
+                            <div style="font-size:2rem;font-weight:800;margin-bottom:10px;">Победа!</div>
+                            <div style="font-size:1.1rem;margin-bottom:6px;">Время: ${fmtTime(elapsed)}</div>
+                            <div style="font-size:1.1rem;margin-bottom:6px;">Ходов: ${moves}</div>
+                            <div style="font-size:1.3rem;margin-bottom:24px;color:#30d158;font-weight:800;">Очки: ${fmtScore(finalScore)}</div>
+                            <div style="display:flex;gap:10px;">
+                                <button id="memRating" style="padding:12px 24px;border-radius:12px;background:rgba(255,255,255,0.15);color:#fff;font-weight:700;border:none;cursor:pointer;">🏆 Рейтинг</button>
+                                <button id="memRetry" style="padding:12px 30px;border-radius:12px;background:#30d158;color:#fff;font-weight:700;border:none;cursor:pointer;">Ещё раз</button>
+                            </div>
+                        `;
+                        area.appendChild(ov);
+                        ov.querySelector('#memRetry').addEventListener('click', () => { ov.remove(); startMemory(area); });
+                        ov.querySelector('#memRating').addEventListener('click', () => openLeaderboard('memory'));
                     }, 400);
                 }
             } else {
@@ -640,18 +947,19 @@ function startMemory(area) {
         }
     }
 
-    return () => {};
+    return () => { stopTimer(); };
 }
 
-/* ============================================================================
-   РЕАКЦИЯ (замена Cyber Runner)
-   ============================================================================ */
+// ============================================================================
+//  РЕАКЦИЯ — ускорение со временем + бомбы
+// ============================================================================
 function startReaction(area) {
     area.innerHTML = `
         <div style="display:flex;flex-direction:column;height:100%;background:#0f1419;color:#fff;padding:16px;">
             <div style="display:flex;justify-content:space-between;margin-bottom:12px;">
                 <div>Счёт: <span id="rctScore" style="font-weight:800;">0</span></div>
-                <div>Промахи: <span id="rctMiss" style="font-weight:800;color:#ff453a;">0/3</span></div>
+                <div>Жизни: <span id="rctLives" style="font-weight:800;color:#ff453a;">❤❤❤</span></div>
+                <div>Уровень: <span id="rctLevel" style="font-weight:800;">1</span></div>
             </div>
             <div id="rctField" style="flex:1;position:relative;background:#1a1f2e;border-radius:14px;overflow:hidden;touch-action:manipulation;"></div>
             <button id="rctStart" style="margin-top:12px;padding:14px;border-radius:12px;background:#30d158;color:#fff;font-weight:700;border:none;cursor:pointer;">Начать</button>
@@ -659,10 +967,43 @@ function startReaction(area) {
     `;
 
     const field = document.getElementById('rctField');
+    const scoreEl = document.getElementById('rctScore');
+    const livesEl = document.getElementById('rctLives');
+    const levelEl = document.getElementById('rctLevel');
+
     let score = 0;
-    let misses = 0;
+    let lives = 3;
+    let level = 1;
     let running = false;
     let spawnTimer = null;
+    let startTime = 0;
+    let levelTimer = null;
+
+    function renderLives() {
+        livesEl.textContent = '❤'.repeat(Math.max(0, lives)) || '—';
+    }
+
+    function computeScore() {
+        // Очки за игру + бонус за уровень
+        return score + level * 50;
+    }
+
+    // Время жизни цели (мс) — уменьшается с уровнем
+    function currentTargetLifetime() {
+        const base = 1400;
+        return Math.max(400, base - (level - 1) * 100);
+    }
+
+    // Интервал между спавнами (мс) — уменьшается с уровнем
+    function currentSpawnInterval() {
+        const base = 750;
+        return Math.max(220, base - (level - 1) * 50);
+    }
+
+    // Шанс появления бомбы (от 0 до 0.35)
+    function currentBombChance() {
+        return Math.min(0.35, 0.05 + (level - 1) * 0.03);
+    }
 
     function spawnTarget() {
         if (!running) return;
@@ -670,78 +1011,122 @@ function startReaction(area) {
         const fh = field.clientHeight;
         if (fw < 50 || fh < 50) return;
 
-        const size = 56;
+        const isBomb = Math.random() < currentBombChance();
+        const size = isBomb ? 60 : 56;
         const x = Math.random() * (fw - size);
         const y = Math.random() * (fh - size);
 
         const t = document.createElement('div');
-        t.style.cssText = `position:absolute;left:${x}px;top:${y}px;width:${size}px;height:${size}px;border-radius:50%;background:radial-gradient(circle,#30d158,#0088cc);box-shadow:0 0 20px rgba(48,209,88,0.6);cursor:pointer;animation:rctPop 0.2s ease;display:flex;align-items:center;justify-content:center;font-size:24px;user-select:none;`;
-        t.textContent = '🎯';
+        t.style.cssText = `position:absolute;left:${x}px;top:${y}px;width:${size}px;height:${size}px;border-radius:50%;
+            background:${isBomb ? 'radial-gradient(circle,#ff453a,#8b0000)' : 'radial-gradient(circle,#30d158,#0088cc)'};
+            box-shadow:0 0 20px ${isBomb ? 'rgba(255,69,58,0.7)' : 'rgba(48,209,88,0.6)'};
+            cursor:pointer;animation:rctPop 0.2s ease;display:flex;align-items:center;justify-content:center;
+            font-size:${isBomb ? '26px' : '24px'};user-select:none;`;
+        t.textContent = isBomb ? '💣' : '🎯';
 
         const timeout = setTimeout(() => {
             if (t.parentNode) {
                 t.remove();
-                misses++;
-                document.getElementById('rctMiss').textContent = misses + '/3';
-                if (misses >= 3) endGame();
+                if (!isBomb) {
+                    // Пропустили цель — теряем жизнь
+                    loseLife();
+                }
             }
-        }, 1200);
+        }, currentTargetLifetime());
 
-        t.addEventListener('click', (e) => {
+        const handleHit = (e) => {
             e.stopPropagation();
+            if (e.cancelable) e.preventDefault();
             clearTimeout(timeout);
-            score++;
-            document.getElementById('rctScore').textContent = score;
-            t.style.transform = 'scale(1.4)';
-            t.style.opacity = '0';
-            setTimeout(() => t.remove(), 200);
-        });
+            if (isBomb) {
+                // Попали по бомбе — теряем жизнь
+                t.style.transform = 'scale(1.6)';
+                t.style.opacity = '0';
+                setTimeout(() => t.remove(), 200);
+                loseLife();
+            } else {
+                // Обычная цель — +1 очко
+                score++;
+                scoreEl.textContent = score;
+                t.style.transform = 'scale(1.4)';
+                t.style.opacity = '0';
+                setTimeout(() => t.remove(), 200);
+            }
+        };
 
-        t.addEventListener('touchstart', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            clearTimeout(timeout);
-            score++;
-            document.getElementById('rctScore').textContent = score;
-            t.remove();
-        }, { passive: false });
+        t.addEventListener('click', handleHit);
+        t.addEventListener('touchstart', handleHit, { passive: false });
 
         field.appendChild(t);
+    }
+
+    function loseLife() {
+        if (!running) return;
+        lives--;
+        renderLives();
+        // Красная вспышка поля
+        field.style.transition = 'box-shadow 0.15s';
+        field.style.boxShadow = 'inset 0 0 60px rgba(255,69,58,0.8)';
+        setTimeout(() => { field.style.boxShadow = ''; }, 150);
+        if (lives <= 0) endGame();
     }
 
     function endGame() {
         running = false;
         clearInterval(spawnTimer);
+        clearInterval(levelTimer);
+        const finalScore = computeScore();
+        submitGameScore('reaction', finalScore);
+
         field.innerHTML = `
-            <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;">
+            <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;">
                 <div style="font-size:1.6rem;font-weight:800;margin-bottom:8px;">Игра окончена</div>
-                <div style="font-size:1.2rem;margin-bottom:20px;">Счёт: ${score}</div>
-                <button id="rctRestart" style="padding:12px 30px;border-radius:12px;background:#30d158;color:#fff;font-weight:700;border:none;cursor:pointer;">Ещё раз</button>
+                <div style="font-size:1rem;margin-bottom:6px;">Целей поймано: ${score}</div>
+                <div style="font-size:1rem;margin-bottom:6px;">Достигнут уровень: ${level}</div>
+                <div style="font-size:1.3rem;margin-bottom:20px;color:#30d158;font-weight:800;">Очки: ${fmtScore(finalScore)}</div>
+                <div style="display:flex;gap:10px;">
+                    <button id="rctRating" style="padding:12px 24px;border-radius:12px;background:rgba(255,255,255,0.15);color:#fff;font-weight:700;border:none;cursor:pointer;">🏆 Рейтинг</button>
+                    <button id="rctRestart" style="padding:12px 30px;border-radius:12px;background:#30d158;color:#fff;font-weight:700;border:none;cursor:pointer;">Ещё раз</button>
+                </div>
             </div>
         `;
         document.getElementById('rctRestart').addEventListener('click', () => {
             field.innerHTML = '';
-            score = 0; misses = 0;
-            document.getElementById('rctScore').textContent = 0;
-            document.getElementById('rctMiss').textContent = '0/3';
+            score = 0; lives = 3; level = 1;
+            scoreEl.textContent = 0;
+            levelEl.textContent = 1;
+            renderLives();
             startGameLoop();
         });
+        document.getElementById('rctRating').addEventListener('click', () => openLeaderboard('reaction'));
     }
 
     function startGameLoop() {
         running = true;
-        spawnTimer = setInterval(() => {
+        startTime = Date.now();
+
+        // Спавн целей/бомб
+        const spawnTick = () => {
             if (!running) return;
-            if (Math.random() < 0.8) spawnTarget();
-        }, 700 - Math.min(400, score * 15));
+            if (Math.random() < 0.85) spawnTarget();
+            spawnTimer = setTimeout(spawnTick, currentSpawnInterval());
+        };
+        spawnTick();
+
+        // Каждые 10 секунд — новый уровень (ускорение + больше бомб)
+        levelTimer = setInterval(() => {
+            if (!running) return;
+            level++;
+            levelEl.textContent = level;
+        }, 10000);
     }
 
     document.getElementById('rctStart').addEventListener('click', () => {
         document.getElementById('rctStart').style.display = 'none';
+        renderLives();
         startGameLoop();
     });
 
-    // Анимация
     if (!document.getElementById('rctStyles')) {
         const s = document.createElement('style');
         s.id = 'rctStyles';
@@ -749,5 +1134,9 @@ function startReaction(area) {
         document.head.appendChild(s);
     }
 
-    return () => { running = false; clearInterval(spawnTimer); };
+    return () => {
+        running = false;
+        clearTimeout(spawnTimer);
+        clearInterval(levelTimer);
+    };
 }
