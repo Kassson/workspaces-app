@@ -6,14 +6,7 @@ window._hwStudents = [];
 window._currentHwStatsId = null;
 let _memberForStatusEdit = null;
 
-function showLoadingScreen() {
-    const el = document.getElementById('loadingScreen');
-    if (el) el.classList.add('show');
-}
-function hideLoadingScreen() {
-    const el = document.getElementById('loadingScreen');
-    if (el) el.classList.remove('show');
-}
+// showLoadingScreen / hideLoadingScreen теперь в shared.js
 
 async function loadAndApplySettings(user) {
     try { systemSettings = await apiGet('/api/settings'); } catch (e) { systemSettings = {}; }
@@ -799,7 +792,6 @@ function renderJournalTable() {
     html += `</tbody></table>`;
     wrap.innerHTML = html;
 
-    // Обводка столбца «сегодня» — на ВСЕ ячейки, включая цветные
     const todayIdx = days.findIndex(d => d.date === todayStr);
     if (todayIdx >= 0) {
         const table = wrap.querySelector('table');
@@ -1834,7 +1826,6 @@ async function rotateInviteCode() {
     catch (e) { showToast(e.error || 'Ошибка', 'error'); }
 }
 
-// УДАЛЕНИЕ ПРОСТРАНСТВА (только root_teacher)
 async function deleteSpace(spaceId, spaceName) {
     if (!currentUser?.isRoot) {
         return showToast('Только Root может удалять пространства', 'error');
