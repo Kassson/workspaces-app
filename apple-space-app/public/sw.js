@@ -1,16 +1,13 @@
 // ============================================================================
 //  sw.js — Service Worker
-//  Стратегия: network-first для HTML, cache-first для статики.
-//  Новый SW активируется мгновенно (skipWaiting + clients.claim).
-//  При обновлении отправляет клиентам SW_UPDATED — фронт покажет тост.
+//  HTML и JS — network-first (всегда свежие).
+//  CSS, иконки — cache-first с фоновым обновлением.
+//  Новый SW активируется мгновенно + оповещает клиентов.
 // ============================================================================
-const CACHE_NAME = 'workspaces-v6';
+const CACHE_NAME = 'workspaces-v7';
 
 const OFFLINE_URLS = [
     '/style.css',
-    '/shared.js',
-    '/portal.js',
-    '/game.js',
     '/manifest.json',
     '/icon.svg'
 ];
@@ -25,11 +22,9 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
     event.waitUntil(
         (async () => {
-            // Удаляем все старые кэши
             const names = await caches.keys();
             await Promise.all(names.filter(n => n !== CACHE_NAME).map(n => caches.delete(n)));
             await self.clients.claim();
-            // Оповещаем все открытые вкладки, что пришло обновление
             const clients = await self.clients.matchAll({ type: 'window' });
             clients.forEach(client => {
                 try { client.postMessage({ type: 'SW_UPDATED', version: CACHE_NAME }); } catch (e) {}
@@ -41,14 +36,16 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
     const url = new URL(event.request.url);
 
-    // API и сокеты — не кэшируем, всегда в сеть
+    // API и sockets — не кэшируем
     if (url.pathname.startsWith('/socket.io/') || url.pathname.startsWith('/api/')) return;
     if (event.request.method !== 'GET') return;
     if (url.origin !== self.location.origin) return;
 
-    // HTML — network-first: всегда свежая страница, кэш только как fallback оффлайн
     const isHTML = event.request.mode === 'navigate' || url.pathname === '/' || url.pathname.endsWith('.html');
-    if (isHTML) {
+    const isJS = url.pathname.endsWith('.js');
+
+    // HTML и JS — network-first (всегда свежие, кэш только как fallback)
+    if (isHTML || isJS) {
         event.respondWith(
             fetch(event.request)
                 .then((response) => {
@@ -58,12 +55,12 @@ self.addEventListener('fetch', (event) => {
                     }
                     return response;
                 })
-                .catch(() => caches.match(event.request).then(r => r || caches.match('/')))
+                .catch(() => caches.match(event.request).then(r => r || (isHTML ? caches.match('/') : undefined)))
         );
         return;
     }
 
-    // Статика (JS, CSS, иконки) — cache-first с фоновым обновлением
+    // CSS / иконки / манифест — cache-first с фоновым обновлением
     event.respondWith(
         caches.match(event.request).then((cached) => {
             const fetchPromise = fetch(event.request).then((response) => {
