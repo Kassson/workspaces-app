@@ -2,10 +2,6 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- ============================================================================
 -- ФУНКЦИЯ НОРМАЛИЗАЦИИ ИМЁН
--- Берёт первые 2 слова ФИО, приводит к нижнему регистру, ё→е,
--- сортирует первые два слова по алфавиту.
--- "Семён Гордеев" → "гордеев семен"
--- "Гордеев Семен Валерьевич" → "гордеев семен"
 -- ============================================================================
 CREATE OR REPLACE FUNCTION name_key(full_name TEXT) RETURNS TEXT AS $$
 DECLARE
@@ -161,12 +157,15 @@ CREATE TABLE IF NOT EXISTS homeworks (
 
 -- ============================================================================
 -- 8. Отметки сдачи ДЗ
+--  attachment_url    — первое фото (для обратной совместимости)
+--  attachment_urls   — массив всех фото (мультистраничные ДЗ)
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS homework_completions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     homework_id UUID REFERENCES homeworks(id) ON DELETE CASCADE,
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     attachment_url TEXT NULL,
+    attachment_urls TEXT[] DEFAULT '{}',
     completed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(homework_id, user_id)
 );
@@ -438,3 +437,12 @@ CREATE INDEX IF NOT EXISTS idx_journal_students_order ON journal_students(space_
 CREATE INDEX IF NOT EXISTS idx_grade_shares_recipient ON grade_shares(space_id, shared_with_user_id);
 CREATE INDEX IF NOT EXISTS idx_grade_shares_owner ON grade_shares(space_id, owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_rpg_state_user ON rpg_state(user_id);
+
+-- ============================================================================
+-- ДОПОЛНИТЕЛЬНЫЕ ИНДЕКСЫ (оптимизация под 100+ одновременных пользователей)
+-- ============================================================================
+CREATE INDEX IF NOT EXISTS idx_grades_date_space ON grades(space_id, lesson_date DESC);
+CREATE INDEX IF NOT EXISTS idx_grades_space_subject ON grades(space_id, subject_name);
+CREATE INDEX IF NOT EXISTS idx_journal_students_name ON journal_students(space_id, subject_name, student_name);
+CREATE INDEX IF NOT EXISTS idx_hw_space_due ON homeworks(space_id, due_date);
+CREATE INDEX IF NOT EXISTS idx_hw_completions_hw_user ON homework_completions(homework_id, user_id);
