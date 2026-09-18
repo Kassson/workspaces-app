@@ -436,7 +436,40 @@ function escapeHtml(str) {
     return String(str ?? '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
 }
 
-function fmtTime(t) { return t ? t.slice(0, 5) : ''; }
+// ============================================================================
+//  ФОРМАТИРОВАНИЕ ВРЕМЕНИ (универсальное)
+//  Принимает:
+//   - строку "09:00:00" или "09:00"
+//   - Date-объект
+//   - объект {hours, minutes} (pg-интервал)
+//   - null / undefined
+//  Возвращает "HH:MM" либо "--:--" при невалидном значении.
+// ============================================================================
+function fmtTime(t) {
+    if (t === null || t === undefined || t === '') return '--:--';
+
+    // Строка "HH:MM:SS" или "HH:MM"
+    if (typeof t === 'string') {
+        const m = t.match(/^(\d{1,2}):(\d{2})/);
+        if (m) return String(m[1]).padStart(2, '0') + ':' + m[2];
+        return t;
+    }
+
+    // Date-объект
+    if (t instanceof Date) {
+        if (isNaN(t.getTime())) return '--:--';
+        return String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
+    }
+
+    // Объект с hours/minutes (например, pg-интервал)
+    if (typeof t === 'object') {
+        const h = parseInt(t.hours ?? t.h ?? 0, 10) || 0;
+        const m = parseInt(t.minutes ?? t.m ?? 0, 10) || 0;
+        return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+    }
+
+    return '--:--';
+}
 
 const WEEKDAY_NAMES = ['', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
 const WEEKDAY_SHORT = ['', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
