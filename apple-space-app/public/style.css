@@ -1341,3 +1341,85 @@ a {
     color: #fff;
     border-color: var(--accent-blue);
 }
+
+/* ============================================================================
+   Кнопка скрытия/показа бокового меню (ПК)
+   ============================================================================ */
+
+/* Сайдбар — анимация ширины */
+.sidebar {
+    transition: width var(--transition), padding var(--transition), border-right-color var(--transition);
+    overflow-x: hidden;
+    white-space: nowrap;
+}
+
+/* Скрытое состояние */
+.app-dashboard.sidebar-hidden .sidebar {
+    width: 0;
+    padding-left: 0;
+    padding-right: 0;
+    border-right-color: transparent;
+}
+
+/* Кнопка «‹» внутри sidebar-logo */
+.sidebar-toggle {
+    margin-left: auto;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background var(--transition), color var(--transition);
+    flex-shrink: 0;
+    font-size: 18px;
+    line-height: 1;
+}
+.sidebar-toggle:hover {
+    background: var(--input-bg);
+    color: var(--text);
+}
+
+/* Плавающая кнопка «›» — появляется, когда сайдбар скрыт */
+.sidebar-show-btn {
+    display: none;
+    position: fixed;
+    top: 16px;
+    left: 16px;
+    z-index: 1000;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--bg-card);
+    border: 1px solid var(--card-border);
+    box-shadow: var(--shadow-sm);
+    color: var(--text);
+    font-size: 20px;
+    line-height: 1;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: transform var(--transition), background var(--transition);
+}
+.sidebar-show-btn:hover { background: var(--input-bg); }
+.sidebar-show-btn:active { transform: scale(0.92); }
+
+/* Показываем плавающую кнопку, только когда сайдбар скрыт (на ПК) */
+@media (min-width: 769px) {
+    .app-dashboard.sidebar-hidden .sidebar-show-btn {
+        display: flex;
+    }
+    /* Когда сайдбар скрыт, освобождаем место для плавающей кнопки */
+    .app-dashboard.sidebar-hidden .main-content {
+        padding-top: 22px;
+    }
+}
+
+/* На мобилке ничего не показываем — сайдбар и так скрыт */
+@media (max-width: 768px) {
+    .sidebar-toggle,
+    .sidebar-show-btn { display: none !important; }
+}
