@@ -163,7 +163,7 @@ function hideLoadingScreen() {
 // ============================================================================
 //  ДИНАМИЧЕСКАЯ ЗАГРУЗКА portal.js (с версией, чтобы не цеплялся кэш)
 // ============================================================================
-const APP_ASSET_VERSION = '10';
+const APP_ASSET_VERSION = '11';
 
 function loadPortalJs() {
     return new Promise((resolve, reject) => {

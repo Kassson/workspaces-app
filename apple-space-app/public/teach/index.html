@@ -7,12 +7,12 @@
     <meta name="theme-color" content="#f5f7fa">
     <link rel="manifest" href="/manifest.json">
     <link rel="icon" href="/icon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/style.css?v=10">
+    <link rel="stylesheet" href="/style.css?v=11">
 
     <!-- Версия приложения — при смене чистим кэш и снимаем SW -->
     <script>
     (function(){
-        var APP_VERSION = '10';
+        var APP_VERSION = '11';
         try {
             var saved = localStorage.getItem('appVersion');
             if (saved !== APP_VERSION) {
@@ -335,7 +335,7 @@
     <div id="dynamicSheetRoot"></div>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="/shared.js?v=10"></script>
+    <script src="/shared.js?v=11"></script>
     <script>
         const errorMsg = document.getElementById('errorMsg');
         function switchView(viewId) {

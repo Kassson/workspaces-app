@@ -39,7 +39,7 @@ function fmtScore(n) {
     return Math.floor(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }
 
-function fmtTime(sec) {
+function fmtGameTime(sec) {
     const m = Math.floor(sec / 60);
     const s = sec % 60;
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
@@ -863,7 +863,7 @@ function startMemory(area) {
         timerInterval = setInterval(() => {
             elapsed = Math.floor((Date.now() - startedAt) / 1000);
             const el = document.getElementById('memTime');
-            if (el) el.textContent = fmtTime(elapsed);
+            if (el) el.textContent = fmtGameTime(elapsed);
         }, 200);
     }
 
@@ -919,7 +919,7 @@ function startMemory(area) {
                         ov.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,0.8);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;z-index:10;';
                         ov.innerHTML = `
                             <div style="font-size:2rem;font-weight:800;margin-bottom:10px;">Победа!</div>
-                            <div style="font-size:1.1rem;margin-bottom:6px;">Время: ${fmtTime(elapsed)}</div>
+                            <div style="font-size:1.1rem;margin-bottom:6px;">Время: ${fmtGameTime(elapsed)}</div>
                             <div style="font-size:1.1rem;margin-bottom:6px;">Ходов: ${moves}</div>
                             <div style="font-size:1.3rem;margin-bottom:24px;color:#30d158;font-weight:800;">Очки: ${fmtScore(finalScore)}</div>
                             <div style="display:flex;gap:10px;">
