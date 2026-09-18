@@ -79,14 +79,33 @@ async function sendPushToUsers(pool, userIds, payload, opts = {}) {
             }
         }
 
-        // Фильтр настроек уведомлений
-        if (opts.notifyType) {
-            const filtered = [];
-            for (const uid of ids) {
-                const allowed = await checkUserPrefs(pool, uid, opts.notifyType);
-                if (allowed) filtered.push(uid);
-            }
-            ids = filtered;
+        // Фильтр настроек уведомлений — батчинг: один запрос на всех
+        if (opts.notifyType && ids.length) {
+            const { rows: prefs } = await pool.query(
+                `SELECT user_id, all_enabled, chat_enabled, schedule_enabled,
+                        lesson_reminder_enabled, new_homework_enabled,
+                        homework_deadline_enabled, grades_enabled
+                 FROM user_notification_prefs WHERE user_id = ANY($1::uuid[])`,
+                [ids]
+            );
+            const prefsMap = {};
+            prefs.forEach(p => { prefsMap[p.user_id] = p; });
+
+            const type = opts.notifyType;
+            ids = ids.filter(uid => {
+                const p = prefsMap[uid];
+                if (!p) return true; // нет настроек — по умолчанию разрешено
+                if (!p.all_enabled) return false;
+                switch (type) {
+                    case 'chat': return p.chat_enabled !== false;
+                    case 'schedule': return p.schedule_enabled !== false;
+                    case 'lesson_reminder': return p.lesson_reminder_enabled !== false;
+                    case 'homework_new': return p.new_homework_enabled !== false;
+                    case 'homework_deadline': return p.homework_deadline_enabled !== false;
+                    case 'grade': return p.grades_enabled !== false;
+                    default: return true;
+                }
+            });
         }
 
         if (!ids.length) return;
@@ -155,18 +174,6 @@ async function getSpaceStudentIds(pool, spaceId) {
         `SELECT u.id FROM space_members sm JOIN users u ON u.id = sm.user_id
          WHERE sm.space_id = $1 AND u.is_teacher = FALSE`,
         [spaceId]
-    );
-    return rows.map(r => r.id);
-}
-
-async function getUnmutedStudents(pool, spaceId, exceptUserId) {
-    const { rows } = await pool.query(
-        `SELECT u.id FROM space_members sm JOIN users u ON u.id = sm.user_id
-         LEFT JOIN chat_mutes cm ON cm.user_id = u.id AND cm.space_id = sm.space_id
-         WHERE sm.space_id = $1 AND u.is_teacher = FALSE
-           AND ($2::uuid IS NULL OR u.id != $2)
-           AND NOT (cm.user_id IS NOT NULL AND (cm.muted_forever = TRUE OR (cm.muted_until IS NOT NULL AND cm.muted_until > NOW())))`,
-        [spaceId, exceptUserId || null]
     );
     return rows.map(r => r.id);
 }
@@ -285,7 +292,6 @@ async function notifyCollegeAnnouncement(pool, text) {
 // ============================================================================
 //  Напоминания о парах (±1 минута)
 // ============================================================================
-const REMINDER_MIN = 10;
 const TZ = process.env.SCHEDULE_TIMEZONE || 'Europe/Moscow';
 const sentReminders = new Set();
 
@@ -441,7 +447,6 @@ module.exports = {
     initWebPush,
     sendPushToUsers,
     getSpaceStudentIds,
-    getUnmutedStudents,
     getAllUserIds,
     notifyScheduleChange,
     notifyNewHomework,
