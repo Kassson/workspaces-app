@@ -30,6 +30,8 @@ function registerJournalRoutes(app, pool, verifyJWT, requireSpaceAccess) {
     });
 
     // POST /api/journal-students — добавить виртуального ученика
+    // После вставки пересчитываем sort_order по фамилии (COLLATE "C"),
+    // чтобы новый ученик встал в правильное место, а не в конец.
     app.post('/api/journal-students', verifyJWT, async (req, res) => {
         try {
             const user = await pool.query('SELECT * FROM users WHERE id = $1', [req.userId]);
@@ -62,18 +64,36 @@ function registerJournalRoutes(app, pool, verifyJWT, requireSpaceAccess) {
                 return res.json(existing.rows[0]);
             }
 
-            const maxQ = await pool.query(
-                'SELECT COALESCE(MAX(sort_order), 0) AS m FROM journal_students WHERE space_id = $1 AND subject_name = $2',
-                [spaceId, subjectName.trim()]
-            );
-            const nextOrder = (maxQ.rows[0].m || 0) + 1;
-
+            // Вставляем со sort_order = 0 (пересчитаем ниже)
             const r = await pool.query(
                 `INSERT INTO journal_students (space_id, subject_name, student_name, sort_order)
-                 VALUES ($1, $2, $3, $4)
+                 VALUES ($1, $2, $3, 0)
                  RETURNING *`,
-                [spaceId, subjectName.trim(), studentName.trim(), nextOrder]
+                [spaceId, subjectName.trim(), studentName.trim()]
             );
+
+            // Пересчёт sort_order по фамилии — как в excel.js
+            try {
+                await pool.query(
+                    `WITH ordered AS (
+                        SELECT id,
+                               ROW_NUMBER() OVER (
+                                   ORDER BY LOWER(REPLACE(student_name, 'ё', 'е')) COLLATE "C" ASC,
+                                            student_name COLLATE "C" ASC
+                               ) AS rn
+                        FROM journal_students
+                        WHERE space_id = $1 AND subject_name = $2
+                    )
+                    UPDATE journal_students js
+                    SET sort_order = o.rn
+                    FROM ordered o
+                    WHERE js.id = o.id`,
+                    [spaceId, subjectName.trim()]
+                );
+            } catch (e) {
+                console.warn('reorder journal_students failed:', e.message);
+            }
+
             res.json(r.rows[0] || { ok: true });
         } catch (e) {
             console.error('journal-students POST:', e.message);
