@@ -152,6 +152,7 @@ CREATE TABLE IF NOT EXISTS homeworks (
     subject_name VARCHAR(100) NOT NULL,
     title TEXT NOT NULL,
     due_date DATE NOT NULL,
+    attachment_url TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -402,6 +403,7 @@ CREATE TABLE IF NOT EXISTS rpg_state (
     forge INT DEFAULT 0,
     tower INT DEFAULT 0,
     monster_idx INT DEFAULT 0,
+    extra JSONB DEFAULT '{}'::jsonb,
     last_online TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

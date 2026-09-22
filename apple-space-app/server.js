@@ -815,9 +815,10 @@ app.get('/api/homework/:id/stats', verifyJWT, async (req, res) => {
 });
 
 app.post('/api/homework', verifyJWT, requireSpaceAdmin, async (req, res) => {
-    const { spaceId, subjectName, title, dueDate } = req.body;
+    const { spaceId, subjectName, title, dueDate, attachmentUrl } = req.body;
     if (!subjectName || !title || !dueDate) return res.status(400).json({ error: 'Заполните поля' });
-    const r = await pool.query('INSERT INTO homeworks (space_id, subject_name, title, due_date) VALUES ($1,$2,$3,$4) RETURNING *', [spaceId, subjectName, title, dueDate]);
+    const cleanAttachmentUrl = typeof attachmentUrl === 'string' && attachmentUrl.length > 0 ? attachmentUrl : null;
+    const r = await pool.query('INSERT INTO homeworks (space_id, subject_name, title, due_date, attachment_url) VALUES ($1,$2,$3,$4,$5) RETURNING *', [spaceId, subjectName, title, dueDate, cleanAttachmentUrl]);
     push.notifyNewHomework(pool, spaceId, subjectName, title, dueDate).catch(() => {});
     res.json(r.rows[0]);
 });
@@ -1334,7 +1335,8 @@ app.get('/api/games/rpg-state', verifyJWT, async (req, res) => {
             monsterIdx: s.monster_idx || 0,
             killsTotal: s.kills_total || 0,
             killsOnLevel: s.kills_on_level || 0,
-            lastOnline: s.last_online ? new Date(s.last_online).getTime() : 0
+            lastOnline: s.last_online ? new Date(s.last_online).getTime() : 0,
+            extra: (s.extra && typeof s.extra === 'object') ? s.extra : {}
         });
     } catch (e) {
         console.error('rpg-state GET:', e.message);
@@ -1345,7 +1347,7 @@ app.get('/api/games/rpg-state', verifyJWT, async (req, res) => {
 app.post('/api/games/rpg-state', verifyJWT, async (req, res) => {
     const {
         coins, level, sword, armor, guilds, warriors, artifacts,
-        monsterIdx, killsTotal, killsOnLevel
+        monsterIdx, killsTotal, killsOnLevel, extra
     } = req.body || {};
 
     const toInt = (v, def = 0) => {
@@ -1366,12 +1368,22 @@ app.post('/api/games/rpg-state', verifyJWT, async (req, res) => {
         killsOnLevel: toInt(killsOnLevel)
     };
 
+    // extra — произвольные доп.данные новой механики кликера (этапы/боссы/магазин).
+    // Не участвует в формуле таблицы лидеров — валидируем только на "не мусор" и размер.
+    let safeExtra = {};
+    if (extra && typeof extra === 'object' && !Array.isArray(extra)) {
+        try {
+            const json = JSON.stringify(extra);
+            if (json.length <= 20000) safeExtra = extra;
+        } catch (e) { /* оставляем {} */ }
+    }
+
     try {
         await pool.query(
             `INSERT INTO rpg_state
                 (user_id, coins, level, sword, armor, guilds, warriors, artifacts,
-                 monster_idx, kills_total, kills_on_level, last_online, updated_at)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW(),NOW())
+                 monster_idx, kills_total, kills_on_level, extra, last_online, updated_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW(),NOW())
              ON CONFLICT (user_id) DO UPDATE SET
                 coins = EXCLUDED.coins,
                 level = EXCLUDED.level,
@@ -1383,13 +1395,15 @@ app.post('/api/games/rpg-state', verifyJWT, async (req, res) => {
                 monster_idx = EXCLUDED.monster_idx,
                 kills_total = EXCLUDED.kills_total,
                 kills_on_level = EXCLUDED.kills_on_level,
+                extra = EXCLUDED.extra,
                 last_online = NOW(),
                 updated_at = NOW()`,
             [
                 req.userId,
                 safe.coins, safe.level, safe.sword, safe.armor,
                 safe.guilds, safe.warriors, safe.artifacts,
-                safe.monsterIdx, safe.killsTotal, safe.killsOnLevel
+                safe.monsterIdx, safe.killsTotal, safe.killsOnLevel,
+                JSON.stringify(safeExtra)
             ]
         );
         res.json({ ok: true });
@@ -1549,6 +1563,8 @@ async function ensureSchema() {
         `ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES chat_messages(id) ON DELETE SET NULL`,
         `ALTER TABLE journal_students ADD COLUMN IF NOT EXISTS sort_order INT DEFAULT 0`,
         `ALTER TABLE homework_completions ADD COLUMN IF NOT EXISTS attachment_urls TEXT[] DEFAULT '{}'`,
+        `ALTER TABLE homeworks ADD COLUMN IF NOT EXISTS attachment_url TEXT`,
+        `ALTER TABLE rpg_state ADD COLUMN IF NOT EXISTS extra JSONB DEFAULT '{}'::jsonb`,
         `CREATE INDEX IF NOT EXISTS idx_journal_students_order ON journal_students(space_id, subject_name, sort_order)`,
         `CREATE INDEX IF NOT EXISTS idx_grades_date_space ON grades(space_id, lesson_date DESC)`,
         `CREATE INDEX IF NOT EXISTS idx_grades_space_subject ON grades(space_id, subject_name)`,
