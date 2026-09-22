@@ -1876,15 +1876,39 @@ async function sendChatMessage(spaceId) {
             };
             
             const uploaded = await uploadFiles(files, spaceId);
-            // Фильтруем только успешно загруженные файлы (с полем id)
-            const successfulUploads = uploaded.filter(f => f && f.id);
-            fileIds = successfulUploads.map(f => f.id);
+            
+            // Логируем ответ для отладки
+            console.log('Результат загрузки файлов:', uploaded);
+            
+            // Фильтруем только успешно загруженные файлы
+            // Проверяем разные возможные форматы ответа: {id}, {fileId}, {file_id}, {url}
+            const successfulUploads = uploaded.filter(f => {
+                if (!f) return false;
+                if (f.error) return false;
+                // Проверяем наличие любого из возможных идентификаторов
+                return f.id || f.fileId || f.file_id || f.url;
+            });
+            
+            // Извлекаем ID из разных возможных полей
+            fileIds = successfulUploads.map(f => {
+                const id = f.id || f.fileId || f.file_id;
+                if (id) return id;
+                // Если ID нет, но есть URL, пытаемся извлечь ID из URL
+                if (f.url) {
+                    const match = f.url.match(/\/files\/([^/]+)/);
+                    return match ? match[1] : f.url;
+                }
+                return null;
+            }).filter(id => id !== null);
+            
+            console.log('Извлечённые fileIds:', fileIds);
             
             // Показываем ошибки для неудачных загрузок
             const failedUploads = uploaded.filter(f => f && f.error);
             if (failedUploads.length > 0) {
-                const errorMsg = failedUploads.map(f => `${f.name}: ${f.error}`).join(', ');
+                const errorMsg = failedUploads.map(f => `${f.name || 'файл'}: ${f.error}`).join(', ');
                 console.error('Ошибки загрузки файлов:', errorMsg);
+                showToast(`Ошибки загрузки: ${errorMsg}`, 'error', 5000);
             }
             
             // Если ни один файл не загрузился, показываем ошибку и не отправляем сообщение

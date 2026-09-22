@@ -437,28 +437,46 @@ async function startRpgClicker(area, forcedState = null) {
 
     function updateUI() {
         const stats = rpgComputeStats(state.extra.upgrades);
-        document.getElementById('rpgCoins').textContent = fmtScore(state.coins);
-        document.getElementById('rpgGems').textContent = fmtScore(state.extra.gems);
-        document.getElementById('rpgLevel').textContent = state.level;
-        document.getElementById('rpgDmg').textContent = fmtScore(stats.tapDamage);
-        document.getElementById('rpgDps').textContent = fmtScore(stats.dps);
-        document.getElementById('rpgCrit').textContent = Math.round(stats.critChance * 100) + '%';
-        document.getElementById('rpgPen').textContent = Math.round(stats.penetration * 100) + '%';
+        
+        // Защита от вызова до загрузки DOM
+        const rpgCoins = document.getElementById('rpgCoins');
+        const rpgGems = document.getElementById('rpgGems');
+        const rpgLevel = document.getElementById('rpgLevel');
+        const rpgDmg = document.getElementById('rpgDmg');
+        const rpgDps = document.getElementById('rpgDps');
+        const rpgCrit = document.getElementById('rpgCrit');
+        const rpgPen = document.getElementById('rpgPen');
+        const rpgStageLabel = document.getElementById('rpgStageLabel');
+        
+        if (!rpgCoins || !rpgGems || !rpgLevel || !rpgDmg || !rpgDps || !rpgCrit || !rpgPen || !rpgStageLabel) {
+            console.warn('RPG UI элементы ещё не загружены');
+            return;
+        }
+        
+        rpgCoins.textContent = fmtScore(state.coins);
+        rpgGems.textContent = fmtScore(state.extra.gems);
+        rpgLevel.textContent = state.level;
+        rpgDmg.textContent = fmtScore(stats.tapDamage);
+        rpgDps.textContent = fmtScore(stats.dps);
+        rpgCrit.textContent = Math.round(stats.critChance * 100) + '%';
+        rpgPen.textContent = Math.round(stats.penetration * 100) + '%';
 
         const t = currentTargetInfo();
-        monsterEl.textContent = t.emoji;
-        nameEl.textContent = t.name;
-        hpBar.style.width = Math.max(0, (t.hp / t.maxHp) * 100) + '%';
-        hpBar.style.background = t.isBoss ? 'linear-gradient(90deg,#ff453a,#af52de)' : 'linear-gradient(90deg,#ff453a,#ff9f0a)';
-        infoEl.textContent = `HP: ${fmtScore(Math.max(0, t.hp))} / ${fmtScore(t.maxHp)}`;
-        bossTag.style.display = t.isBoss ? 'block' : 'none';
-        monsterEl.style.filter = t.isBoss ? 'drop-shadow(0 0 26px rgba(175,82,222,0.75))' : 'drop-shadow(0 0 20px rgba(255,80,80,0.5))';
-        killsEl.textContent = `Убито всего: ${fmtScore(state.killsTotal)}`;
+        if (monsterEl) monsterEl.textContent = t.emoji;
+        if (nameEl) nameEl.textContent = t.name;
+        if (hpBar) {
+            hpBar.style.width = Math.max(0, (t.hp / t.maxHp) * 100) + '%';
+            hpBar.style.background = t.isBoss ? 'linear-gradient(90deg,#ff453a,#af52de)' : 'linear-gradient(90deg,#ff453a,#ff9f0a)';
+        }
+        if (infoEl) infoEl.textContent = `HP: ${fmtScore(Math.max(0, t.hp))} / ${fmtScore(t.maxHp)}`;
+        if (bossTag) bossTag.style.display = t.isBoss ? 'block' : 'none';
+        if (monsterEl) monsterEl.style.filter = t.isBoss ? 'drop-shadow(0 0 26px rgba(175,82,222,0.75))' : 'drop-shadow(0 0 20px rgba(255,80,80,0.5))';
+        if (killsEl) killsEl.textContent = `Убито всего: ${fmtScore(state.killsTotal)}`;
 
         const required = rpgKillsRequired(state.level);
-        stageProgressLabel.textContent = t.isBoss ? 'Бой с боссом!' : `${state.killsOnLevel} / ${required}`;
-        stageProgressBar.style.width = (t.isBoss ? 100 : Math.min(100, (state.killsOnLevel / required) * 100)) + '%';
-        document.getElementById('rpgStageLabel').textContent = `Этап ${state.level}`;
+        if (stageProgressLabel) stageProgressLabel.textContent = t.isBoss ? 'Бой с боссом!' : `${state.killsOnLevel} / ${required}`;
+        if (stageProgressBar) stageProgressBar.style.width = (t.isBoss ? 100 : Math.min(100, (state.killsOnLevel / required) * 100)) + '%';
+        rpgStageLabel.textContent = `Этап ${state.level}`;
     }
 
     function persistLocal() { saveRpgState(state); }
