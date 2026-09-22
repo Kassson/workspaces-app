@@ -200,9 +200,14 @@ function homeworkCardHtml(hw, isAdmin, spaceId) {
         `
         : '';
 
+    const taskAttachmentHtml = hw.attachment_url
+        ? `<img src="${hw.attachment_url}" class="hw-task-photo" onclick="openImageViewer(['${hw.attachment_url}'], 0)" style="max-width:100px;max-height:100px;object-fit:cover;border-radius:10px;cursor:pointer;display:block;margin:6px 0;">`
+        : '';
+
     return `<div class="hw-card ${hw.is_done && !isTeacher ? 'done' : ''}">
         <div class="hw-top"><span class="hw-subject">${escapeHtml(hw.subject_name)}</span><span class="hw-due">до ${due}</span></div>
         <div class="hw-title">${escapeHtml(hw.title)}</div>
+        ${taskAttachmentHtml}
         <div class="hw-actions">
             ${personalActions}
             ${adminActions}
@@ -2035,11 +2040,34 @@ function openAddHomeworkSheet(spaceId) {
         <div class="form-group"><input name="subjectName" class="form-control" placeholder="Предмет" required></div>
         <div class="form-group"><textarea name="title" class="form-control" placeholder="Задание" required rows="3"></textarea></div>
         <div class="form-group"><input name="dueDate" type="date" class="form-control" required></div>
+        <div class="form-group">
+            <label class="btn-small" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+                📎 Прикрепить фото задания (опционально)
+                <input type="file" name="attachment" accept="image/*" style="display:none" onchange="handleHwAttachmentPreview(this)">
+            </label>
+            <div id="hwAttachmentPreview" style="margin-top:8px;"></div>
+        </div>
     `, async (fd) => {
-        await apiPost('/api/homework', { spaceId, subjectName: fd.get('subjectName'), title: fd.get('title'), dueDate: fd.get('dueDate') });
+        let attachmentUrl = null;
+        const file = fd.get('attachment');
+        if (file && file instanceof File && file.size > 0) {
+            const uploaded = await uploadFiles([file], spaceId);
+            const first = uploaded.find(f => f && f.url);
+            if (!first) throw new Error('Не удалось загрузить фото');
+            attachmentUrl = first.url;
+        }
+        await apiPost('/api/homework', { spaceId, subjectName: fd.get('subjectName'), title: fd.get('title'), dueDate: fd.get('dueDate'), attachmentUrl });
         showToast('ДЗ добавлено', 'success');
         renderHomeworkTab(document.getElementById(currentHwContainerId()), spaceId, true);
     }, 'Добавить');
+}
+function handleHwAttachmentPreview(input) {
+    const box = document.getElementById('hwAttachmentPreview');
+    if (!box) return;
+    const file = input.files && input.files[0];
+    if (!file) { box.innerHTML = ''; return; }
+    const url = URL.createObjectURL(file);
+    box.innerHTML = `<img src="${url}" style="max-width:120px;max-height:120px;object-fit:cover;border-radius:10px;display:block;">`;
 }
 function openJoinSpaceForm() {
     showFormSheet('Присоединиться к группе', `<div class="form-group"><input name="code" class="form-control" placeholder="Код приглашения" required style="text-transform:uppercase;"></div>`, async (fd) => {

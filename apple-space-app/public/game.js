@@ -27,7 +27,7 @@ function waitForLayout(area, callback, attempts = 0) {
 }
 
 const GAMES = [
-    { id: 'rpg-clicker',  name: 'RPG-кликер',  desc: 'Убивай монстров, прокачивай меч' },
+    { id: 'rpg-clicker',  name: 'RPG-кликер',  desc: 'Проходи этапы, бей боссов, качай магазин' },
     { id: 'snake-arena',  name: 'Змейка',      desc: 'Классика: собирай яблоки' },
     { id: '2048',         name: '2048',        desc: 'Собери плитку 2048' },
     { id: 'memory',       name: 'Найди пару',  desc: 'Открывай карточки, находи пары' },
@@ -246,239 +246,390 @@ async function submitGameScore(gameId, score) {
 }
 
 // ============================================================================
-//  RPG-КЛИКЕР
+//  RPG-КЛИКЕР — приключение по этапам с боссами и магазином, открывающимся по уровням
 // ============================================================================
+
+// Обычные монстры — пул расширяется по мере роста этапа (state.level)
+const RPG_MONSTER_POOL = [
+    { name: 'Слизень',      emoji: '🟢', hpMul: 1,    rewardMul: 1 },
+    { name: 'Крыса',        emoji: '🐀', hpMul: 1.7,  rewardMul: 1.3 },
+    { name: 'Летучая мышь', emoji: '🦇', hpMul: 2.5,  rewardMul: 1.6 },
+    { name: 'Гоблин',       emoji: '👺', hpMul: 3.6,  rewardMul: 2 },
+    { name: 'Скелет',       emoji: '💀', hpMul: 5.2,  rewardMul: 2.6 },
+    { name: 'Орк',          emoji: '👹', hpMul: 7.2,  rewardMul: 3.4 },
+    { name: 'Призрак',      emoji: '👻', hpMul: 9.8,  rewardMul: 4.4 },
+    { name: 'Демон',        emoji: '😈', hpMul: 13.5, rewardMul: 5.8 }
+];
+
+// Боссы этапов — по одному на этап (циклически), сила считается формулой rpgBossHp/rpgBossResistance
+const RPG_BOSS_POOL = [
+    { name: 'Король слизней',     emoji: '🐸' },
+    { name: 'Крысиный барон',     emoji: '🐭' },
+    { name: 'Вожак гоблинов',     emoji: '👺' },
+    { name: 'Костяной страж',     emoji: '☠️' },
+    { name: 'Вождь орков',        emoji: '🪓' },
+    { name: 'Древний призрак',    emoji: '🌫️' },
+    { name: 'Повелитель демонов', emoji: '👿' },
+    { name: 'Дракон бездны',      emoji: '🐉' }
+];
+
+// Магазин: предметы открываются по уровням игрока (тиеры 1-5)
+const RPG_SHOP_ITEMS = [
+    { key: 'sword',    name: 'Меч',               icon: '⚔️', tier: 1, unlockLevel: 1,  currency: 'coins', baseCost: 10,   costMul: 1.15,
+      desc: up => `Урон за тап: +1 (сейчас ${1 + up.sword})` },
+    { key: 'armor',    name: 'Доспехи',           icon: '🛡️', tier: 1, unlockLevel: 1,  currency: 'coins', baseCost: 15,   costMul: 1.2,
+      desc: up => `Монет за убийство: +15% (сейчас +${up.armor * 15}%)` },
+    { key: 'guild',    name: 'Гильдия',           icon: '🏰', tier: 2, unlockLevel: 3,  currency: 'coins', baseCost: 120,  costMul: 1.45,
+      desc: up => `Пассивный урон: +2/сек (сейчас +${up.guild * 2}/сек)` },
+    { key: 'warrior',  name: 'Наёмник',           icon: '🗡️', tier: 2, unlockLevel: 3,  currency: 'coins', baseCost: 60,   costMul: 1.28,
+      desc: up => `Пассивный урон: +1/сек (сейчас +${up.warrior}/сек)` },
+    { key: 'artifact', name: 'Артефакт',          icon: '🔮', tier: 3, unlockLevel: 6,  currency: 'coins', baseCost: 600,  costMul: 1.9,
+      desc: up => `Скорость тапа +15%, крит +2% (ур. ${up.artifact})` },
+    { key: 'forge',    name: 'Кузница',           icon: '🔥', tier: 3, unlockLevel: 6,  currency: 'coins', baseCost: 800,  costMul: 1.75,
+      desc: up => `Пробивает защиту боссов: +4% (сейчас +${up.forge * 4}%)` },
+    { key: 'potion',   name: 'Зелье силы',        icon: '🧪', tier: 4, unlockLevel: 10, currency: 'coins', baseCost: 2500, costMul: 1.6,
+      desc: up => `Весь урон: +8% (сейчас +${up.potion * 8}%)` },
+    { key: 'tower',    name: 'Башня',             icon: '🗼', tier: 4, unlockLevel: 10, currency: 'coins', baseCost: 4000, costMul: 1.55,
+      desc: up => `Пассивный урон: +6/сек (сейчас +${up.tower * 6}/сек)` },
+    { key: 'crystal',  name: 'Кристалл вечности', icon: '💎', tier: 5, unlockLevel: 15, currency: 'gems',  baseCost: 5,    costMul: 1.5,
+      desc: up => `Весь урон ×${(1 + up.crystal * 0.1).toFixed(1)} (сейчас ур. ${up.crystal})` }
+];
+
+const RPG_TIER_NAMES = { 1: 'Начало пути', 2: 'Отряд', 3: 'Магия', 4: 'Алхимия', 5: 'Легенда' };
+
+function rpgDefaultUpgrades() {
+    return { sword: 0, armor: 0, guild: 0, warrior: 0, artifact: 0, forge: 0, potion: 0, tower: 0, crystal: 0 };
+}
+function rpgShopItemCost(item, up) {
+    return Math.floor(item.baseCost * Math.pow(item.costMul, up[item.key] || 0));
+}
+// Сколько обычных монстров нужно убить на этапе, прежде чем выйдет босс
+function rpgKillsRequired(stage) {
+    return 6 + Math.min(18, Math.floor(stage / 2) * 2);
+}
+function rpgAvailablePoolSize(stage) {
+    return Math.min(RPG_MONSTER_POOL.length, 2 + Math.floor(stage / 2));
+}
+function rpgPickMonsterIdx(stage) {
+    return Math.floor(Math.random() * rpgAvailablePoolSize(stage));
+}
+function rpgRegularHp(stage, poolIdx) {
+    const base = 9 * Math.pow(1.33, stage - 1);
+    return Math.max(3, Math.ceil(base * RPG_MONSTER_POOL[poolIdx].hpMul));
+}
+function rpgRegularReward(stage, poolIdx) {
+    const base = 3 * Math.pow(1.27, stage - 1);
+    return Math.max(1, Math.ceil(base * RPG_MONSTER_POOL[poolIdx].rewardMul));
+}
+// Боссы заметно крепче обычных монстров того же этапа — тапами "в лоб" их не унести
+function rpgBossHp(stage) {
+    return Math.ceil(280 * Math.pow(1.5, stage - 1));
+}
+function rpgBossReward(stage) {
+    return Math.ceil(140 * Math.pow(1.38, stage - 1));
+}
+function rpgBossGems(stage) {
+    return 3 + Math.floor(stage / 2);
+}
+// Сопротивление урону босса растёт с этапами; снижается прокачкой "Кузница" (penetration)
+function rpgBossResistance(stage) {
+    return Math.min(0.6, 0.04 + stage * 0.02);
+}
+function rpgComputeStats(up) {
+    const dmgMul = (1 + up.potion * 0.08) * (1 + up.crystal * 0.1);
+    return {
+        tapDamage: (1 + up.sword) * dmgMul,
+        dps: (up.guild * 2 + up.warrior * 1 + up.tower * 6) * dmgMul,
+        coinMul: 1 + up.armor * 0.15,
+        speedMul: 1 + up.artifact * 0.15,
+        critChance: Math.min(0.6, up.artifact * 0.02),
+        penetration: Math.min(0.75, up.forge * 0.04),
+        dmgMul
+    };
+}
+
 async function startRpgClicker(area) {
     area.innerHTML = '<p style="text-align:center;padding:60px 20px;color:#8d99a5;">Загрузка прогресса…</p>';
 
     let state;
-    try {
-        state = await loadRpgStateAsync();
-    } catch (e) {
-        state = loadRpgState();
-    }
-    if (typeof state.killsTotal !== 'number') state.killsTotal = 0;
-    if (typeof state.killsOnLevel !== 'number') state.killsOnLevel = 0;
-    if (typeof state.level !== 'number' || state.level < 1) state.level = 1;
+    try { state = await loadRpgStateAsync(); }
+    catch (e) { state = loadRpgState(); }
+    state = rpgMigrateState(state);
 
     area.innerHTML = `
         <div style="display:flex;flex-direction:column;height:100%;background:linear-gradient(180deg,#1a1f2e,#0f1419);color:#fff;">
-            <div style="padding:14px;display:flex;justify-content:space-between;">
-                <div>
-                    <div style="font-size:0.75rem;opacity:0.7;">Монеты</div>
-                    <div style="font-size:1.5rem;font-weight:800;" id="rpgCoins">${fmtScore(state.coins)}</div>
-                </div>
-                <div style="text-align:right;">
-                    <div style="font-size:0.75rem;opacity:0.7;">Уровень</div>
-                    <div style="font-size:1.5rem;font-weight:800;" id="rpgLevel">${state.level}</div>
-                </div>
+            <div style="padding:12px 14px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+                <div><div style="font-size:0.7rem;opacity:0.7;">Монеты</div><div style="font-size:1.3rem;font-weight:800;" id="rpgCoins">${fmtScore(state.coins)}</div></div>
+                <div><div style="font-size:0.7rem;opacity:0.7;">💎 Кристаллы</div><div style="font-size:1.3rem;font-weight:800;color:#7dd3fc;" id="rpgGems">${fmtScore(state.extra.gems)}</div></div>
+                <div style="text-align:right;"><div style="font-size:0.7rem;opacity:0.7;">Уровень</div><div style="font-size:1.3rem;font-weight:800;" id="rpgLevel">${state.level}</div></div>
+            </div>
+            <div style="padding:0 14px;">
+                <div style="display:flex;justify-content:space-between;font-size:0.7rem;opacity:0.75;margin-bottom:3px;"><span id="rpgStageLabel">Этап ${state.level}</span><span id="rpgStageProgressLabel"></span></div>
+                <div style="height:8px;background:rgba(255,255,255,0.12);border-radius:4px;overflow:hidden;"><div id="rpgStageProgress" style="height:100%;background:linear-gradient(90deg,#30d158,#0088cc);width:0%;transition:width 0.2s;"></div></div>
             </div>
             <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;">
+                <div id="rpgBossTag" style="display:none;font-size:0.75rem;font-weight:800;letter-spacing:0.05em;color:#ff9f0a;margin-bottom:6px;">⚠️ БОСС ЭТАПА</div>
                 <div id="rpgMonster" style="font-size:5rem;cursor:pointer;user-select:none;transition:transform 0.08s;filter:drop-shadow(0 0 20px rgba(255,80,80,0.5));">👹</div>
                 <div style="width:80%;max-width:300px;margin-top:16px;height:14px;background:rgba(255,255,255,0.15);border-radius:7px;overflow:hidden;">
                     <div id="rpgMonsterHp" style="height:100%;background:linear-gradient(90deg,#ff453a,#ff9f0a);width:100%;transition:width 0.15s;"></div>
                 </div>
                 <div style="margin-top:8px;font-size:0.9rem;" id="rpgMonsterName">Слизень</div>
                 <div style="margin-top:4px;font-size:0.8rem;opacity:0.7;" id="rpgMonsterInfo"></div>
-                <div style="margin-top:6px;font-size:0.75rem;opacity:0.6;" id="rpgKillsInfo">Убито: 0</div>
+                <div style="margin-top:6px;font-size:0.75rem;opacity:0.6;" id="rpgKillsInfo">Убито всего: 0</div>
             </div>
             <div style="padding:12px;background:rgba(0,0,0,0.3);">
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;font-size:0.8rem;">
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px;font-size:0.72rem;">
                     <div style="text-align:center;"><div style="opacity:0.7;">Урон</div><div style="font-weight:700;" id="rpgDmg">1</div></div>
                     <div style="text-align:center;"><div style="opacity:0.7;">DPS</div><div style="font-weight:700;" id="rpgDps">0</div></div>
-                    <div style="text-align:center;"><div style="opacity:0.7;">Скорость</div><div style="font-weight:700;" id="rpgSpeed">1x</div></div>
+                    <div style="text-align:center;"><div style="opacity:0.7;">Крит</div><div style="font-weight:700;" id="rpgCrit">0%</div></div>
+                    <div style="text-align:center;"><div style="opacity:0.7;">Пробитие</div><div style="font-weight:700;" id="rpgPen">0%</div></div>
                 </div>
-                <button onclick="rpgToggleShop()" style="width:100%;padding:12px;border-radius:12px;background:linear-gradient(90deg,#0088cc,#00b4ff);color:#fff;font-weight:700;border:none;cursor:pointer;">Прокачка</button>
+                <button onclick="rpgToggleShop()" style="width:100%;padding:12px;border-radius:12px;background:linear-gradient(90deg,#0088cc,#00b4ff);color:#fff;font-weight:700;border:none;cursor:pointer;">🛒 Магазин</button>
             </div>
-            <div id="rpgShop" style="display:none;position:absolute;inset:0;background:rgba(0,0,0,0.9);z-index:10;overflow-y:auto;padding:20px;"></div>
+            <div id="rpgShop" style="display:none;position:absolute;inset:0;background:rgba(10,12,20,0.97);z-index:10;overflow-y:auto;padding:20px;"></div>
         </div>
     `;
-
-    const monsterTypes = [
-        { name: 'Слизень',   emoji: '🟢', hp: 10,   reward: 5,    weight: 30 },
-        { name: 'Крыса',     emoji: '🐀', hp: 25,   reward: 12,   weight: 25 },
-        { name: 'Гоблин',    emoji: '👺', hp: 60,   reward: 30,   weight: 18 },
-        { name: 'Скелет',    emoji: '💀', hp: 150,  reward: 75,   weight: 12 },
-        { name: 'Орк',       emoji: '👹', hp: 400,  reward: 180,  weight: 7 },
-        { name: 'Демон',     emoji: '😈', hp: 1000, reward: 450,  weight: 5 },
-        { name: 'Дракон',    emoji: '🐉', hp: 3000, reward: 1200, weight: 3 }
-    ];
-
-    function pickRandomMonster() {
-        const total = monsterTypes.reduce((s, m) => s + m.weight, 0);
-        let r = Math.random() * total;
-        for (let i = 0; i < monsterTypes.length; i++) {
-            r -= monsterTypes[i].weight;
-            if (r <= 0) return i;
-        }
-        return 0;
-    }
-
-    let monsterIdx = Math.min(state.monsterIdx || 0, monsterTypes.length - 1);
-    let monsterHp = monsterTypes[monsterIdx].hp * (1 + state.level * 0.5);
-    let maxMonsterHp = monsterHp;
-    let lastAttackTime = 0;
 
     const monsterEl = document.getElementById('rpgMonster');
     const hpBar = document.getElementById('rpgMonsterHp');
     const nameEl = document.getElementById('rpgMonsterName');
     const infoEl = document.getElementById('rpgMonsterInfo');
     const killsEl = document.getElementById('rpgKillsInfo');
+    const bossTag = document.getElementById('rpgBossTag');
+    const stageProgressBar = document.getElementById('rpgStageProgress');
+    const stageProgressLabel = document.getElementById('rpgStageProgressLabel');
+
+    let lastAttackTime = 0;
+
+    function spawnRegularMonster() {
+        const ex = state.extra;
+        ex.monsterPoolIdx = rpgPickMonsterIdx(state.level);
+        ex.monsterMaxHp = rpgRegularHp(state.level, ex.monsterPoolIdx);
+        ex.monsterHp = ex.monsterMaxHp;
+        ex.bossActive = false;
+    }
+    function spawnBoss() {
+        const ex = state.extra;
+        ex.bossActive = true;
+        ex.bossMaxHp = rpgBossHp(state.level);
+        ex.bossHp = ex.bossMaxHp;
+    }
+    // Восстанавливаем цель после перезагрузки страницы, если она ещё не жива
+    if (!state.extra.bossActive && (!state.extra.monsterHp || state.extra.monsterHp <= 0)) {
+        spawnRegularMonster();
+    }
+
+    function currentTargetInfo() {
+        const ex = state.extra;
+        if (ex.bossActive) {
+            const boss = RPG_BOSS_POOL[(state.level - 1) % RPG_BOSS_POOL.length];
+            return { emoji: boss.emoji, name: boss.name, hp: ex.bossHp, maxHp: ex.bossMaxHp, isBoss: true };
+        }
+        const m = RPG_MONSTER_POOL[ex.monsterPoolIdx] || RPG_MONSTER_POOL[0];
+        return { emoji: m.emoji, name: m.name, hp: ex.monsterHp, maxHp: ex.monsterMaxHp, isBoss: false };
+    }
 
     function updateUI() {
+        const stats = rpgComputeStats(state.extra.upgrades);
         document.getElementById('rpgCoins').textContent = fmtScore(state.coins);
+        document.getElementById('rpgGems').textContent = fmtScore(state.extra.gems);
         document.getElementById('rpgLevel').textContent = state.level;
-        document.getElementById('rpgDmg').textContent = state.sword;
-        document.getElementById('rpgDps').textContent = Math.floor((state.guilds * 2 + state.warriors * 1) * state.level);
-        document.getElementById('rpgSpeed').textContent = (1 + state.artifacts * 0.2).toFixed(1) + 'x';
-        hpBar.style.width = Math.max(0, (monsterHp / maxMonsterHp) * 100) + '%';
-        nameEl.textContent = monsterTypes[monsterIdx].name;
-        infoEl.textContent = `HP: ${Math.max(0, Math.floor(monsterHp))} / ${Math.floor(maxMonsterHp)}`;
-        killsEl.textContent = `Убито: ${fmtScore(state.killsTotal)}`;
-        monsterEl.textContent = monsterTypes[monsterIdx].emoji;
+        document.getElementById('rpgDmg').textContent = fmtScore(stats.tapDamage);
+        document.getElementById('rpgDps').textContent = fmtScore(stats.dps);
+        document.getElementById('rpgCrit').textContent = Math.round(stats.critChance * 100) + '%';
+        document.getElementById('rpgPen').textContent = Math.round(stats.penetration * 100) + '%';
+
+        const t = currentTargetInfo();
+        monsterEl.textContent = t.emoji;
+        nameEl.textContent = t.name;
+        hpBar.style.width = Math.max(0, (t.hp / t.maxHp) * 100) + '%';
+        hpBar.style.background = t.isBoss ? 'linear-gradient(90deg,#ff453a,#af52de)' : 'linear-gradient(90deg,#ff453a,#ff9f0a)';
+        infoEl.textContent = `HP: ${fmtScore(Math.max(0, t.hp))} / ${fmtScore(t.maxHp)}`;
+        bossTag.style.display = t.isBoss ? 'block' : 'none';
+        monsterEl.style.filter = t.isBoss ? 'drop-shadow(0 0 26px rgba(175,82,222,0.75))' : 'drop-shadow(0 0 20px rgba(255,80,80,0.5))';
+        killsEl.textContent = `Убито всего: ${fmtScore(state.killsTotal)}`;
+
+        const required = rpgKillsRequired(state.level);
+        stageProgressLabel.textContent = t.isBoss ? 'Бой с боссом!' : `${state.killsOnLevel} / ${required}`;
+        stageProgressBar.style.width = (t.isBoss ? 100 : Math.min(100, (state.killsOnLevel / required) * 100)) + '%';
+        document.getElementById('rpgStageLabel').textContent = `Этап ${state.level}`;
     }
 
-    function onMonsterKilled() {
-        const armorMultiplier = 1 + state.armor * 0.15;
-        state.coins += monsterTypes[monsterIdx].reward * (1 + state.level * 0.3) * armorMultiplier;
+    function persistLocal() { saveRpgState(state); }
+
+    function rpgCheckNewUnlocks(newLevel) {
+        const justUnlocked = RPG_SHOP_ITEMS.filter(it => it.unlockLevel === newLevel);
+        if (justUnlocked.length) showToast(`Магазин: новые товары — ${justUnlocked.map(i => i.name).join(', ')}`, 'info', 4500);
+    }
+
+    function onTargetKilled() {
+        const ex = state.extra;
+        const stats = rpgComputeStats(ex.upgrades);
         state.killsTotal++;
-        state.killsOnLevel++;
-        while (state.killsOnLevel >= 5) {
+
+        if (ex.bossActive) {
+            const reward = Math.ceil(rpgBossReward(state.level) * stats.coinMul);
+            const gems = rpgBossGems(state.level);
+            state.coins += reward;
+            ex.gems += gems;
             state.level++;
-            state.killsOnLevel -= 5;
+            state.killsOnLevel = 0;
+            showToast(`Босс повержен! +${fmtScore(reward)} 🪙, +${gems} 💎, уровень ${state.level}!`, 'success');
+            rpgCheckNewUnlocks(state.level);
+            spawnRegularMonster();
+        } else {
+            const reward = Math.ceil(rpgRegularReward(state.level, ex.monsterPoolIdx) * stats.coinMul);
+            state.coins += reward;
+            state.killsOnLevel++;
+            if (state.killsOnLevel >= rpgKillsRequired(state.level)) spawnBoss();
+            else spawnRegularMonster();
         }
-        monsterIdx = pickRandomMonster();
-        state.monsterIdx = monsterIdx;
-        maxMonsterHp = monsterTypes[monsterIdx].hp * (1 + state.level * 0.5);
-        monsterHp = maxMonsterHp;
-        saveRpgState(state);
+        persistLocal();
     }
 
-    function tapMonster(e) {
+    function tapTarget(e) {
         e.preventDefault();
+        const stats = rpgComputeStats(state.extra.upgrades);
         const now = Date.now();
-        if (now - lastAttackTime < 100 / (1 + state.artifacts * 0.2)) return;
+        if (now - lastAttackTime < 100 / stats.speedMul) return;
         lastAttackTime = now;
 
-        let dmg = state.sword;
-        if (Math.random() < 0.1 + state.artifacts * 0.02) dmg *= 3;
+        let dmg = stats.tapDamage;
+        let isCrit = false;
+        if (Math.random() < stats.critChance) { dmg *= 2.5; isCrit = true; }
 
-        monsterHp -= dmg;
+        const ex = state.extra;
+        if (ex.bossActive) {
+            const resistance = Math.max(0, rpgBossResistance(state.level) - stats.penetration);
+            dmg *= (1 - resistance);
+            ex.bossHp -= dmg;
+        } else {
+            ex.monsterHp -= dmg;
+        }
+
         monsterEl.style.transform = 'scale(0.92)';
         setTimeout(() => monsterEl.style.transform = 'scale(1)', 80);
 
         const particle = document.createElement('div');
-        particle.textContent = '-' + Math.floor(dmg);
-        particle.style.cssText = 'position:absolute;top:40%;left:50%;transform:translate(-50%,-50%);color:#ff453a;font-weight:800;font-size:1.4rem;pointer-events:none;animation:rpgFloat 0.6s ease-out forwards;';
+        particle.textContent = (isCrit ? '💥-' : '-') + fmtScore(dmg);
+        particle.style.cssText = `position:absolute;top:40%;left:50%;transform:translate(-50%,-50%);color:${isCrit ? '#ff9f0a' : '#ff453a'};font-weight:800;font-size:${isCrit ? '1.7rem' : '1.4rem'};pointer-events:none;animation:rpgFloat 0.6s ease-out forwards;`;
         area.querySelector('#rpgMonster')?.parentElement?.appendChild(particle);
         setTimeout(() => particle.remove(), 600);
 
-        if (monsterHp <= 0) onMonsterKilled();
+        const curHp = ex.bossActive ? ex.bossHp : ex.monsterHp;
+        if (curHp <= 0) onTargetKilled();
         updateUI();
     }
 
-    monsterEl.addEventListener('touchstart', tapMonster, { passive: false });
-    monsterEl.addEventListener('click', tapMonster);
+    monsterEl.addEventListener('touchstart', tapTarget, { passive: false });
+    monsterEl.addEventListener('click', tapTarget);
 
     window.rpgToggleShop = () => {
         const shop = document.getElementById('rpgShop');
-        if (shop.style.display === 'none') {
-            shop.style.display = 'block';
-            renderShop();
-        } else shop.style.display = 'none';
+        if (shop.style.display === 'none') { shop.style.display = 'block'; renderShop(); }
+        else shop.style.display = 'none';
     };
+
+    function rpgShopRowHtml(item, up, st) {
+        const locked = item.unlockLevel > st.level;
+        if (locked) {
+            return `<div style="background:rgba(255,255,255,0.04);border-radius:12px;padding:14px;display:flex;justify-content:space-between;align-items:center;opacity:0.45;">
+                <div><div style="font-weight:700;">🔒 ${item.icon} ${item.name}</div><div style="font-size:0.8rem;opacity:0.7;">Откроется на уровне ${item.unlockLevel}</div></div>
+            </div>`;
+        }
+        const cost = rpgShopItemCost(item, up);
+        const balance = item.currency === 'gems' ? st.extra.gems : st.coins;
+        const canAfford = balance >= cost;
+        const currencyIcon = item.currency === 'gems' ? '💎' : '🪙';
+        return `<div style="background:rgba(255,255,255,0.08);border-radius:12px;padding:14px;display:flex;justify-content:space-between;align-items:center;gap:10px;${!canAfford ? 'opacity:0.5;' : ''}">
+            <div><div style="font-weight:700;">${item.icon} ${item.name}</div><div style="font-size:0.8rem;opacity:0.7;">${item.desc(up)}</div></div>
+            <button onclick="rpgBuy('${item.key}')" ${!canAfford ? 'disabled' : ''} style="background:linear-gradient(90deg,#0088cc,#00b4ff);color:#fff;border:none;padding:10px 14px;border-radius:10px;font-weight:700;cursor:pointer;white-space:nowrap;">${currencyIcon} ${fmtScore(cost)}</button>
+        </div>`;
+    }
 
     function renderShop() {
         const shop = document.getElementById('rpgShop');
-        const swordCost = Math.floor(10 * Math.pow(1.15, state.sword));
-        const armorCost = Math.floor(15 * Math.pow(1.2, state.armor));
-        const guildCost = Math.floor(100 * Math.pow(1.5, state.guilds));
-        const warriorCost = Math.floor(50 * Math.pow(1.3, state.warriors));
-        const artifactCost = Math.floor(500 * Math.pow(2, state.artifacts));
-
+        const up = state.extra.upgrades;
+        let body = '';
+        for (const tier of [1, 2, 3, 4, 5]) {
+            const items = RPG_SHOP_ITEMS.filter(it => it.tier === tier);
+            const tierLocked = items.every(it => it.unlockLevel > state.level);
+            body += `<div style="margin-bottom:16px;">
+                <div style="font-size:0.8rem;font-weight:800;opacity:0.7;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px;">${RPG_TIER_NAMES[tier]}${tierLocked ? ` · открывается на ур. ${items[0].unlockLevel}` : ''}</div>
+                <div style="display:grid;gap:10px;">${items.map(it => rpgShopRowHtml(it, up, state)).join('')}</div>
+            </div>`;
+        }
         shop.innerHTML = `
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-                <div style="font-size:1.3rem;font-weight:700;">Прокачка</div>
+                <div style="font-size:1.3rem;font-weight:700;">🛒 Магазин</div>
                 <button onclick="rpgToggleShop()" style="background:rgba(255,255,255,0.15);color:#fff;border:none;padding:8px 16px;border-radius:10px;font-weight:600;cursor:pointer;">Закрыть</button>
             </div>
-            <div style="display:grid;gap:10px;">
-                ${upgradeRow('Меч', `Урон: ${state.sword} → ${state.sword + 1}`, swordCost, state.coins >= swordCost, 'rpgBuySword')}
-                ${upgradeRow('Доспехи', `Броня: ${state.armor} → ${state.armor + 1}`, armorCost, state.coins >= armorCost, 'rpgBuyArmor')}
-                ${upgradeRow('Гильдия', `+2 DPS за уровень (${state.guilds})`, guildCost, state.coins >= guildCost, 'rpgBuyGuild')}
-                ${upgradeRow('Воин', `+1 DPS за уровень (${state.warriors})`, warriorCost, state.coins >= warriorCost, 'rpgBuyWarrior')}
-                ${upgradeRow('Артефакт', `+20% скорость, +2% крит (${state.artifacts})`, artifactCost, state.coins >= artifactCost, 'rpgBuyArtifact')}
-            </div>
+            ${body}
         `;
     }
 
-    function upgradeRow(name, desc, cost, canAfford, action) {
-        return `
-            <div style="background:rgba(255,255,255,0.08);border-radius:12px;padding:14px;display:flex;justify-content:space-between;align-items:center;${!canAfford ? 'opacity:0.5;' : ''}">
-                <div>
-                    <div style="font-weight:700;">${name}</div>
-                    <div style="font-size:0.8rem;opacity:0.7;">${desc}</div>
-                </div>
-                <button onclick="${action}()" ${!canAfford ? 'disabled' : ''} style="background:linear-gradient(90deg,#0088cc,#00b4ff);color:#fff;border:none;padding:10px 16px;border-radius:10px;font-weight:700;cursor:pointer;">${fmtScore(cost)}</button>
-            </div>`;
+    // Синхронизирует старые поля (sword/armor/guilds/warriors/artifacts/monsterIdx) для совместимости
+    // с таблицей лидеров и БД — сама формула рейтинга их не использует, но пусть остаются валидными.
+    function rpgSyncLegacyFields() {
+        const up = state.extra.upgrades;
+        state.sword = 1 + up.sword;
+        state.armor = up.armor;
+        state.guilds = up.guild;
+        state.warriors = up.warrior;
+        state.artifacts = up.artifact;
+        state.monsterIdx = state.extra.monsterPoolIdx || 0;
     }
+    rpgSyncLegacyFields();
 
-    window.rpgBuySword = () => {
-        const c = Math.floor(10 * Math.pow(1.15, state.sword));
-        if (state.coins < c) return;
-        state.coins -= c; state.sword++; saveRpgState(state); updateUI(); renderShop();
-    };
-    window.rpgBuyArmor = () => {
-        const c = Math.floor(15 * Math.pow(1.2, state.armor));
-        if (state.coins < c) return;
-        state.coins -= c; state.armor++; saveRpgState(state); updateUI(); renderShop();
-    };
-    window.rpgBuyGuild = () => {
-        const c = Math.floor(100 * Math.pow(1.5, state.guilds));
-        if (state.coins < c) return;
-        state.coins -= c; state.guilds++; saveRpgState(state); updateUI(); renderShop();
-    };
-    window.rpgBuyWarrior = () => {
-        const c = Math.floor(50 * Math.pow(1.3, state.warriors));
-        if (state.coins < c) return;
-        state.coins -= c; state.warriors++; saveRpgState(state); updateUI(); renderShop();
-    };
-    window.rpgBuyArtifact = () => {
-        const c = Math.floor(500 * Math.pow(2, state.artifacts));
-        if (state.coins < c) return;
-        state.coins -= c; state.artifacts++; saveRpgState(state); updateUI(); renderShop();
+    window.rpgBuy = (key) => {
+        const item = RPG_SHOP_ITEMS.find(it => it.key === key);
+        if (!item || item.unlockLevel > state.level) return;
+        const up = state.extra.upgrades;
+        const cost = rpgShopItemCost(item, up);
+        const balance = item.currency === 'gems' ? state.extra.gems : state.coins;
+        if (balance < cost) return;
+        if (item.currency === 'gems') state.extra.gems -= cost; else state.coins -= cost;
+        up[key] = (up[key] || 0) + 1;
+        rpgSyncLegacyFields();
+        persistLocal();
+        updateUI();
+        renderShop();
     };
 
     const passiveTimer = setInterval(() => {
-        const dps = (state.guilds * 2 + state.warriors * 1) * state.level;
-        if (dps > 0) {
-            monsterHp -= dps / 10;
-            if (monsterHp <= 0) onMonsterKilled();
+        const stats = rpgComputeStats(state.extra.upgrades);
+        if (stats.dps > 0) {
+            const ex = state.extra;
+            if (ex.bossActive) {
+                const resistance = Math.max(0, rpgBossResistance(state.level) - stats.penetration);
+                ex.bossHp -= (stats.dps * (1 - resistance)) / 10;
+                if (ex.bossHp <= 0) onTargetKilled();
+            } else {
+                ex.monsterHp -= stats.dps / 10;
+                if (ex.monsterHp <= 0) onTargetKilled();
+            }
         }
-        state.coins += (state.guilds * 0.5 + state.warriors * 0.2) / 10;
         updateUI();
     }, 100);
 
     const now = Date.now();
     if (state.lastOnline && state.lastOnline > 0) {
+        const stats = rpgComputeStats(state.extra.upgrades);
         const elapsed = Math.min((now - state.lastOnline) / 1000, 4 * 3600);
-        const offlineIncome = (state.guilds * 0.5 + state.warriors * 0.2) * elapsed;
+        const offlineIncome = Math.floor(stats.dps * 0.4 * elapsed);
         if (offlineIncome > 1) {
-            state.coins += offlineIncome;
             setTimeout(() => {
-                if (confirm(`Пока вас не было, гильдии заработали ${fmtScore(offlineIncome)} монет.`)) {
-                    saveRpgState(state); updateUI();
-                } else {
-                    state.coins -= offlineIncome; saveRpgState(state); updateUI();
-                }
+                showToast(`Пока вас не было, отряд заработал ${fmtScore(offlineIncome)} 🪙`, 'info', 5000);
+                state.coins += offlineIncome;
+                persistLocal();
+                updateUI();
             }, 300);
         }
     }
     state.lastOnline = now;
-    saveRpgState(state);
+    persistLocal();
 
-    const serverSyncTimer = setInterval(() => {
-        saveRpgStateToServer(state);
-    }, 15000);
+    const serverSyncTimer = setInterval(() => { saveRpgStateToServer(state); }, 15000);
 
     updateUI();
 
@@ -493,30 +644,63 @@ async function startRpgClicker(area) {
         clearInterval(passiveTimer);
         clearInterval(serverSyncTimer);
         state.lastOnline = Date.now();
-        saveRpgState(state);
+        persistLocal();
         saveRpgStateToServer(state);
         window.rpgToggleShop = null;
-        window.rpgBuySword = null;
-        window.rpgBuyArmor = null;
-        window.rpgBuyGuild = null;
-        window.rpgBuyWarrior = null;
-        window.rpgBuyArtifact = null;
+        window.rpgBuy = null;
     };
 }
 
 function loadRpgState() {
-    try {
-        return JSON.parse(localStorage.getItem('rpgClickerState')) || defaultRpgState();
-    } catch (e) {
-        return defaultRpgState();
-    }
+    try { return JSON.parse(localStorage.getItem('rpgClickerState')) || defaultRpgState(); }
+    catch (e) { return defaultRpgState(); }
 }
 
 function defaultRpgState() {
     return {
         coins: 0, level: 1, sword: 1, armor: 0, guilds: 0, warriors: 0, artifacts: 0,
-        monsterIdx: 0, lastOnline: 0, killsTotal: 0, killsOnLevel: 0
+        monsterIdx: 0, lastOnline: 0, killsTotal: 0, killsOnLevel: 0,
+        extra: { gems: 0, bossActive: false, monsterHp: 0, monsterMaxHp: 0, monsterPoolIdx: 0, bossHp: 0, bossMaxHp: 0, upgrades: rpgDefaultUpgrades() }
     };
+}
+
+// Приводит любое сохранённое состояние (старый формат/новый/битое) к актуальной структуре,
+// не теряя накопленный прогресс: уровень, монеты, общее число убийств и уже купленные прокачки.
+function rpgMigrateState(state) {
+    state = state || {};
+    if (typeof state.coins !== 'number' || !isFinite(state.coins)) state.coins = 0;
+    if (typeof state.level !== 'number' || state.level < 1) state.level = 1;
+    if (typeof state.killsTotal !== 'number') state.killsTotal = 0;
+    if (typeof state.killsOnLevel !== 'number') state.killsOnLevel = 0;
+    if (typeof state.lastOnline !== 'number') state.lastOnline = 0;
+
+    if (!state.extra || typeof state.extra !== 'object') state.extra = {};
+    const ex = state.extra;
+    if (typeof ex.gems !== 'number') ex.gems = 0;
+    if (!ex.upgrades || typeof ex.upgrades !== 'object') {
+        // Старое состояние (до переработки) — переносим прежние прокачки в новую структуру
+        ex.upgrades = rpgDefaultUpgrades();
+        ex.upgrades.sword = Math.max(0, (state.sword || 1) - 1);
+        ex.upgrades.armor = state.armor || 0;
+        ex.upgrades.guild = state.guilds || 0;
+        ex.upgrades.warrior = state.warriors || 0;
+        ex.upgrades.artifact = state.artifacts || 0;
+    }
+    for (const k of Object.keys(rpgDefaultUpgrades())) {
+        if (typeof ex.upgrades[k] !== 'number') ex.upgrades[k] = 0;
+    }
+
+    const required = rpgKillsRequired(state.level);
+    if (state.killsOnLevel > required) state.killsOnLevel = required;
+
+    if (typeof ex.bossActive !== 'boolean') ex.bossActive = false;
+    if (ex.bossActive && (typeof ex.bossHp !== 'number' || typeof ex.bossMaxHp !== 'number' || ex.bossHp <= 0)) {
+        ex.bossActive = false;
+    }
+    if (!ex.bossActive && (typeof ex.monsterHp !== 'number' || typeof ex.monsterMaxHp !== 'number' || ex.monsterHp <= 0 || typeof ex.monsterPoolIdx !== 'number')) {
+        ex.monsterHp = 0; // будет создан заново перед стартом боя
+    }
+    return state;
 }
 
 function saveRpgState(s) {
@@ -524,19 +708,14 @@ function saveRpgState(s) {
 }
 
 async function loadRpgStateAsync() {
-    const local = loadRpgState();
+    const local = rpgMigrateState(loadRpgState());
     let server = null;
-    try {
-        server = await apiGet('/api/games/rpg-state');
-    } catch (e) { /* тихо */ }
-
+    try { server = await apiGet('/api/games/rpg-state'); } catch (e) { /* тихо */ }
     if (!server) return local;
+    server = rpgMigrateState(server);
 
-    const localScore = (local.level || 1) * 10000 + (local.killsTotal || 0) * 100 + Math.floor((local.coins || 0) / 10);
-    const serverScore = (server.level || 1) * 10000 + (server.killsTotal || 0) * 100 + Math.floor((server.coins || 0) / 10);
-
-    if (serverScore > localScore) return server;
-    return local;
+    const scoreOf = st => (st.level || 1) * 10000 + (st.killsTotal || 0) * 100 + Math.floor((st.coins || 0) / 10);
+    return scoreOf(server) > scoreOf(local) ? server : local;
 }
 
 async function saveRpgStateToServer(s) {
@@ -551,7 +730,8 @@ async function saveRpgStateToServer(s) {
             artifacts: s.artifacts,
             monsterIdx: s.monsterIdx,
             killsTotal: s.killsTotal,
-            killsOnLevel: s.killsOnLevel
+            killsOnLevel: s.killsOnLevel,
+            extra: s.extra
         });
     } catch (e) { /* тихо */ }
 }

@@ -2,7 +2,7 @@
 //  sw.js — Service Worker
 //  Network-first для ВСЕГО. Мгновенная активация. Оповещение клиентов.
 // ============================================================================
-const CACHE_NAME = 'workspaces-v11';
+const CACHE_NAME = 'workspaces-v12';
 
 self.addEventListener('install', (event) => {
     // Не ждём закрытия вкладок — активируемся сразу
