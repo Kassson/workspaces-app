@@ -88,6 +88,7 @@ function startGame(gameId) {
         <div style="padding:12px 16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--card-border);background:var(--bg-card);">
             <div style="font-weight:700;font-size:1.05rem;">${gameInfo ? gameInfo.name : gameId}</div>
             <div style="display:flex; gap:8px;">
+                ${gameId === 'rpg-clicker' ? '<button onclick="resetRpgGame()" style="background:linear-gradient(90deg,#ff453a,#ff9f0a);color:#fff;border:none;padding:8px 14px;border-radius:10px;font-weight:600;cursor:pointer;" title="Сбросить прогресс">🔄</button>' : ''}
                 <button onclick="openLeaderboard('${gameId}')" style="background:var(--input-bg);border:none;padding:8px 14px;border-radius:10px;font-weight:600;cursor:pointer;color:var(--text);">🏆 Рейтинг</button>
                 <button onclick="stopActiveGame()" style="background:var(--input-bg);border:none;padding:8px 14px;border-radius:10px;font-weight:600;cursor:pointer;color:var(--text);">Закрыть</button>
             </div>
@@ -348,12 +349,17 @@ function rpgComputeStats(up) {
     };
 }
 
-async function startRpgClicker(area) {
+async function startRpgClicker(area, forcedState = null) {
     area.innerHTML = '<p style="text-align:center;padding:60px 20px;color:#8d99a5;">Загрузка прогресса…</p>';
 
     let state;
-    try { state = await loadRpgStateAsync(); }
-    catch (e) { state = loadRpgState(); }
+    if (forcedState) {
+        // Используем принудительно переданное состояние (например, после сброса)
+        state = forcedState;
+    } else {
+        try { state = await loadRpgStateAsync(); }
+        catch (e) { state = loadRpgState(); }
+    }
     state = rpgMigrateState(state);
 
     area.innerHTML = `
@@ -384,10 +390,7 @@ async function startRpgClicker(area) {
                     <div style="text-align:center;"><div style="opacity:0.7;">Крит</div><div style="font-weight:700;" id="rpgCrit">0%</div></div>
                     <div style="text-align:center;"><div style="opacity:0.7;">Пробитие</div><div style="font-weight:700;" id="rpgPen">0%</div></div>
                 </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-                    <button onclick="rpgToggleShop()" style="padding:12px;border-radius:12px;background:linear-gradient(90deg,#0088cc,#00b4ff);color:#fff;font-weight:700;border:none;cursor:pointer;">🛒 Магазин</button>
-                    <button onclick="resetRpgGame()" style="padding:12px;border-radius:12px;background:linear-gradient(90deg,#ff453a,#ff9f0a);color:#fff;font-weight:700;border:none;cursor:pointer;" title="Сбросить прогресс">🔄 Сброс</button>
-                </div>
+                <button onclick="rpgToggleShop()" style="width:100%;padding:12px;border-radius:12px;background:linear-gradient(90deg,#0088cc,#00b4ff);color:#fff;font-weight:700;border:none;cursor:pointer;">🛒 Магазин</button>
             </div>
             <div id="rpgShop" style="display:none;position:absolute;inset:0;background:rgba(10,12,20,0.97);z-index:10;overflow-y:auto;padding:20px;"></div>
         </div>
@@ -745,13 +748,21 @@ async function resetRpgGame() {
     if (!confirm('Вы уверены? Весь прогресс будет потерян!')) return;
 
     const newState = defaultRpgState();
-    saveRpgState(newState);
+    
+    // Сначала сохраняем на сервер, потом в localStorage
     try {
         await apiPost('/api/games/rpg-state', newState);
-    } catch (e) { /* тихо */ }
+    } catch (e) { 
+        console.error('Ошибка сброса на сервере:', e);
+    }
+    
+    // Теперь сохраняем локально
+    saveRpgState(newState);
 
     showToast('Прогресс сброшен', 'info');
-    await startRpgClicker(document.getElementById('gameArea'));
+    
+    // Перезагружаем игру с принудительным использованием нового состояния
+    await startRpgClicker(document.getElementById('gameArea'), newState);
 }
 
 // ============================================================================

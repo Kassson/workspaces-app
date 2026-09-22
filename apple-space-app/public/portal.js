@@ -1876,7 +1876,21 @@ async function sendChatMessage(spaceId) {
             };
             
             const uploaded = await uploadFiles(files, spaceId);
-            fileIds = uploaded.filter(f => f.id).map(f => f.id);
+            // Фильтруем только успешно загруженные файлы (с полем id)
+            const successfulUploads = uploaded.filter(f => f && f.id);
+            fileIds = successfulUploads.map(f => f.id);
+            
+            // Показываем ошибки для неудачных загрузок
+            const failedUploads = uploaded.filter(f => f && f.error);
+            if (failedUploads.length > 0) {
+                const errorMsg = failedUploads.map(f => `${f.name}: ${f.error}`).join(', ');
+                console.error('Ошибки загрузки файлов:', errorMsg);
+            }
+            
+            // Если ни один файл не загрузился, показываем ошибку и не отправляем сообщение
+            if (files.length > 0 && fileIds.length === 0) {
+                throw new Error('Не удалось загрузить файлы');
+            }
             
             // Удаляем индикатор загрузки
             const indicator = document.getElementById('uploadIndicator');
