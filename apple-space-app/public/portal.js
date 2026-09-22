@@ -115,8 +115,16 @@ function lessonCardHtml(l, overrides, dateStr, isPast, isAdmin, spaceId) {
 }
 
 // ===================== ДОМАШНИЕ ЗАДАНИЯ =====================
+let _hwContainerId = null;
+
+function currentHwContainerId() {
+    return _hwContainerId || 'mainContent';
+}
+
 async function renderHomeworkTab(container, spaceId, isAdmin) {
     if (!spaceId) { container.innerHTML = emptySpaceState(); return; }
+    // Сохраняем ID контейнера для использования в callback-функциях
+    _hwContainerId = container.id;
     container.innerHTML = '<p class="empty-state">Загрузка…</p>';
     try {
         const list = await apiGet(`/api/homework/${spaceId}`);
@@ -1411,6 +1419,76 @@ function importJournalExcel(spaceId) {
 // ===================== ЧАТ =====================
 let chatJoinedSpace = null;
 let typingUsers = new Map();
+let _pendingChatFiles = [];
+let _uploadProgressCallback = null;
+
+// ===================== ФУНКЦИИ ЗАГРУЗКИ ФАЙЛОВ =====================
+async function uploadFiles(files, spaceId) {
+    const results = [];
+    const totalFiles = files.length;
+    let uploadedCount = 0;
+    
+    for (const file of files) {
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('spaceId', spaceId);
+            
+            const xhr = new XMLHttpRequest();
+            
+            // Создаем промис для отслеживания загрузки
+            const uploadPromise = new Promise((resolve, reject) => {
+                xhr.upload.addEventListener('progress', (e) => {
+                    if (e.lengthComputable) {
+                        const percent = Math.round((e.loaded / e.total) * 100);
+                        const overallPercent = Math.round(((uploadedCount + e.loaded / e.total) / totalFiles) * 100);
+                        if (_uploadProgressCallback) {
+                            _uploadProgressCallback(overallPercent, file.name);
+                        }
+                    }
+                });
+                
+                xhr.addEventListener('load', () => {
+                    if (xhr.status === 200) {
+                        try {
+                            const response = JSON.parse(xhr.responseText);
+                            resolve(response);
+                        } catch (e) {
+                            reject(new Error('Ошибка парсинга ответа'));
+                        }
+                    } else {
+                        try {
+                            const error = JSON.parse(xhr.responseText);
+                            reject(new Error(error.error || 'Ошибка загрузки'));
+                        } catch (e) {
+                            reject(new Error('Ошибка загрузки файла'));
+                        }
+                    }
+                });
+                
+                xhr.addEventListener('error', () => reject(new Error('Ошибка сети')));
+                xhr.addEventListener('abort', () => reject(new Error('Загрузка отменена')));
+            });
+            
+            xhr.open('POST', '/api/files/upload');
+            xhr.setRequestHeader('Authorization', `Bearer ${localStorage.getItem('token')}`);
+            xhr.send(formData);
+            
+            const result = await uploadPromise;
+            results.push(result);
+            uploadedCount++;
+            
+        } catch (e) {
+            console.error('Ошибка загрузки файла:', file.name, e.message);
+            showToast(`Ошибка: ${file.name} - ${e.message}`, 'error');
+            results.push({ error: e.message });
+        }
+    }
+    
+    return results;
+}
+
+
 
 function renderChatTab(container, spaceId, isAdmin, currentUserId) {
     if (!spaceId) { container.innerHTML = emptySpaceState(); return; }
@@ -1432,7 +1510,7 @@ function renderChatTab(container, spaceId, isAdmin, currentUserId) {
             <div class="chat-input-row">
                 <label class="attach-btn" style="cursor:pointer; padding:8px; display:flex; align-items:center;">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-                    <input type="file" id="chatFileInput" multiple style="display:none">
+                    <input type="file" id="chatFileInput" multiple style="display:none" onchange="selectAttach(this.files)">
                 </label>
                 <textarea id="chatInput" rows="1" placeholder="Сообщение…"></textarea>
                 <button class="btn-primary" style="width:auto; margin:0;" onclick="sendChatMessage('${spaceId}')">Отправить</button>
@@ -1459,16 +1537,38 @@ function renderChatTab(container, spaceId, isAdmin, currentUserId) {
         clearTimeout(searchTimeout);
         searchTimeout = setTimeout(() => loadChatHistory(spaceId, isAdmin, currentUserId, e.target.value), 300);
     });
+    
+    // Обработка Enter для отправки сообщения
+    const chatInput = document.getElementById('chatInput');
+    if (chatInput) {
+        chatInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendChatMessage(spaceId);
+            }
+        });
+    }
 
-    const fileInput = document.getElementById('chatFileInput');
-    let pendingFiles = [];
-    fileInput.addEventListener('change', () => {
-        pendingFiles = Array.from(fileInput.files);
-        renderFilePreview(pendingFiles);
-    });
-    window.__pendingFiles = () => pendingFiles;
-    window.__clearPendingFiles = () => { pendingFiles = []; renderFilePreview([]); fileInput.value = ''; };
+    // Обработка скролла чата
+    const chatMessages = document.getElementById('chatMessages');
+    if (chatMessages) {
+        chatMessages.addEventListener('scroll', () => {
+            const scrollBtn = document.getElementById('chatScrollDownBtn');
+            if (scrollBtn) {
+                const distFromBottom = chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight;
+                scrollBtn.style.display = distFromBottom > 300 ? 'flex' : 'none';
+            }
+        });
+        
+        const scrollBtn = document.getElementById('chatScrollDownBtn');
+        if (scrollBtn) {
+            scrollBtn.addEventListener('click', () => {
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            });
+        }
+    }
 
+    // Обработка Enter для отправки сообщения
     const input = document.getElementById('chatInput');
     let typingStopTimer;
     input.onkeydown = (e) => {
@@ -1500,6 +1600,12 @@ function renderChatTab(container, spaceId, isAdmin, currentUserId) {
         scrollBtn.addEventListener('click', () => {
             if (box) box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
         });
+    }
+
+    // Удаляем старые обработчики перед добавлением новых
+    if (window.__chatScrollHandler) {
+        document.removeEventListener('click', window.__chatScrollHandler);
+        window.__chatScrollHandler = null;
     }
 
     socket.off('new_message'); socket.off('message_deleted'); socket.off('reaction_updated');
@@ -1534,12 +1640,66 @@ function renderTypingIndicator() {
     el.textContent = text;
 }
 
-function renderFilePreview(files) {
+function renderFilePreview() {
     const box = document.getElementById('filePreviewContainer');
     if (!box) return;
-    if (!files.length) { box.innerHTML = ''; return; }
-    box.innerHTML = files.map(f => `<div style="display:inline-block;margin:4px;padding:6px 10px;background:var(--input-bg);border-radius:8px;font-size:12px;">${escapeHtml(f.name)} (${formatBytes(f.size)})</div>`).join('');
+    
+    if (!_pendingChatFiles || !_pendingChatFiles.length) {
+        box.innerHTML = '';
+        return;
+    }
+    
+    let html = '<div style="display:flex;flex-wrap:wrap;gap:8px;padding:8px 0;">';
+    
+    _pendingChatFiles.forEach((f, i) => {
+        const isImage = f.type.startsWith('image/');
+        
+        if (isImage) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const preview = document.getElementById(`file-preview-${i}`);
+                if (preview) {
+                    preview.innerHTML = `<img src="${e.target.result}" style="max-width:100%;max-height:100%;object-fit:cover;border-radius:4px;">`;
+                }
+            };
+            reader.readAsDataURL(f);
+        }
+        
+        html += `
+            <div id="file-preview-${i}" style="width:60px;height:60px;background:var(--input-bg);border-radius:8px;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;">
+                ${isImage ? '<div style="font-size:10px;color:var(--text-secondary);">...</div>' : `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`}
+                <button onclick="event.stopPropagation(); window._removePendingFile(${i})" style="position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:var(--danger);color:#fff;border:none;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;">×</button>
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    box.innerHTML = html;
 }
+
+function selectAttach(files) {
+    const fileArray = Array.from(files);
+    if (!fileArray.length) return;
+    
+    const maxSize = 20 * 1024 * 1024;
+    for (const file of fileArray) {
+        if (file.size > maxSize) {
+            showToast(`Файл "${file.name}" слишком большой (макс 20 МБ)`, 'error');
+            return;
+        }
+    }
+    
+    _pendingChatFiles = _pendingChatFiles || [];
+    _pendingChatFiles.push(...fileArray);
+    renderFilePreview();
+}
+
+window._removePendingFile = function(index) {
+    _pendingChatFiles.splice(index, 1);
+    renderFilePreview();
+};
+
+window.selectAttach = selectAttach;
 
 async function loadChatHistory(spaceId, isAdmin, currentUserId, search = '') {
     try {
@@ -1592,7 +1752,7 @@ function appendChatMessage(m, isAdmin, currentUserId) {
         ${filesHtml}
         <div class="reactions-row" id="reactions-${m.id}">${reactionsHtml}</div>
         <div class="chat-actions" style="display:flex; gap:6px; margin-top:4px; font-size:11px;">
-            <button class="btn-tiny" onclick="replyToMessage('${m.id}', '${escapeHtml(m.full_name).replace(/'/g, "\\'")}', '${escapeHtml(m.message.slice(0, 40)).replace(/'/g, "\\'")}')">Ответить</button>
+            <button class="btn-tiny" onclick="replyToMessage('${m.id}', this)">Ответить</button>
             <button class="btn-tiny" onclick="openReactionPicker('${m.id}')">Реакция</button>
             ${isAdmin ? `<button class="btn-tiny" onclick="deleteChatMessage('${m.id}')">Удалить</button>` : ''}
         </div>`;
@@ -1637,8 +1797,18 @@ async function toggleReaction(messageId, emoji) {
 }
 
 let _replyToId = null;
-function replyToMessage(messageId, name, preview) {
+let _replyToName = null;
+let _replyToPreview = null;
+
+function replyToMessage(messageId, btn) {
     _replyToId = messageId;
+    // Получаем данные из родительского элемента
+    const bubble = btn.closest('.chat-bubble');
+    const nameEl = bubble?.querySelector('.who');
+    const txtEl = bubble?.querySelector('.txt');
+    _replyToName = nameEl ? nameEl.textContent.replace(/преподаватель$/i, '').trim() : '';
+    _replyToPreview = txtEl ? txtEl.textContent.slice(0, 40) : '';
+
     const container = document.querySelector('.chat-input-row');
     if (!container) return;
     let previewEl = document.getElementById('replyPreview');
@@ -1646,7 +1816,7 @@ function replyToMessage(messageId, name, preview) {
     previewEl = document.createElement('div');
     previewEl.id = 'replyPreview';
     previewEl.style.cssText = 'padding:6px 10px;background:var(--input-bg);border-left:3px solid #0088cc;border-radius:8px;margin-bottom:6px;font-size:0.8rem;display:flex;justify-content:space-between;align-items:center;';
-    previewEl.innerHTML = `<div><b>${escapeHtml(name)}</b><br>${escapeHtml(preview)}</div><button style="background:none;border:none;cursor:pointer;font-size:16px;" onclick="cancelReply()">✕</button>`;
+    previewEl.innerHTML = `<div><b>${escapeHtml(_replyToName)}</b><br>${escapeHtml(_replyToPreview)}</div><button style="background:none;border:none;cursor:pointer;font-size:16px;" onclick="cancelReply()">✕</button>`;
     container.parentElement.insertBefore(previewEl, container);
 }
 function cancelReply() { _replyToId = null; document.getElementById('replyPreview')?.remove(); }
@@ -1654,14 +1824,66 @@ function cancelReply() { _replyToId = null; document.getElementById('replyPrevie
 async function sendChatMessage(spaceId) {
     const input = document.getElementById('chatInput');
     const text = input.value.trim();
-    const files = window.__pendingFiles ? window.__pendingFiles() : [];
+    const files = _pendingChatFiles || [];
     if (!text && !files.length) return;
+    
+    const sendBtn = document.querySelector('.chat-input-row button[class*="btn-primary"]');
+    if (sendBtn) sendBtn.disabled = true;
+    
     try {
         let fileIds = [];
         if (files.length) {
+            // Показываем индикатор загрузки
+            const uploadIndicator = document.createElement('div');
+            uploadIndicator.id = 'uploadIndicator';
+            uploadIndicator.style.cssText = `
+                padding: 8px 12px;
+                background: var(--accent-blue-light, rgba(0, 136, 204, 0.1));
+                border-left: 3px solid #0088cc;
+                border-radius: 6px;
+                margin-bottom: 8px;
+                font-size: 0.85rem;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            `;
+            uploadIndicator.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 8px; flex: 1;">
+                    <div style="width: 16px; height: 16px; border: 2px solid #0088cc; border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+                    <div id="uploadStatus">Загрузка файлов: 0%</div>
+                </div>
+            `;
+            
+            // Добавляем стиль для анимации
+            if (!document.getElementById('uploadSpinStyle')) {
+                const style = document.createElement('style');
+                style.id = 'uploadSpinStyle';
+                style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
+                document.head.appendChild(style);
+            }
+            
+            const filePreviewContainer = document.getElementById('filePreviewContainer');
+            if (filePreviewContainer && filePreviewContainer.parentElement) {
+                filePreviewContainer.parentElement.insertBefore(uploadIndicator, filePreviewContainer);
+            }
+            
+            // Устанавливаем callback для отслеживания прогресса
+            _uploadProgressCallback = (percent, fileName) => {
+                const statusEl = document.getElementById('uploadStatus');
+                if (statusEl) {
+                    statusEl.textContent = `Загрузка ${fileName}: ${percent}%`;
+                }
+            };
+            
             const uploaded = await uploadFiles(files, spaceId);
             fileIds = uploaded.filter(f => f.id).map(f => f.id);
+            
+            // Удаляем индикатор загрузки
+            const indicator = document.getElementById('uploadIndicator');
+            if (indicator) indicator.remove();
+            _uploadProgressCallback = null;
         }
+        
         const mentions = [];
         const mentionRegex = /@([a-zA-Z0-9_]+)/g;
         let match;
@@ -1676,9 +1898,15 @@ async function sendChatMessage(spaceId) {
         socket.emit('send_message', { message: text, replyToId: _replyToId, fileIds, mentions: mentionIds });
         input.value = '';
         cancelReply();
-        if (window.__clearPendingFiles) window.__clearPendingFiles();
+        _pendingChatFiles = [];
+        renderFilePreview();
         socket.emit('typing_stop');
-    } catch (e) { showToast(e.error || 'Ошибка отправки', 'error'); }
+        showToast('Сообщение отправлено', 'success');
+    } catch (e) { 
+        showToast(e.error || e.message || 'Ошибка отправки', 'error'); 
+    } finally {
+        if (sendBtn) sendBtn.disabled = false;
+    }
 }
 function deleteChatMessage(id) { socket.emit('delete_message', { messageId: id }); }
 

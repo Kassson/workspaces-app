@@ -384,7 +384,10 @@ async function startRpgClicker(area) {
                     <div style="text-align:center;"><div style="opacity:0.7;">Крит</div><div style="font-weight:700;" id="rpgCrit">0%</div></div>
                     <div style="text-align:center;"><div style="opacity:0.7;">Пробитие</div><div style="font-weight:700;" id="rpgPen">0%</div></div>
                 </div>
-                <button onclick="rpgToggleShop()" style="width:100%;padding:12px;border-radius:12px;background:linear-gradient(90deg,#0088cc,#00b4ff);color:#fff;font-weight:700;border:none;cursor:pointer;">🛒 Магазин</button>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                    <button onclick="rpgToggleShop()" style="padding:12px;border-radius:12px;background:linear-gradient(90deg,#0088cc,#00b4ff);color:#fff;font-weight:700;border:none;cursor:pointer;">🛒 Магазин</button>
+                    <button onclick="resetRpgGame()" style="padding:12px;border-radius:12px;background:linear-gradient(90deg,#ff453a,#ff9f0a);color:#fff;font-weight:700;border:none;cursor:pointer;" title="Сбросить прогресс">🔄 Сброс</button>
+                </div>
             </div>
             <div id="rpgShop" style="display:none;position:absolute;inset:0;background:rgba(10,12,20,0.97);z-index:10;overflow-y:auto;padding:20px;"></div>
         </div>
@@ -526,6 +529,7 @@ async function startRpgClicker(area) {
 
     window.rpgToggleShop = () => {
         const shop = document.getElementById('rpgShop');
+        if (!shop) return;
         if (shop.style.display === 'none') { shop.style.display = 'block'; renderShop(); }
         else shop.style.display = 'none';
     };
@@ -734,6 +738,20 @@ async function saveRpgStateToServer(s) {
             extra: s.extra
         });
     } catch (e) { /* тихо */ }
+}
+
+// Сброс прогресса игры RPG-кликер
+async function resetRpgGame() {
+    if (!confirm('Вы уверены? Весь прогресс будет потерян!')) return;
+
+    const newState = defaultRpgState();
+    saveRpgState(newState);
+    try {
+        await apiPost('/api/games/rpg-state', newState);
+    } catch (e) { /* тихо */ }
+
+    showToast('Прогресс сброшен', 'info');
+    await startRpgClicker(document.getElementById('gameArea'));
 }
 
 // ============================================================================

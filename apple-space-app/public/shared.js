@@ -1,6 +1,14 @@
 /* ===================== ОБЩИЕ УТИЛИТЫ (студент + преподаватель) ===================== */
 
-const socket = io({ query: { token: localStorage.getItem('token') || '' } });
+const socket = io({
+    query: { token: localStorage.getItem('token') || '' },
+    reconnectionAttempts: 3,
+    timeout: 5000
+});
+
+socket.on('connect_error', (err) => {
+    console.warn('Socket connection error:', err.message);
+});
 
 // ============================================================================
 //  ГЛОБАЛЬНЫЕ НАСТРОЙКИ
