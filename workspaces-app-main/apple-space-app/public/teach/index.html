@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Workspaces — Преподаватель</title>
+    <meta name="theme-color" content="#f5f7fa">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/style.css?v=11">
+
+    <!-- Версия приложения — при смене чистим кэш и снимаем SW -->
+    <script>
+    (function(){
+        var APP_VERSION = '11';
+        try {
+            var saved = localStorage.getItem('appVersion');
+            if (saved !== APP_VERSION) {
+                localStorage.setItem('appVersion', APP_VERSION);
+                if ('caches' in window) {
+                    caches.keys().then(function(keys) {
+                        return Promise.all(keys.map(function(k) { return caches.delete(k); }));
+                    }).catch(function(){});
+                }
+                if ('serviceWorker' in navigator) {
+                    navigator.serviceWorker.getRegistrations().then(function(regs) {
+                        return Promise.all(regs.map(function(r) { return r.unregister(); }));
+                    }).catch(function(){});
+                }
+            }
+        } catch (e) {}
+    })();
+    </script>
+</head>
+<body>
+    <div class="loading-screen show" id="loadingScreen">
+        <div class="loading-content">
+            <div class="loading-logo">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+                    <circle cx="256" cy="256" r="256" fill="#0088cc"/>
+                    <g transform="translate(64, 64) scale(16)" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                        <path d="M2 17l10 5 10-5"/>
+                        <path d="M2 12l10 5 10-5"/>
+                    </g>
+                </svg>
+            </div>
+            <div class="loading-ring"></div>
+        </div>
+    </div>
+
+    <button class="theme-toggle-btn" id="themeToggle" title="Сменить тему">🌙</button>
+
+    <div class="maintenance-screen" id="maintenanceScreen">
+        <div class="icon">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+            </svg>
+        </div>
+        <h1>Ведутся технические работы</h1>
+        <p style="color:var(--text-secondary);">Преподаватели и Root сохраняют полный доступ.</p>
+    </div>
+
+    <!-- Авторизация -->
+    <div class="login-wrapper" id="loginWrapper">
+        <div class="auth-container">
+            <div class="app-logo">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><circle cx="256" cy="256" r="256" fill="#0088cc"/><g transform="translate(64, 64) scale(16)" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></g></svg>
+            </div>
+
+            <div id="viewLogin">
+                <h1 class="app-title">Workspaces</h1>
+                <p class="app-subtitle">Преподаватели</p>
+                <form onsubmit="handleLogin(event)">
+                    <div class="form-group"><input type="text" id="logInput" class="form-control" placeholder="Логин (Почта)" required></div>
+                    <div class="form-group"><input type="password" id="logPass" class="form-control" placeholder="Пароль" required></div>
+                    <button type="submit" class="btn-primary">Авторизоваться</button>
+                </form>
+                <button class="btn-text" onclick="switchView('viewReg')">Регистрация преподавателя</button>
+                <button class="btn-text" onclick="openForgotPassword()" style="font-size:0.8rem;opacity:0.7;">Забыли пароль?</button>
+            </div>
+
+            <div id="viewReg" style="display: none;">
+                <h1 class="app-title">Регистрация</h1>
+                <p class="app-subtitle" style="font-size:0.8rem;">После регистрации нужно пройти верификацию у коллеги.</p>
+                <form onsubmit="handleReg(event)">
+                    <div class="form-group"><input type="text" id="regFull" class="form-control" placeholder="ФИО полностью" required></div>
+                    <div class="form-group"><input type="email" id="regEmail" class="form-control" placeholder="Рабочая почта" required></div>
+                    <div class="form-group"><input type="password" id="regPass1" class="form-control" placeholder="Пароль (мин. 8 символов, буква+цифра)" required></div>
+                    <div class="form-group"><input type="password" id="regPass2" class="form-control" placeholder="Повторите пароль" required></div>
+                    <button type="submit" class="btn-primary">Создать аккаунт</button>
+                </form>
+                <button class="btn-text" onclick="switchView('viewLogin')">Отмена</button>
+            </div>
+
+            <div id="viewRegCode" style="display: none;">
+                <h1 class="app-title">Ваш код профиля</h1>
+                <p class="app-subtitle" style="margin-bottom: 10px;">Сообщите код любому подтверждённому преподавателю.</p>
+                <h2 id="generatedCodeDisplay" style="font-size: 2.5rem; letter-spacing: 5px; color: #0088cc; margin-bottom: 20px;">T-0000</h2>
+                <button class="btn-primary" onclick="switchView('viewLogin')">Перейти ко входу</button>
+            </div>
+
+            <div id="viewForgot" style="display: none;">
+                <h1 class="app-title">Восстановление пароля</h1>
+                <p class="app-subtitle" style="font-size:0.85rem;">Введите логин. Другой преподаватель получит запрос и подтвердит его.</p>
+                <div class="form-group"><input type="text" id="forgotLogin" class="form-control" placeholder="Логин или Почта" required></div>
+                <button class="btn-primary" onclick="submitForgotPassword()">Отправить запрос</button>
+                <button class="btn-text" onclick="switchView('viewLogin')">Назад</button>
+            </div>
+
+            <div id="viewForgotSent" style="display: none;">
+                <h1 class="app-title">Запрос отправлен</h1>
+                <p class="app-subtitle" style="font-size:0.9rem;">
+                    Обратитесь к любому подтверждённому преподавателю — он увидит ваш запрос в разделе «Верификация» и нажмёт «Подтвердить».<br><br>
+                    После этого вам будет передана ссылка для смены пароля.
+                </p>
+                <button class="btn-primary" onclick="switchView('viewLogin')">Назад ко входу</button>
+            </div>
+
+            <div id="viewResetToken" style="display: none;">
+                <h1 class="app-title">Новый пароль</h1>
+                <p class="app-subtitle" style="font-size:0.9rem;">Введите новый пароль для восстановления доступа.</p>
+                <div class="form-group"><input type="password" id="tokenNewPass" class="form-control" placeholder="Новый пароль (мин. 8 символов)" required></div>
+                <button class="btn-primary" onclick="submitResetWithToken()">Сменить пароль</button>
+                <button class="btn-text" onclick="switchView('viewLogin')">Отмена</button>
+            </div>
+
+            <p id="errorMsg" style="color: #ff453a; font-size: 0.85rem; margin-top: 10px;"></p>
+        </div>
+        <a href="/" class="outside-link">← Студенческий портал</a>
+    </div>
+
+    <div class="login-wrapper" id="pendingWrapper" style="display:none;">
+        <div class="auth-container">
+            <h1 class="app-title">Ожидает верификации</h1>
+            <p class="app-subtitle">Сообщите код коллеге:</p>
+            <h2 style="font-size: 2.3rem; letter-spacing: 5px; color: #0088cc; margin-bottom: 20px;" id="pendingCode">T-0000</h2>
+            <button class="btn-secondary" onclick="location.reload()">Обновить</button>
+            <button class="btn-text" onclick="logout()">Выйти</button>
+        </div>
+    </div>
+
+    <!-- Дашборд -->
+    <div class="app-dashboard" id="dashboard">
+        <button class="sidebar-show-btn" id="sidebarShowBtn" title="Показать меню">›</button>
+        <aside class="sidebar">
+            <div class="sidebar-logo">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="28" height="28"><circle cx="256" cy="256" r="256" fill="#0088cc"/><g transform="translate(64, 64) scale(16)" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></g></svg>
+                <span>Workspaces</span>
+                <button class="sidebar-toggle" id="sidebarToggle" title="Скрыть меню">‹</button>
+            </div>
+            <div id="currentSpaceLabel" class="current-space-label">— выберите группу —</div>
+
+            <a onclick="showTab('tab-system', this)" class="sidebar-item" data-tab="tab-system" id="sidebarSystemItem">
+                <svg class="sidebar-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l7-5 7 5v14"/><path d="M9 21v-6h6v6"/></svg>
+                <span>Панель управления</span>
+            </a>
+            <a onclick="showTab('tab-spaces', this)" class="sidebar-item" data-tab="tab-spaces">
+                <svg class="sidebar-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+                <span>Пространства</span>
+            </a>
+            <a onclick="showTab('tab-schedule', this)" class="sidebar-item active" data-tab="tab-schedule">
+                <svg class="sidebar-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18"/><path d="M8 3v4M16 3v4"/></svg>
+                <span>Расписание</span>
+            </a>
+            <a onclick="showTab('tab-hw', this)" class="sidebar-item" data-tab="tab-hw">
+                <svg class="sidebar-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v6h6"/><path d="M8 14l2 2 4-4"/></svg>
+                <span>Домашние задания</span>
+            </a>
+            <a onclick="showTab('tab-grades', this)" class="sidebar-item" data-tab="tab-grades">
+                <svg class="sidebar-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
+                <span>Журнал</span>
+            </a>
+            <a onclick="showTab('tab-members', this)" class="sidebar-item" data-tab="tab-members">
+                <svg class="sidebar-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.5 3-6 6.5-6s6.5 2.5 6.5 6"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14c2.5 0 4.5 1.8 4.5 4"/></svg>
+                <span>Участники</span>
+            </a>
+            <a onclick="showTab('tab-auths', this)" class="sidebar-item" data-tab="tab-auths">
+                <svg class="sidebar-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-4z"/><path d="M9 12l2 2 4-4"/></svg>
+                <span>Верификация</span>
+            </a>
+            <a onclick="showTab('tab-settings', this)" class="sidebar-item" data-tab="tab-settings" style="margin-top:auto;">
+                <svg class="sidebar-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3h.1a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>
+                <span>Настройки</span>
+            </a>
+        </aside>
+
+        <main class="main-content">
+            <div class="announcement-banner" id="announcementBanner"></div>
+
+            <div id="tab-system" class="tab-section">
+                <h1 class="page-title">Панель управления колледжем</h1>
+                <div class="settings-card" id="rootOnlyNotice" style="display:none;">
+                    <p style="color:var(--text-secondary); margin:0;">Только Root Teacher может изменять глобальные настройки.</p>
+                </div>
+                <div class="settings-card">
+                    <div class="switch-row">
+                        <div><div class="switch-label">Удалёнка (только фото ДЗ)</div><div class="switch-desc">Студенты смогут сдавать ДЗ только фотографиями, без кнопки «Выполнено».</div></div>
+                        <label class="switch"><input type="checkbox" id="sw-remote"><span class="slider"></span></label>
+                    </div>
+                    <div class="switch-row">
+                        <div><div class="switch-label">Технические работы</div><div class="switch-desc">Блокирует доступ студентам.</div></div>
+                        <label class="switch"><input type="checkbox" id="sw-maintenance"><span class="slider"></span></label>
+                    </div>
+                    <div class="switch-row">
+                        <div><div class="switch-label">Экзамены</div><div class="switch-desc">Отключает чат студентам.</div></div>
+                        <label class="switch"><input type="checkbox" id="sw-exams"><span class="slider"></span></label>
+                    </div>
+                    <div class="form-group" style="margin-top:16px;">
+                        <label class="switch-label">Объявление колледжа</label>
+                        <textarea id="announcementText" class="form-control" rows="2" placeholder="Текст баннера"></textarea>
+                    </div>
+                    <button class="btn-primary" id="saveSettingsBtn" onclick="saveGlobalSettings()">Сохранить настройки</button>
+                </div>
+            </div>
+
+            <div id="tab-spaces" class="tab-section">
+                <h1 class="page-title">Все пространства</h1>
+                <button class="btn-small" onclick="openCreateSpaceForm()" style="margin-bottom:14px;">Создать группу</button>
+                <p style="color:var(--text-secondary); font-size:0.85rem;">Нажмите на группу, чтобы переключиться в неё</p>
+                <div id="allSpacesList"></div>
+            </div>
+
+            <div id="tab-schedule" class="tab-section active"></div>
+            <div id="tab-hw" class="tab-section"></div>
+            <div id="tab-grades" class="tab-section"></div>
+            <div id="tab-members" class="tab-section"></div>
+
+            <div id="tab-auths" class="tab-section">
+                <h1 class="page-title">Верификация</h1>
+
+                <div class="settings-card">
+                    <h3>Подтвердить нового коллегу</h3>
+                    <p style="color:var(--text-secondary); font-size:0.9rem;">Попросите коллегу назвать 4 цифры кода. Буквы «T-» подставятся автоматически.</p>
+                    <div style="display:flex; gap:10px; max-width: 320px;">
+                        <input type="text" id="colleagueCode" class="form-control" placeholder="0000" maxlength="4" inputmode="numeric" style="text-align:center; letter-spacing:6px; font-weight:700;">
+                        <button class="btn-primary" style="margin:0; width: 140px;" onclick="verifyColleague()">Подтвердить</button>
+                    </div>
+                </div>
+
+                <div class="settings-card">
+                    <h3>Запросы на восстановление пароля</h3>
+                    <p style="color:var(--text-secondary); font-size:0.85rem; margin-bottom:12px;">
+                        Студенты — сообщите код лично. Учителей — подтвердите кнопкой, после чего передайте им ссылку для смены пароля.
+                    </p>
+                    <div id="resetRequestsList">
+                        <p class="empty-state" style="padding:16px 0;">Нет активных запросов</p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="tab-settings" class="tab-section">
+                <h1 class="page-title">Настройки аккаунта</h1>
+                <div class="settings-card">
+                    <div style="display:flex; align-items:center; gap:12px; margin-bottom:10px;">
+                        <div id="teacherAvatarBig" style="font-size:2.5rem;">👤</div>
+                        <div>
+                            <div id="teacherFullName" style="font-weight:500;"></div>
+                            <div id="teacherProfileInfo" style="color:var(--text-secondary); font-size:0.9rem;"></div>
+                        </div>
+                    </div>
+                    <button class="btn-secondary" onclick="openEditProfile()">Редактировать профиль</button>
+                </div>
+
+                <div class="settings-card" id="themeSettingsCard">
+                    <h3>Тема оформления</h3>
+                    <p style="color:var(--text-secondary); font-size:0.85rem; margin-top:0;">Выберите тему для этого устройства.</p>
+                    <div style="display:flex; gap:8px; margin-top:10px;">
+                        <button class="theme-option" data-theme-val="auto" style="flex:1;">Авто</button>
+                        <button class="theme-option" data-theme-val="light" style="flex:1;">Светлая</button>
+                        <button class="theme-option" data-theme-val="dark" style="flex:1;">Тёмная</button>
+                    </div>
+                </div>
+
+                <div class="settings-card">
+                    <h3>Настройки пространства</h3>
+                    <p style="color:var(--text-secondary); font-size:0.85rem;">Для выбранного пространства</p>
+                    <button class="btn-secondary" style="margin-bottom:8px;" onclick="rotateInviteCode()">Сменить код приглашения</button>
+                    <button class="btn-secondary" onclick="openBlacklist()">Чёрный список</button>
+                </div>
+
+                <div class="settings-card" id="deleteSpaceCard" style="display:none;">
+                    <h3 style="color:var(--danger);">Опасная зона</h3>
+                    <p style="color:var(--text-secondary); font-size:0.85rem;">Удаление пространства необратимо: все ученики будут исключены, файлы, сообщения, оценки и ДЗ удалены.</p>
+                    <button class="btn-danger" id="deleteSpaceBtn" style="margin-top:8px;">Удалить это пространство</button>
+                </div>
+
+                <div class="settings-card" id="pushSettingsContainer"></div>
+
+                <div class="settings-card">
+                    <h3>Безопасность</h3>
+                    <button class="btn-secondary" onclick="openChangePasswordInfo()">Как сменить пароль</button>
+                </div>
+
+                <div class="settings-card">
+                    <h3>О приложении</h3>
+                    <p style="color:var(--text-secondary); font-size:0.85rem; margin:0;">Workspaces v1.0</p>
+                </div>
+
+                <div class="settings-card">
+                    <button class="btn-danger" onclick="logout()">Выйти из аккаунта</button>
+                </div>
+            </div>
+        </main>
+
+        <nav class="bottom-tabbar">
+            <button class="tab-btn" data-tab="tab-system" onclick="showTab('tab-system', this)" id="bottomSystemBtn">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l7-5 7 5v14"/><path d="M9 21v-6h6v6"/></svg>
+                <span>Панель</span>
+            </button>
+            <button class="tab-btn active" data-tab="tab-schedule" onclick="showTab('tab-schedule', this)">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18"/><path d="M8 3v4M16 3v4"/></svg>
+                <span>Пары</span>
+            </button>
+            <button class="tab-btn" data-tab="tab-hw" onclick="showTab('tab-hw', this)">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v6h6"/><path d="M8 14l2 2 4-4"/></svg>
+                <span>ДЗ</span>
+            </button>
+            <button class="tab-btn" data-tab="tab-grades" onclick="showTab('tab-grades', this)">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
+                <span>Журнал</span>
+            </button>
+            <button class="tab-btn" data-tab="tab-members" onclick="showTab('tab-members', this)">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.5 3-6 6.5-6s6.5 2.5 6.5 6"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14c2.5 0 4.5 1.8 4.5 4"/></svg>
+                <span>Люди</span>
+            </button>
+            <button class="tab-btn" onclick="openMoreSheet()">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/></svg>
+                <span>Ещё</span>
+            </button>
+        </nav>
+    </div>
+
+    <div class="sheet-overlay" id="sheetOverlay" onclick="closeDynamicSheet()"></div>
+    <div id="dynamicSheetRoot"></div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/shared.js?v=11"></script>
+    <script>
+        const errorMsg = document.getElementById('errorMsg');
+        function switchView(viewId) {
+            ['viewLogin', 'viewReg', 'viewRegCode', 'viewForgot', 'viewForgotSent', 'viewResetToken'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = 'none';
+            });
+            const target = document.getElementById(viewId);
+            if (target) target.style.display = 'block';
+            errorMsg.textContent = '';
+        }
+
+        let mySpaces = [];
+        let currentUser = null;
+        let _resetToken = null;
+
+        function isValidEmailDomain(email) {
+            const allowedDomains = ['gmail.com', 'mail.ru', 'yandex.ru', 'rambler.ru', 'bk.ru', 'list.ru', 'inbox.ru', 'ya.ru', 'outlook.com', 'yahoo.com'];
+            return allowedDomains.includes((email.split('@')[1] || '').toLowerCase());
+        }
+
+        async function handleReg(e) {
+            e.preventDefault();
+            errorMsg.textContent = '';
+            if (document.getElementById('regPass1').value !== document.getElementById('regPass2').value) { errorMsg.textContent = 'Пароли не совпадают'; return; }
+            const email = document.getElementById('regEmail').value.trim();
+            if (!isValidEmailDomain(email)) { errorMsg.textContent = 'Введите реальный адрес почты'; return; }
+            try {
+                const d = await apiPost('/api/teach/register', { fullName: document.getElementById('regFull').value, email, password: document.getElementById('regPass1').value });
+                document.getElementById('generatedCodeDisplay').textContent = d.code;
+                switchView('viewRegCode');
+            } catch (d) { errorMsg.textContent = d.error || 'Ошибка регистрации'; }
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            try {
+                const data = await apiPost('/api/auth/login', {
+                    login: document.getElementById('logInput').value,
+                    password: document.getElementById('logPass').value,
+                    isTeacher: true
+                });
+                localStorage.setItem('token', data.token);
+                localStorage.setItem('role', 'teacher');
+                localStorage.setItem('user', JSON.stringify(data.user));
+                showLoadingScreen();
+                location.reload();
+            } catch (d) { errorMsg.textContent = d.error || 'Ошибка входа'; }
+        }
+
+        function logout() {
+            showLoadingScreen();
+            setTimeout(() => { localStorage.clear(); location.reload(); }, 150);
+        }
+
+        function openForgotPassword() {
+            document.getElementById('forgotLogin').value = document.getElementById('logInput').value || '';
+            switchView('viewForgot');
+        }
+
+        async function submitForgotPassword() {
+            const login = document.getElementById('forgotLogin').value.trim();
+            if (!login) { errorMsg.textContent = 'Введите логин'; return; }
+            try {
+                await requestPasswordReset(login);
+                switchView('viewForgotSent');
+            } catch (d) { errorMsg.textContent = d.error || 'Ошибка отправки'; }
+        }
+
+        async function submitResetWithToken() {
+            const newPassword = document.getElementById('tokenNewPass').value;
+            if (!newPassword) { errorMsg.textContent = 'Введите пароль'; return; }
+            try {
+                await resetPasswordWithToken(_resetToken, newPassword);
+                showToast('Пароль изменён. Войдите с новым.', 'success', 5000);
+                history.replaceState(null, '', '/teach');
+                _resetToken = null;
+                switchView('viewLogin');
+            } catch (d) { errorMsg.textContent = d.error || 'Ошибка смены пароля'; }
+        }
+
+        async function checkResetTokenInUrl() {
+            const params = new URLSearchParams(location.search);
+            const token = params.get('reset');
+            if (!token) return false;
+            const r = await checkResetToken(token);
+            if (!r.valid) {
+                showToast('Ссылка недействительна или устарела', 'error', 5000);
+                history.replaceState(null, '', '/teach');
+                return false;
+            }
+            _resetToken = token;
+            switchView('viewResetToken');
+            return true;
+        }
+
+        async function verifyColleague() {
+            let code = document.getElementById('colleagueCode').value.trim();
+            if (!code) return;
+            try {
+                const d = await apiPost('/api/teach/verify-colleague', { code });
+                showToast(d.message, 'success');
+                document.getElementById('colleagueCode').value = '';
+            }
+            catch (d) { showToast(d.error || 'Ошибка', 'error'); }
+        }
+
+        document.getElementById('colleagueCode')?.addEventListener('input', (e) => {
+            e.target.value = e.target.value.replace(/\D/g, '').slice(0, 4);
+        });
+
+        async function loadResetRequests() {
+            try {
+                const list = await getPasswordResetRequests();
+                renderResetRequests(list);
+            } catch (e) { /* тихо */ }
+        }
+
+        function renderResetRequests(list) {
+            const box = document.getElementById('resetRequestsList');
+            if (!box) return;
+            if (!list.length) {
+                box.innerHTML = '<p class="empty-state" style="padding:16px 0;">Нет активных запросов</p>';
+                return;
+            }
+            box.innerHTML = list.map(r => {
+                const isTeacher = r.user_type === 'teacher';
+                const isApproved = r.status === 'approved';
+                if (isTeacher) {
+                    return `
+                        <div style="padding:12px;background:var(--input-bg);border-radius:12px;margin-bottom:8px;">
+                            <div style="font-weight:600;margin-bottom:6px;">${escapeHtml(r.display_name)}</div>
+                            <div style="color:var(--text-secondary);font-size:0.85rem;margin-bottom:8px;">
+                                Хочет восстановить пароль.
+                                ${isApproved ? '<br><span style="color:#30d158;">✅ Уже подтверждён другим преподавателем</span>' : ''}
+                            </div>
+                            ${!isApproved ? `
+                                <div style="display:flex;gap:8px;">
+                                    <button class="btn-small" style="background:#30d158;color:#fff;" onclick="approveReset('${r.id}')">Подтвердить</button>
+                                    <button class="btn-small" style="background:#ff453a;color:#fff;" onclick="declineReset('${r.id}')">Отклонить</button>
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                }
+                return `
+                    <div style="padding:12px;background:var(--input-bg);border-radius:12px;margin-bottom:8px;">
+                        <div style="font-weight:600;margin-bottom:6px;">${escapeHtml(r.display_name)} ${r.username ? '(@' + escapeHtml(r.username) + ')' : ''}</div>
+                        <div style="color:var(--text-secondary);font-size:0.85rem;margin-bottom:8px;">
+                            Хочет восстановить пароль. Сообщите ученику код:
+                        </div>
+                        <div style="font-size:1.6rem;font-weight:800;letter-spacing:6px;color:#0088cc;padding:8px 0;text-align:center;background:var(--bg-card);border-radius:8px;margin-bottom:8px;">${escapeHtml(r.code || '----')}</div>
+                        <button class="btn-small" style="background:#ff453a;color:#fff;" onclick="declineReset('${r.id}')">Отклонить</button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function approveReset(id) {
+            try {
+                const r = await approvePasswordReset(id);
+                if (r.link) {
+                    const fullUrl = location.origin + r.link;
+                    const root = document.getElementById('dynamicSheetRoot');
+                    root.innerHTML = `
+                        <div class="sheet show" id="dynamicSheet">
+                            <div class="sheet-handle"></div>
+                            <h2 class="app-title" style="font-size:1.2rem;">Ссылка для коллеги</h2>
+                            <p style="color:var(--text-secondary);font-size:0.9rem;">Передайте эту ссылку преподавателю любым способом.</p>
+                            <div style="background:var(--input-bg);padding:12px;border-radius:10px;word-break:break-all;font-size:0.85rem;margin:10px 0;" id="resetLinkBox">${escapeHtml(fullUrl)}</div>
+                            <button class="btn-primary" onclick="copyResetLink('${escapeHtml(fullUrl)}')">Скопировать</button>
+                            <button class="btn-secondary" onclick="closeDynamicSheet()">Закрыть</button>
+                        </div>
+                    `;
+                    document.getElementById('sheetOverlay').classList.add('show');
+                }
+                loadResetRequests();
+            } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
+        }
+
+        async function declineReset(id) {
+            const ok = await showConfirm('Отклонить запрос?', 'Пользователь сможет создать новый запрос позже.', 'Отклонить', 'Отмена', true);
+            if (!ok) return;
+            try {
+                await declinePasswordReset(id);
+                loadResetRequests();
+            } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
+        }
+
+        function copyResetLink(link) {
+            navigator.clipboard.writeText(link).then(() => showToast('Скопировано', 'success')).catch(() => showToast('Ошибка копирования', 'error'));
+        }
+
+        socket.on('password_reset_request', () => { loadResetRequests(); });
+        socket.on('password_reset_updated', () => { loadResetRequests(); });
+
+        function showTab(tabId, el) {
+            document.querySelectorAll('.tab-section').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.sidebar-item, .bottom-tabbar .tab-btn').forEach(s => s.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+            document.querySelectorAll(`[data-tab="${tabId}"]`).forEach(s => s.classList.add('active'));
+            loadTabContent(tabId);
+        }
+
+        function openMoreSheet() {
+            const root = document.getElementById('dynamicSheetRoot');
+            const tabs = [
+                { id: 'tab-spaces',   icon: '📁', label: 'Пространства' },
+                { id: 'tab-auths',    icon: '🛡️', label: 'Верификация' },
+                { id: 'tab-settings', icon: '⚙️', label: 'Настройки' }
+            ];
+            const isRoot = !!currentUser?.isRoot;
+            if (isRoot) tabs.unshift({ id: 'tab-system', icon: '🏛️', label: 'Панель управления' });
+
+            const currentActive = document.querySelector('.tab-section.active')?.id || '';
+
+            root.innerHTML = `
+                <div class="sheet show" id="dynamicSheet">
+                    <div class="sheet-handle"></div>
+                    <h2 class="app-title" style="font-size:1.2rem;margin-bottom:14px;">Все разделы</h2>
+                    <div style="display:flex;flex-direction:column;gap:6px;" id="moreSheetList">
+                        ${tabs.map(t => `
+                            <button class="btn-secondary" data-more-tab="${t.id}" style="margin:0;display:flex;align-items:center;gap:10px;justify-content:flex-start;${t.id === currentActive ? 'background:var(--accent-blue);color:#fff;' : ''}">
+                                <span style="font-size:1.2rem;">${t.icon}</span>
+                                <span>${t.label}</span>
+                            </button>
+                        `).join('')}
+                    </div>
+                    <button class="btn-secondary" style="margin-top:14px;" onclick="closeDynamicSheet()">Закрыть</button>
+                </div>`;
+            document.getElementById('sheetOverlay').classList.add('show');
+
+            root.querySelectorAll('[data-more-tab]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const tabId = btn.dataset.moreTab;
+                    closeDynamicSheet();
+                    showTab(tabId);
+                });
+            });
+        }
+
+        function loadTabContent(tabId) {
+            const spaceId = currentSpace?.id;
+            if (tabId === 'tab-schedule') renderScheduleUnified(document.getElementById('tab-schedule'), spaceId, true);
+            if (tabId === 'tab-hw') renderHomeworkTab(document.getElementById('tab-hw'), spaceId, true);
+            if (tabId === 'tab-grades') renderGradesTab(document.getElementById('tab-grades'), spaceId, true);
+            if (tabId === 'tab-members') renderMembersTab(document.getElementById('tab-members'), spaceId, true);
+            if (tabId === 'tab-settings') {
+                renderPushSettingsCard();
+                refreshThemeButtons();
+                renderDeleteSpaceCard();
+            }
+            if (tabId === 'tab-auths') loadResetRequests();
+        }
+
+        function renderDeleteSpaceCard() {
+            const card = document.getElementById('deleteSpaceCard');
+            const btn = document.getElementById('deleteSpaceBtn');
+            if (!card || !btn) return;
+            if (!currentUser?.isRoot || !currentSpace) {
+                card.style.display = 'none';
+                return;
+            }
+            card.style.display = 'block';
+            btn.textContent = `Удалить «${currentSpace.name}»`;
+            btn.onclick = () => deleteSpace(currentSpace.id, currentSpace.name);
+        }
+
+        async function reloadSpaces() {
+            mySpaces = await apiGet('/api/spaces/mine');
+            const label = document.getElementById('currentSpaceLabel');
+            if (!mySpaces.length) {
+                currentSpace = null;
+                if (label) label.textContent = '— нет групп —';
+            } else {
+                const savedId = localStorage.getItem('activeSpaceId');
+                const found = mySpaces.find(s => s.id === savedId) || mySpaces[0];
+                currentSpace = found;
+                if (label) label.textContent = found.name;
+            }
+            renderAllSpacesList();
+            const activeTab = document.querySelector('.tab-section.active')?.id || 'tab-schedule';
+            loadTabContent(activeTab);
+        }
+        window.__reloadSpaces = reloadSpaces;
+
+        function switchSpace(spaceId) {
+            const found = mySpaces.find(s => s.id === spaceId);
+            if (!found) return;
+            currentSpace = found;
+            localStorage.setItem('activeSpaceId', spaceId);
+            document.getElementById('currentSpaceLabel').textContent = found.name;
+            renderAllSpacesList();
+            const activeTab = document.querySelector('.tab-section.active')?.id || 'tab-schedule';
+            loadTabContent(activeTab);
+            showTab('tab-system', document.querySelector('.sidebar-item[data-tab="tab-system"]'));
+        }
+
+        function renderAllSpacesList() {
+            const box = document.getElementById('allSpacesList');
+            if (!mySpaces.length) { box.innerHTML = '<p class="empty-state">Пока нет ни одной группы.</p>'; return; }
+            const isRoot = !!currentUser?.isRoot;
+            box.innerHTML = mySpaces.map(s => `
+                <div class="space-card" style="${currentSpace?.id === s.id ? 'border-color:#0088cc; border-width:2px;' : ''}" onclick="switchSpace('${s.id}')">
+                    <span>${currentSpace?.id === s.id ? '● ' : ''}${escapeHtml(s.name)}</span>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span class="code-pill">${s.invite_code}</span>
+                        ${isRoot ? `<button class="btn-small" style="background:#ff453a;color:#fff;padding:4px 8px;font-size:0.75rem;" onclick="event.stopPropagation(); deleteSpace('${s.id}', '${escapeHtml(s.name).replace(/'/g, "\\'")}')">Удалить</button>` : ''}
+                    </div>
+                </div>`).join('');
+        }
+
+        async function loadRootSettings() {
+            const s = await apiGet('/api/settings');
+            systemSettings = s;
+            document.getElementById('sw-remote').checked = !!s.remote_mode;
+            document.getElementById('sw-maintenance').checked = !!s.maintenance_mode;
+            document.getElementById('sw-exams').checked = !!s.exams_mode;
+            document.getElementById('announcementText').value = s.global_announcement || '';
+            const isRoot = currentUser?.isRoot;
+            document.getElementById('rootOnlyNotice').style.display = isRoot ? 'none' : 'block';
+            document.getElementById('saveSettingsBtn').style.display = isRoot ? 'block' : 'none';
+            ['sw-remote', 'sw-maintenance', 'sw-exams'].forEach(id => document.getElementById(id).disabled = !isRoot);
+            document.getElementById('announcementText').disabled = !isRoot;
+        }
+
+        async function saveGlobalSettings() {
+            try {
+                await apiPost('/api/settings/update', {
+                    remote_mode: document.getElementById('sw-remote').checked,
+                    maintenance_mode: document.getElementById('sw-maintenance').checked,
+                    exams_mode: document.getElementById('sw-exams').checked,
+                    private_chat_mode: false,
+                    global_announcement: document.getElementById('announcementText').value
+                });
+                showToast('Настройки сохранены', 'success');
+            } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
+        }
+
+        socket.on('settings_updated', () => { loadRootSettings(); });
+        socket.on('members_updated', () => {
+            const active = document.querySelector('.tab-section.active')?.id;
+            if (active === 'tab-members') loadTabContent('tab-members');
+        });
+
+        function renderTeacherProfile() {
+            if (!currentUser) return;
+            document.getElementById('teacherAvatarBig').textContent = currentUser.avatarEmoji || '👤';
+            document.getElementById('teacherFullName').textContent = currentUser.fullName;
+            document.getElementById('teacherProfileInfo').textContent = `@${currentUser.username}${currentUser.isRoot ? ' · Root' : ''}`;
+        }
+
+        async function openChangePasswordInfo() {
+            const ok = await showConfirm('Сменить пароль', 'Выйдите из аккаунта, нажмите «Забыли пароль?», введите логин. Другой преподаватель подтвердит запрос в разделе «Верификация».', 'Понятно', 'Закрыть');
+            if (ok) logout();
+        }
+
+        function hideSystemTabForNonRoot() {
+            if (currentUser?.isRoot) return;
+            const sidebarItem = document.getElementById('sidebarSystemItem');
+            const bottomBtn = document.getElementById('bottomSystemBtn');
+            if (sidebarItem) sidebarItem.style.display = 'none';
+            if (bottomBtn) bottomBtn.style.display = 'none';
+        }
+
+        async function boot() {
+            if (location.search.includes('reset=')) {
+                document.getElementById('loginWrapper').style.display = 'flex';
+                await checkResetTokenInUrl();
+                hideLoadingScreen();
+                return;
+            }
+
+            if (!(localStorage.getItem('token') && localStorage.getItem('role') === 'teacher')) {
+                hideLoadingScreen();
+                return;
+            }
+            let user;
+            try { ({ user } = await apiGet('/api/auth/me')); }
+            catch (e) { logout(); return; }
+            currentUser = user;
+            localStorage.setItem('user', JSON.stringify(user));
+
+            if (!user.isTeacherVerified) {
+                document.getElementById('loginWrapper').style.display = 'none';
+                document.getElementById('pendingWrapper').style.display = 'flex';
+                document.getElementById('pendingCode').textContent = user.verificationCode || 'T-????';
+                hideLoadingScreen();
+                return;
+            }
+
+            try {
+                await loadPortalJs();
+            } catch (e) {
+                console.error('portal.js load failed:', e);
+                showToast('Не удалось загрузить портал', 'error');
+                hideLoadingScreen();
+                return;
+            }
+
+            document.getElementById('loginWrapper').style.display = 'none';
+            document.getElementById('dashboard').style.display = 'flex';
+            renderTeacherProfile();
+            initSidebarToggle();
+
+            hideSystemTabForNonRoot();
+            if (!user.isRoot) {
+                document.getElementById('tab-system').classList.remove('active');
+                document.getElementById('tab-schedule').classList.add('active');
+                document.querySelectorAll('.sidebar-item, .bottom-tabbar .tab-btn').forEach(s => s.classList.remove('active'));
+                document.querySelectorAll('[data-tab="tab-schedule"]').forEach(s => s.classList.add('active'));
+            }
+
+            await loadAndApplySettings(currentUser);
+            await loadRootSettings();
+            await reloadSpaces();
+            startSelfPing();
+            startPresenceTracking();
+            updateBadges();
+
+            loadResetRequests();
+
+            hideLoadingScreen();
+        }
+        boot();
+    </script>
+</body>
+</html>
