@@ -1428,7 +1428,16 @@ async function uploadFiles(files, spaceId) {
     const totalFiles = files.length;
     let uploadedCount = 0;
     
-    for (const file of files) {
+    for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        
+        // Отмечаем файл как загружающийся
+        if (_pendingChatFiles[i]) {
+            _pendingChatFiles[i].isUploading = true;
+            _pendingChatFiles[i].uploadProgress = 0;
+            renderFilePreview();
+        }
+        
         try {
             const formData = new FormData();
             formData.append('file', file);
@@ -1441,6 +1450,14 @@ async function uploadFiles(files, spaceId) {
                 xhr.upload.addEventListener('progress', (e) => {
                     if (e.lengthComputable) {
                         const percent = Math.round((e.loaded / e.total) * 100);
+                        
+                        // Обновляем прогресс конкретного файла
+                        if (_pendingChatFiles[i]) {
+                            _pendingChatFiles[i].uploadProgress = percent;
+                            renderFilePreview();
+                        }
+                        
+                        // Также вызываем общий callback для совместимости
                         const overallPercent = Math.round(((uploadedCount + e.loaded / e.total) / totalFiles) * 100);
                         if (_uploadProgressCallback) {
                             _uploadProgressCallback(overallPercent, file.name);
@@ -1478,10 +1495,23 @@ async function uploadFiles(files, spaceId) {
             results.push(result);
             uploadedCount++;
             
+            // Завершаем загрузку файла
+            if (_pendingChatFiles[i]) {
+                _pendingChatFiles[i].isUploading = false;
+                _pendingChatFiles[i].uploadProgress = 100;
+                renderFilePreview();
+            }
+            
         } catch (e) {
             console.error('Ошибка загрузки файла:', file.name, e.message);
             showToast(`Ошибка: ${file.name} - ${e.message}`, 'error');
             results.push({ error: e.message });
+            
+            // Снимаем флаг загрузки при ошибке
+            if (_pendingChatFiles[i]) {
+                _pendingChatFiles[i].isUploading = false;
+                renderFilePreview();
+            }
         }
     }
     
@@ -1650,32 +1680,63 @@ function renderFilePreview() {
         return;
     }
     
-    let html = '<div style="display:flex;flex-wrap:wrap;gap:8px;padding:8px 0;">';
+    let html = '<div style="display:flex;flex-wrap:wrap;gap:10px;padding:8px 0;">';
     
     _pendingChatFiles.forEach((f, i) => {
         const isImage = f.type.startsWith('image/');
-        
-        if (isImage) {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const preview = document.getElementById(`file-preview-${i}`);
-                if (preview) {
-                    preview.innerHTML = `<img src="${e.target.result}" style="max-width:100%;max-height:100%;object-fit:cover;border-radius:4px;">`;
-                }
-            };
-            reader.readAsDataURL(f);
-        }
+        const progress = f.uploadProgress || 0;
+        const isUploading = f.isUploading || false;
         
         html += `
-            <div id="file-preview-${i}" style="width:60px;height:60px;background:var(--input-bg);border-radius:8px;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;">
-                ${isImage ? '<div style="font-size:10px;color:var(--text-secondary);">...</div>' : `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`}
-                <button onclick="event.stopPropagation(); window._removePendingFile(${i})" style="position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:var(--danger);color:#fff;border:none;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;">×</button>
+            <div id="file-preview-${i}" style="width:80px;height:80px;background:var(--input-bg);border-radius:10px;display:flex;align-items:center;justify-content:center;position:relative;overflow:visible;">
+                <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;border-radius:10px;">
+                    ${isImage ? '<div id="file-img-' + i + '" style="font-size:10px;color:var(--text-secondary);">📷</div>' : `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`}
+                    
+                    ${isUploading ? `
+                    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);border-radius:10px;">
+                        <svg width="32" height="32" viewBox="0 0 36 36" style="transform:rotate(-90deg);">
+                            <circle cx="18" cy="18" r="14" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="3"/>
+                            <circle cx="18" cy="18" r="14" fill="none" stroke="#0088cc" stroke-width="3" 
+                                stroke-dasharray="${progress * 0.88} 88" 
+                                stroke-linecap="round"
+                                style="transition:stroke-dasharray 0.3s ease;"/>
+                        </svg>
+                        <div style="position:absolute;font-size:9px;font-weight:700;color:#fff;">${progress}%</div>
+                    </div>
+                    ` : ''}
+                </div>
+                
+                <button onclick="event.stopPropagation(); window._removePendingFile(${i})" 
+                    style="position:absolute;top:-8px;right:-8px;width:24px;height:24px;border-radius:50%;background:#ff3b30;color:#fff;border:2px solid var(--bg-primary,#fff);cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.2);transition:transform 0.15s,background 0.15s;"
+                    onmouseover="this.style.transform='scale(1.1)';this.style.background='#ff1f14';"
+                    onmouseout="this.style.transform='scale(1)';this.style.background='#ff3b30';">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                        <path d="M2 2L10 10M10 2L2 10"/>
+                    </svg>
+                </button>
             </div>
         `;
     });
     
     html += '</div>';
     box.innerHTML = html;
+    
+    // Загружаем превью изображений
+    _pendingChatFiles.forEach((f, i) => {
+        if (f.type.startsWith('image/')) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const imgContainer = document.getElementById(`file-img-${i}`);
+                if (imgContainer && imgContainer.parentElement) {
+                    imgContainer.parentElement.style.backgroundImage = `url(${e.target.result})`;
+                    imgContainer.parentElement.style.backgroundSize = 'cover';
+                    imgContainer.parentElement.style.backgroundPosition = 'center';
+                    imgContainer.remove();
+                }
+            };
+            reader.readAsDataURL(f);
+        }
+    });
 }
 
 function selectAttach(files) {

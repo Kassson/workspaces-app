@@ -769,6 +769,12 @@ async function saveRpgStateToServer(s) {
 async function resetRpgGame() {
     if (!confirm('Вы уверены? Весь прогресс будет потерян!')) return;
 
+    // Останавливаем все таймеры предыдущей игры
+    if (activeGameCleanup) {
+        try { activeGameCleanup(); } catch (e) {}
+        activeGameCleanup = null;
+    }
+
     const newState = defaultRpgState();
     
     // Сначала сохраняем локально
@@ -786,7 +792,7 @@ async function resetRpgGame() {
     
     // Перезагружаем игру с принудительным использованием нового состояния
     // Передаём флаг, что это сброс, чтобы не загружать с сервера
-    await startRpgClicker(document.getElementById('gameArea'), newState, true);
+    activeGameCleanup = await startRpgClicker(document.getElementById('gameArea'), newState, true);
 }
 
 // ============================================================================
