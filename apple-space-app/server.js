@@ -1459,7 +1459,12 @@ io.on('connection', async (socket) => {
     });
 
     socket.on('send_message', async ({ message, replyToId, fileIds, mentions }) => {
-        if (!socket.userId || !socket.spaceId || !message || !message.trim()) return;
+        if (!socket.userId || !socket.spaceId) return;
+        // Разрешаем пустое сообщение только если есть файлы
+        const hasFiles = Array.isArray(fileIds) && fileIds.length > 0;
+        if (!message || !message.trim()) {
+            if (!hasFiles) return; // Пустое сообщение без файлов - отклоняем
+        }
         const user = await getUserById(socket.userId);
         const settings = (await pool.query('SELECT * FROM system_settings WHERE id = 1')).rows[0];
         if (settings.exams_mode && !user.is_teacher) return;

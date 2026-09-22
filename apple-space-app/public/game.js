@@ -349,13 +349,17 @@ function rpgComputeStats(up) {
     };
 }
 
-async function startRpgClicker(area, forcedState = null) {
+async function startRpgClicker(area, forcedState = null, skipServerLoad = false) {
     area.innerHTML = '<p style="text-align:center;padding:60px 20px;color:#8d99a5;">Загрузка прогресса…</p>';
 
     let state;
     if (forcedState) {
         // Используем принудительно переданное состояние (например, после сброса)
         state = forcedState;
+        console.log('Используется принудительное состояние:', skipServerLoad ? '(сброс)' : '(внешнее)');
+    } else if (skipServerLoad) {
+        // Только локальное состояние, без загрузки с сервера
+        state = loadRpgState();
     } else {
         try { state = await loadRpgStateAsync(); }
         catch (e) { state = loadRpgState(); }
@@ -767,20 +771,22 @@ async function resetRpgGame() {
 
     const newState = defaultRpgState();
     
-    // Сначала сохраняем на сервер, потом в localStorage
+    // Сначала сохраняем локально
+    saveRpgState(newState);
+    
+    // Потом отправляем на сервер
     try {
         await apiPost('/api/games/rpg-state', newState);
+        console.log('Прогресс сброшен на сервере');
     } catch (e) { 
         console.error('Ошибка сброса на сервере:', e);
     }
-    
-    // Теперь сохраняем локально
-    saveRpgState(newState);
 
     showToast('Прогресс сброшен', 'info');
     
     // Перезагружаем игру с принудительным использованием нового состояния
-    await startRpgClicker(document.getElementById('gameArea'), newState);
+    // Передаём флаг, что это сброс, чтобы не загружать с сервера
+    await startRpgClicker(document.getElementById('gameArea'), newState, true);
 }
 
 // ============================================================================

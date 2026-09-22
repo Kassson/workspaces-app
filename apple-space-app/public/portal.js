@@ -1611,6 +1611,7 @@ function renderChatTab(container, spaceId, isAdmin, currentUserId) {
     socket.off('new_message'); socket.off('message_deleted'); socket.off('reaction_updated');
     socket.off('user_typing'); socket.off('user_stopped_typing');
     socket.on('new_message', (msg) => {
+        console.log('Получено новое сообщение:', msg);
         if (msg.space_id !== spaceId) return;
         const wasNearBottom = box ? (box.scrollHeight - box.scrollTop - box.clientHeight < 150) : true;
         appendChatMessage(msg, isAdmin, currentUserId);
@@ -1933,7 +1934,13 @@ async function sendChatMessage(spaceId) {
                 for (const nick of mentions) { const found = members.find(m => m.username === nick); if (found) mentionIds.push(found.id); }
             } catch (e) {}
         }
-        socket.emit('send_message', { message: text, replyToId: _replyToId, fileIds, mentions: mentionIds });
+                                // Если нет текста, но есть файлы - отправляем пустой текст
+        // (сервер теперь разрешает это)
+        const messageText = text;
+        
+        const messageData = { message: messageText, replyToId: _replyToId, fileIds, mentions: mentionIds };
+        console.log('Отправка сообщения с данными:', messageData);
+        socket.emit('send_message', messageData);
         input.value = '';
         cancelReply();
         _pendingChatFiles = [];
