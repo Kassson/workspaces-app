@@ -152,7 +152,9 @@ CREATE TABLE IF NOT EXISTS homeworks (
     subject_name VARCHAR(100) NOT NULL,
     title TEXT NOT NULL,
     due_date DATE NOT NULL,
-    attachment_url TEXT,
+    attachment_url TEXT,                 -- устаревшее: первая ссылка (истекает)
+    attachment_keys TEXT[] DEFAULT '{}', -- ключи файлов в хранилище (актуальный способ)
+    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -167,6 +169,7 @@ CREATE TABLE IF NOT EXISTS homework_completions (
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     attachment_url TEXT NULL,
     attachment_urls TEXT[] DEFAULT '{}',
+    attachment_keys TEXT[] DEFAULT '{}',
     completed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(homework_id, user_id)
 );
@@ -409,6 +412,43 @@ CREATE TABLE IF NOT EXISTS rpg_state (
 );
 
 -- ============================================================================
+-- 23. Настройки группы (пространства)
+--  Настраивается преподавателем/админом группы: название, доступные разделы,
+--  права участников (кто может добавлять ДЗ, писать в чат, видеть участников).
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS space_settings (
+    space_id UUID PRIMARY KEY REFERENCES spaces(id) ON DELETE CASCADE,
+
+    -- Кто может добавлять домашние задания
+    -- 'admins' — только преподаватель/админ, 'all' — все участники
+    homework_post_policy VARCHAR(20) NOT NULL DEFAULT 'admins',
+    -- Кто может отмечать/снимать сдачу ДЗ: 'all' | 'admins'
+    homework_complete_policy VARCHAR(20) NOT NULL DEFAULT 'all',
+
+    -- Доступные в группе разделы и функции
+    feature_schedule BOOLEAN NOT NULL DEFAULT TRUE,
+    feature_homework BOOLEAN NOT NULL DEFAULT TRUE,
+    feature_grades BOOLEAN NOT NULL DEFAULT TRUE,
+    feature_chat BOOLEAN NOT NULL DEFAULT TRUE,
+    feature_games BOOLEAN NOT NULL DEFAULT TRUE,
+    feature_files BOOLEAN NOT NULL DEFAULT TRUE,
+
+    -- Права участников
+    members_can_see_members BOOLEAN NOT NULL DEFAULT TRUE,
+    members_can_chat BOOLEAN NOT NULL DEFAULT TRUE,
+    members_can_react BOOLEAN NOT NULL DEFAULT TRUE,
+    members_can_view_others_grades BOOLEAN NOT NULL DEFAULT FALSE,
+    members_can_share_grades BOOLEAN NOT NULL DEFAULT TRUE,
+    members_can_delete_own_homework BOOLEAN NOT NULL DEFAULT TRUE,
+    only_teachers_grade BOOLEAN NOT NULL DEFAULT TRUE,
+    -- Могут ли админы группы (ученики-старосты) управлять участниками
+    members_can_manage BOOLEAN NOT NULL DEFAULT TRUE,
+
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_by UUID REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- ============================================================================
 -- ИНДЕКСЫ
 -- ============================================================================
 CREATE INDEX IF NOT EXISTS idx_chat_created_at ON chat_messages(created_at);
@@ -448,3 +488,4 @@ CREATE INDEX IF NOT EXISTS idx_grades_space_subject ON grades(space_id, subject_
 CREATE INDEX IF NOT EXISTS idx_journal_students_name ON journal_students(space_id, subject_name, student_name);
 CREATE INDEX IF NOT EXISTS idx_hw_space_due ON homeworks(space_id, due_date);
 CREATE INDEX IF NOT EXISTS idx_hw_completions_hw_user ON homework_completions(homework_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_homeworks_created_by ON homeworks(created_by);

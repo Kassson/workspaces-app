@@ -4,7 +4,12 @@
   "description": "College Workspaces App",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node dev-check-encoding.js && node dev-static-check.js && node dev-api-test.js",
+    "test:api": "node dev-api-test.js",
+    "test:static": "node dev-static-check.js",
+    "test:encoding": "node dev-check-encoding.js",
+    "icons": "node dev-make-icons.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",

@@ -47,6 +47,28 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.get('/teach', (req, res) => res.sendFile(path.join(__dirname, 'public', 'teach', 'index.html')));
 
+// ============================================================================
+//  Раздача локально сохранённых файлов (резервный режим хранилища).
+//  Путь: /api/local-files/<key>  (ключ может содержать слэши)
+// ============================================================================
+app.get(/^\/api\/local-files\/(.+)$/, (req, res) => {
+    const rel = decodeURIComponent(req.params[0] || '');
+    if (!rel || rel.includes('..') || rel.includes('\0')) {
+        return res.status(400).json({ error: 'Недопустимый путь' });
+    }
+    const rootResolved = path.resolve(storage.LOCAL_ROOT);
+    const abs = path.resolve(rootResolved, rel.replace(/^\/+/, ''));
+    if (abs !== rootResolved && !abs.startsWith(rootResolved + path.sep)) {
+        return res.status(400).json({ error: 'Недопустимый путь' });
+    }
+    if (!fs.existsSync(abs)) return res.status(404).json({ error: 'Файл не найден' });
+    res.setHeader('Cache-Control', 'public, max-age=31536000');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.sendFile(abs, (err) => {
+        if (err && !res.headersSent) res.status(404).end();
+    });
+});
+
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, max: 20,
     message: { error: 'Слишком много попыток. Попробуйте через 15 минут.' },
@@ -147,6 +169,18 @@ function containsBannedWord(text) {
 }
 function violatesProfanityFilter(...fields) { return fields.some(f => containsBannedWord(f)); }
 
+// Аватар — это эмодзи, а не произвольная строка. Иначе через профиль можно
+// записать в БД HTML/скрипт, который потом отрисуется в другом интерфейсе.
+function sanitizeAvatarEmoji(value) {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (trimmed.length > 8) return null;
+    if (/[<>&"'`\\]/.test(trimmed)) return null;
+    if (/[\u0000-\u001F\u007F]/.test(trimmed)) return null;
+    return trimmed;
+}
+
 function generateCode(len = 4) { let c = ''; for (let i = 0; i < len; i++) c += Math.floor(Math.random() * 10); return c; }
 function generateInviteCode() { return Math.random().toString(36).substring(2, 8).toUpperCase(); }
 
@@ -175,6 +209,116 @@ async function isSpaceBlocked(userId, spaceId) {
     return r.rows.length > 0;
 }
 
+// ============================================================================
+//  НАСТРОЙКИ ГРУППЫ (пространства)
+//  Значения по умолчанию совпадают со схемой. Если строки нет — создаём её.
+// ============================================================================
+const SPACE_SETTINGS_DEFAULTS = {
+    homework_post_policy: 'admins',
+    homework_complete_policy: 'all',
+    feature_schedule: true,
+    feature_homework: true,
+    feature_grades: true,
+    feature_chat: true,
+    feature_games: true,
+    feature_files: true,
+    members_can_see_members: true,
+    members_can_chat: true,
+    members_can_react: true,
+    members_can_view_others_grades: false,
+    members_can_share_grades: true,
+    members_can_delete_own_homework: true,
+    only_teachers_grade: true,
+    members_can_manage: true
+};
+
+const SPACE_SETTINGS_BOOL_KEYS = [
+    'feature_schedule', 'feature_homework', 'feature_grades', 'feature_chat',
+    'feature_games', 'feature_files', 'members_can_see_members', 'members_can_chat',
+    'members_can_react', 'members_can_view_others_grades', 'members_can_share_grades',
+    'members_can_delete_own_homework', 'only_teachers_grade', 'members_can_manage'
+];
+
+function normalizeSpaceSettings(row) {
+    const out = { ...SPACE_SETTINGS_DEFAULTS };
+    if (!row) return out;
+    for (const key of SPACE_SETTINGS_BOOL_KEYS) {
+        if (row[key] !== undefined && row[key] !== null) out[key] = !!row[key];
+    }
+    for (const key of ['homework_post_policy', 'homework_complete_policy']) {
+        if (row[key] === 'all' || row[key] === 'admins') out[key] = row[key];
+    }
+    if (row.updated_at) out.updated_at = row.updated_at;
+    return out;
+}
+
+async function getSpaceSettings(spaceId) {
+    try {
+        const r = await pool.query('SELECT * FROM space_settings WHERE space_id = $1', [spaceId]);
+        if (r.rows.length) return normalizeSpaceSettings(r.rows[0]);
+        const ins = await pool.query(
+            'INSERT INTO space_settings (space_id) VALUES ($1) ON CONFLICT (space_id) DO UPDATE SET space_id = EXCLUDED.space_id RETURNING *',
+            [spaceId]
+        );
+        return normalizeSpaceSettings(ins.rows[0]);
+    } catch (e) {
+        console.error('getSpaceSettings:', e.message);
+        return { ...SPACE_SETTINGS_DEFAULTS };
+    }
+}
+
+// Обновление настроек группы: применяются только переданные поля
+async function updateSpaceSettings(spaceId, patch, userId) {
+    const current = await getSpaceSettings(spaceId);
+    const next = { ...current };
+
+    for (const key of SPACE_SETTINGS_BOOL_KEYS) {
+        if (patch && patch[key] !== undefined) next[key] = !!patch[key];
+    }
+    for (const key of ['homework_post_policy', 'homework_complete_policy']) {
+        if (patch && (patch[key] === 'all' || patch[key] === 'admins')) next[key] = patch[key];
+    }
+
+    const cols = [...SPACE_SETTINGS_BOOL_KEYS, 'homework_post_policy', 'homework_complete_policy'];
+    const values = cols.map(c => next[c]);
+
+    const insertCols = cols.join(', ');
+    const placeholders = cols.map((_, i) => '$' + (i + 2)).join(', ');
+    const updates = cols.map((c, i) => `${c} = $${i + 2}`).join(', ');
+
+    const r = await pool.query(
+        `INSERT INTO space_settings (space_id, ${insertCols}, updated_at, updated_by)
+         VALUES ($1, ${placeholders}, NOW(), $${cols.length + 2})
+         ON CONFLICT (space_id) DO UPDATE SET ${updates}, updated_at = NOW(), updated_by = $${cols.length + 2}
+         RETURNING *`,
+        [spaceId, ...values, userId || null]
+    );
+    return normalizeSpaceSettings(r.rows[0]);
+}
+
+// Кто может добавлять ДЗ в этой группе
+async function canPostHomework(user, spaceId) {
+    if (await isSpaceAdmin(user, spaceId)) return true;
+    if (!(await isSpaceMember(user, spaceId))) return false;
+    const settings = await getSpaceSettings(spaceId);
+    return settings.homework_post_policy === 'all';
+}
+
+// ============================================================================
+//  ФАЙЛЫ-ВЛОЖЕНИЯ: в БД храним КЛЮЧИ объектов, а ссылки выдаём при чтении
+//  (подписанные ссылки истекают, поэтому их нельзя хранить).
+// ============================================================================
+function normalizeKeyList(value) {
+    if (!value) return [];
+    const arr = Array.isArray(value) ? value : [value];
+    return arr.map(v => storage.extractKeyFromValue(v)).filter(k => !!k);
+}
+
+// Готовит карту «ключ → свежая ссылка»
+async function resolveAttachmentUrls(keys) {
+    return storage.getSignedFileUrls(keys).catch(() => new Map());
+}
+
 function publicUser(u) {
     if (!u) return null;
     return {
@@ -196,11 +340,38 @@ async function requireSpaceAccess(req, res, next) {
     next();
 }
 async function requireSpaceAdmin(req, res, next) {
-    const user = await getUserById(req.userId);
-    req.currentUser = user;
-    const spaceId = req.params.spaceId || req.body.spaceId;
-    if (!(await isSpaceAdmin(user, spaceId))) return res.status(403).json({ error: 'Только преподаватель или админ' });
-    next();
+    try {
+        const user = await getUserById(req.userId);
+        req.currentUser = user;
+        const spaceId = req.params.spaceId || req.body.spaceId;
+        if (!(await isSpaceAdmin(user, spaceId))) return res.status(403).json({ error: 'Только преподаватель или админ' });
+        next();
+    } catch (e) {
+        console.error('requireSpaceAdmin:', e.message);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
+}
+
+// Управление участниками: преподаватель всегда, админ группы — если это
+// разрешено настройкой members_can_manage.
+async function requireSpaceManage(req, res, next) {
+    try {
+        const user = await getUserById(req.userId);
+        req.currentUser = user;
+        const spaceId = req.params.spaceId || req.body.spaceId;
+        if (!(await isSpaceMember(user, spaceId))) return res.status(403).json({ error: 'Нет доступа' });
+        // Преподаватель (подтверждённый) управляет всегда
+        if (isSuperAdmin(user)) return next();
+        if (!(await isSpaceAdmin(user, spaceId))) return res.status(403).json({ error: 'Нет прав' });
+        const settings = await getSpaceSettings(spaceId);
+        if (!settings.members_can_manage) {
+            return res.status(403).json({ error: 'Управление участниками отключено в настройках группы' });
+        }
+        next();
+    } catch (e) {
+        console.error('requireSpaceManage:', e.message);
+        res.status(500).json({ error: 'Ошибка сервера' });
+    }
 }
 
 // ================= РЕГИСТРАЦИЯ / ВХОД =================
@@ -276,9 +447,10 @@ app.post('/api/auth/update-profile', verifyJWT, async (req, res) => {
     if (!user) return res.status(404).json({ error: 'Не найден' });
     const newNickname = user.is_teacher ? user.username : (nickname || user.username);
     const newTheme = ['auto', 'light', 'dark'].includes(theme) ? theme : (user.theme || 'auto');
+    const newAvatar = sanitizeAvatarEmoji(avatarEmoji) || user.avatar_emoji || '👤';
     try {
         await pool.query('UPDATE users SET full_name = $1, username = $2, avatar_emoji = $3, theme = $4 WHERE id = $5',
-            [`${firstName} ${lastName}`, newNickname, avatarEmoji || '👤', newTheme, user.id]);
+            [`${firstName} ${lastName}`, newNickname, newAvatar, newTheme, user.id]);
         const updated = await getUserById(user.id);
         res.json({ success: true, user: publicUser(updated) });
     } catch (e) {
@@ -504,12 +676,107 @@ app.post('/api/spaces/:spaceId/leave', verifyJWT, async (req, res) => {
 
 app.get('/api/spaces/mine', verifyJWT, async (req, res) => {
     const user = await getUserById(req.userId);
+    let rows;
     if (isSuperAdmin(user)) {
-        const r = await pool.query('SELECT *, true AS is_admin FROM spaces ORDER BY created_at DESC');
-        return res.json(r.rows);
+        rows = (await pool.query('SELECT *, true AS is_admin FROM spaces ORDER BY created_at DESC')).rows;
+    } else {
+        rows = (await pool.query(`SELECT s.*, (sm.role = 'admin' OR sm.role = 'starosta') AS is_admin FROM spaces s JOIN space_members sm ON sm.space_id = s.id WHERE sm.user_id = $1 ORDER BY s.created_at DESC`, [user.id])).rows;
     }
-    const r = await pool.query(`SELECT s.*, (sm.role = 'admin' OR sm.role = 'starosta') AS is_admin FROM spaces s JOIN space_members sm ON sm.space_id = s.id WHERE sm.user_id = $1 ORDER BY s.created_at DESC`, [user.id]);
-    res.json(r.rows);
+
+    // Подмешиваем настройки группы (одним запросом)
+    try {
+        if (rows.length) {
+            const ids = rows.map(r => r.id);
+            const st = await pool.query('SELECT * FROM space_settings WHERE space_id = ANY($1::uuid[])', [ids]);
+            const byId = new Map(st.rows.map(r => [r.space_id, normalizeSpaceSettings(r)]));
+            for (const row of rows) {
+                row.settings = byId.get(row.id) || { ...SPACE_SETTINGS_DEFAULTS };
+            }
+        }
+    } catch (e) {
+        console.error('spaces/mine settings:', e.message);
+        for (const row of rows) row.settings = { ...SPACE_SETTINGS_DEFAULTS };
+    }
+    res.json(rows);
+});
+
+// ============================================================================
+//  НАСТРОЙКИ ГРУППЫ
+// ============================================================================
+
+// Переименование группы
+app.post('/api/spaces/:spaceId/rename', verifyJWT, requireSpaceAdmin, async (req, res) => {
+    try {
+        const raw = (req.body && req.body.name) || '';
+        const name = String(raw).trim();
+        if (!name) return res.status(400).json({ error: 'Введите название' });
+        if (name.length > 100) return res.status(400).json({ error: 'Название слишком длинное (макс. 100)' });
+        if (violatesProfanityFilter(name)) return res.status(400).json({ error: 'Недопустимое название' });
+
+        const r = await pool.query('UPDATE spaces SET name = $1 WHERE id = $2 RETURNING *', [name, req.params.spaceId]);
+        if (!r.rows.length) return res.status(404).json({ error: 'Группа не найдена' });
+        io.to(`space:${req.params.spaceId}`).emit('space_updated', r.rows[0]);
+        res.json(r.rows[0]);
+    } catch (e) {
+        console.error('rename space:', e.message);
+        res.status(500).json({ error: 'Ошибка переименования' });
+    }
+});
+
+// Получить настройки группы
+app.get('/api/spaces/:spaceId/settings', verifyJWT, requireSpaceAccess, async (req, res) => {
+    try {
+        const settings = await getSpaceSettings(req.params.spaceId);
+        const isAdmin = await isSpaceAdmin(req.currentUser, req.params.spaceId);
+        const space = await pool.query('SELECT id, name, invite_code, created_at FROM spaces WHERE id = $1', [req.params.spaceId]);
+        if (!space.rows.length) return res.status(404).json({ error: 'Группа не найдена' });
+        res.json({ space: space.rows[0], settings, isAdmin, canPostHomework: await canPostHomework(req.currentUser, req.params.spaceId) });
+    } catch (e) {
+        console.error('space settings GET:', e.message);
+        res.status(500).json({ error: 'Ошибка загрузки настроек' });
+    }
+});
+
+// Обновить настройки группы (только преподаватель/админ группы)
+app.post('/api/spaces/:spaceId/settings', verifyJWT, requireSpaceAdmin, async (req, res) => {
+    try {
+        const patch = req.body && typeof req.body === 'object' ? req.body : {};
+        const settings = await updateSpaceSettings(req.params.spaceId, patch, req.currentUser.id);
+        io.to(`space:${req.params.spaceId}`).emit('space_settings_updated', { spaceId: req.params.spaceId, settings });
+        res.json(settings);
+    } catch (e) {
+        console.error('space settings POST:', e.message);
+        res.status(500).json({ error: 'Ошибка сохранения настроек' });
+    }
+});
+
+// Сводка по группе для панели управления
+app.get('/api/spaces/:spaceId/overview', verifyJWT, requireSpaceAdmin, async (req, res) => {
+    try {
+        const spaceId = req.params.spaceId;
+        const [members, homework, grades, messages, settings, space] = await Promise.all([
+            pool.query('SELECT COUNT(*)::int AS c FROM space_members sm JOIN users u ON u.id = sm.user_id WHERE sm.space_id = $1 AND u.is_teacher = FALSE', [spaceId]),
+            pool.query('SELECT COUNT(*)::int AS c FROM homeworks WHERE space_id = $1', [spaceId]),
+            pool.query('SELECT COUNT(*)::int AS c FROM grades WHERE space_id = $1', [spaceId]),
+            pool.query('SELECT COUNT(*)::int AS c FROM chat_messages WHERE space_id = $1', [spaceId]),
+            getSpaceSettings(spaceId),
+            pool.query('SELECT id, name, invite_code, created_at FROM spaces WHERE id = $1', [spaceId])
+        ]);
+        if (!space.rows.length) return res.status(404).json({ error: 'Группа не найдена' });
+        res.json({
+            space: space.rows[0],
+            settings,
+            stats: {
+                students: members.rows[0].c,
+                homeworks: homework.rows[0].c,
+                grades: grades.rows[0].c,
+                messages: messages.rows[0].c
+            }
+        });
+    } catch (e) {
+        console.error('space overview:', e.message);
+        res.status(500).json({ error: 'Ошибка' });
+    }
 });
 
 app.post('/api/spaces/:spaceId/rotate-invite-code', verifyJWT, requireSpaceAdmin, async (req, res) => {
@@ -527,6 +794,19 @@ app.post('/api/spaces/:spaceId/rotate-invite-code', verifyJWT, requireSpaceAdmin
 app.get('/api/spaces/:spaceId/members', verifyJWT, requireSpaceAccess, async (req, res) => {
     const user = req.currentUser;
     const root = isRoot(user);
+    // Группа может скрыть список участников от обычных учеников
+    const settings = await getSpaceSettings(req.params.spaceId);
+    const isAdmin = await isSpaceAdmin(user, req.params.spaceId);
+    if (!root && !isAdmin && !settings.members_can_see_members) {
+        const mine = await pool.query(
+            `SELECT u.id, u.username, u.full_name, u.is_teacher, u.avatar_emoji, sm.role, sm.custom_status, sm.joined_at, sm.muted_until,
+                    COALESCE(sm.hidden_from_journal, FALSE) AS hidden_from_journal
+             FROM space_members sm JOIN users u ON u.id = sm.user_id
+             WHERE sm.space_id = $1 AND sm.user_id = $2`,
+            [req.params.spaceId, user.id]
+        );
+        return res.json(mine.rows);
+    }
     const r = await pool.query(
         `SELECT u.id, u.username, u.full_name, u.is_teacher, u.avatar_emoji, sm.role, sm.custom_status, sm.joined_at, sm.muted_until,
                 COALESCE(sm.hidden_from_journal, FALSE) AS hidden_from_journal
@@ -544,7 +824,7 @@ app.get('/api/spaces/:spaceId/members', verifyJWT, requireSpaceAccess, async (re
     res.json(r.rows);
 });
 
-app.post('/api/spaces/:spaceId/members/:userId/role', verifyJWT, requireSpaceAdmin, async (req, res) => {
+app.post('/api/spaces/:spaceId/members/:userId/role', verifyJWT, requireSpaceManage, async (req, res) => {
     const { role } = req.body;
     if (!['admin', 'member'].includes(role)) return res.status(400).json({ error: 'Роль: admin или member' });
     if (req.params.userId === req.currentUser.id) return res.status(400).json({ error: 'Нельзя изменить свою роль' });
@@ -556,7 +836,7 @@ app.post('/api/spaces/:spaceId/members/:userId/role', verifyJWT, requireSpaceAdm
     res.json(r.rows[0]);
 });
 
-app.post('/api/spaces/:spaceId/members/:userId/custom-status', verifyJWT, requireSpaceAdmin, async (req, res) => {
+app.post('/api/spaces/:spaceId/members/:userId/custom-status', verifyJWT, requireSpaceManage, async (req, res) => {
     const { customStatus } = req.body;
     if (typeof customStatus !== 'string') return res.status(400).json({ error: 'Неверный формат' });
     const trimmed = customStatus.trim().slice(0, 50);
@@ -568,7 +848,7 @@ app.post('/api/spaces/:spaceId/members/:userId/custom-status', verifyJWT, requir
     res.json({ success: true });
 });
 
-app.delete('/api/spaces/:spaceId/members/:userId', verifyJWT, requireSpaceAdmin, async (req, res) => {
+app.delete('/api/spaces/:spaceId/members/:userId', verifyJWT, requireSpaceManage, async (req, res) => {
     if (req.params.userId === req.currentUser.id) return res.status(400).json({ error: 'Нельзя исключить себя' });
     const target = await pool.query('SELECT is_teacher FROM users WHERE id = $1', [req.params.userId]);
     if (target.rows[0]?.is_teacher) return res.status(403).json({ error: 'Нельзя исключить преподавателя' });
@@ -577,7 +857,7 @@ app.delete('/api/spaces/:spaceId/members/:userId', verifyJWT, requireSpaceAdmin,
     res.json({ message: 'Исключён' });
 });
 
-app.post('/api/spaces/:spaceId/members/:userId/mute', verifyJWT, requireSpaceAdmin, async (req, res) => {
+app.post('/api/spaces/:spaceId/members/:userId/mute', verifyJWT, requireSpaceManage, async (req, res) => {
     const { minutes } = req.body;
     if (req.params.userId === req.currentUser.id) return res.status(400).json({ error: 'Нельзя замутить себя' });
     const target = await pool.query('SELECT is_teacher FROM users WHERE id = $1', [req.params.userId]);
@@ -588,13 +868,13 @@ app.post('/api/spaces/:spaceId/members/:userId/mute', verifyJWT, requireSpaceAdm
     res.json({ success: true, mutedUntil: until });
 });
 
-app.delete('/api/spaces/:spaceId/members/:userId/mute', verifyJWT, requireSpaceAdmin, async (req, res) => {
+app.delete('/api/spaces/:spaceId/members/:userId/mute', verifyJWT, requireSpaceManage, async (req, res) => {
     await pool.query('UPDATE space_members SET muted_until = NULL WHERE space_id = $1 AND user_id = $2', [req.params.spaceId, req.params.userId]);
     io.to(`space:${req.params.spaceId}`).emit('members_updated');
     res.json({ success: true });
 });
 
-app.post('/api/spaces/:spaceId/members/:userId/block', verifyJWT, requireSpaceAdmin, async (req, res) => {
+app.post('/api/spaces/:spaceId/members/:userId/block', verifyJWT, requireSpaceManage, async (req, res) => {
     const { reason } = req.body;
     if (req.params.userId === req.currentUser.id) return res.status(400).json({ error: 'Нельзя забанить себя' });
     const target = await pool.query('SELECT sm.role, u.is_teacher FROM space_members sm JOIN users u ON u.id = sm.user_id WHERE sm.space_id = $1 AND sm.user_id = $2', [req.params.spaceId, req.params.userId]);
@@ -607,13 +887,13 @@ app.post('/api/spaces/:spaceId/members/:userId/block', verifyJWT, requireSpaceAd
     res.json({ success: true });
 });
 
-app.delete('/api/spaces/:spaceId/blocked/:userId', verifyJWT, requireSpaceAdmin, async (req, res) => {
+app.delete('/api/spaces/:spaceId/blocked/:userId', verifyJWT, requireSpaceManage, async (req, res) => {
     await pool.query('DELETE FROM space_blocked WHERE space_id = $1 AND user_id = $2', [req.params.spaceId, req.params.userId]);
     io.to(`space:${req.params.spaceId}`).emit('members_updated');
     res.json({ success: true });
 });
 
-app.get('/api/spaces/:spaceId/blacklist', verifyJWT, requireSpaceAdmin, async (req, res) => {
+app.get('/api/spaces/:spaceId/blacklist', verifyJWT, requireSpaceManage, async (req, res) => {
     const blocked = await pool.query(`SELECT u.id, u.full_name, u.username, u.avatar_emoji, sb.reason, sb.blocked_at, 'blocked' AS type FROM space_blocked sb JOIN users u ON u.id = sb.user_id WHERE sb.space_id = $1 ORDER BY sb.blocked_at DESC`, [req.params.spaceId]);
     const muted = await pool.query(`SELECT u.id, u.full_name, u.username, u.avatar_emoji, sm.muted_until, 'muted' AS type FROM space_members sm JOIN users u ON u.id = sm.user_id WHERE sm.space_id = $1 AND sm.muted_until IS NOT NULL AND sm.muted_until > NOW() ORDER BY sm.muted_until DESC`, [req.params.spaceId]);
     res.json({ blocked: blocked.rows, muted: muted.rows });
@@ -759,108 +1039,292 @@ app.get('/api/schedule/:spaceId/ics', verifyJWT, requireSpaceAccess, async (req,
 
 // ================= ДОМАШНИЕ ЗАДАНИЯ =================
 app.get('/api/homework/:spaceId', verifyJWT, requireSpaceAccess, async (req, res) => {
-    const hw = await pool.query(
-        `SELECT h.*, hc.attachment_url, hc.attachment_urls, hc.completed_at,
-                (hc.id IS NOT NULL) AS is_done, g.grade_value
-         FROM homeworks h
-         LEFT JOIN homework_completions hc ON hc.homework_id = h.id AND hc.user_id = $2
-         LEFT JOIN grades g ON g.homework_id = h.id AND g.student_user_id = $2
-         WHERE h.space_id = $1 ORDER BY h.due_date ASC`,
-        [req.params.spaceId, req.currentUser.id]
-    );
-    res.json(hw.rows);
+    try {
+        const hw = await pool.query(
+            `SELECT h.*, hc.attachment_url, hc.attachment_urls, hc.attachment_keys, hc.completed_at,
+                    (hc.id IS NOT NULL) AS is_done, g.grade_value
+             FROM homeworks h
+             LEFT JOIN homework_completions hc ON hc.homework_id = h.id AND hc.user_id = $2
+             LEFT JOIN grades g ON g.homework_id = h.id AND g.student_user_id = $2
+             WHERE h.space_id = $1 ORDER BY h.due_date ASC`,
+            [req.params.spaceId, req.currentUser.id]
+        );
+        // Ссылки на файлы генерируем на лету — хранить подписанные URL нельзя
+        for (const row of hw.rows) {
+            row._taskKeys = normalizeKeyList(row.attachment_keys);
+            if (!row._taskKeys.length && row.attachment_url) {
+                const legacy = storage.extractKeyFromValue(row.attachment_url);
+                if (legacy) row._taskKeys.push(legacy);
+            }
+            row._submissionKeys = normalizeKeyList(row.attachment_keys_hc);
+            if (!row._submissionKeys.length) {
+                row._submissionKeys = normalizeKeyList([
+                    ...(Array.isArray(row.attachment_urls_hc) ? row.attachment_urls_hc : []),
+                    ...(row.attachment_url_hc ? [row.attachment_url_hc] : [])
+                ]);
+            }
+        }
+        const urlMap = await storage.getSignedFileUrls([
+            ...hw.rows.flatMap(r => r._taskKeys),
+            ...hw.rows.flatMap(r => r._submissionKeys)
+        ]).catch(() => new Map());
+        for (const row of hw.rows) {
+            row.attachmentUrls = row._submissionKeys.map(k => urlMap.get(k)).filter(Boolean);
+            row.attachment_url = row.attachmentUrls[0] || null;
+            row.attachment_urls = row.attachmentUrls;
+            row.taskAttachmentUrls = row._taskKeys.map(k => urlMap.get(k)).filter(Boolean);
+            row.taskAttachmentUrl = row.taskAttachmentUrls[0] || null;
+            delete row._taskKeys;
+            delete row._submissionKeys;
+            delete row.attachment_keys;
+            delete row.attachment_keys_hc;
+            delete row.attachment_url_hc;
+            delete row.attachment_urls_hc;
+        }
+        res.json(hw.rows);
+    } catch (e) {
+        console.error('homework list:', e.message);
+        res.status(500).json({ error: 'Ошибка загрузки домашних заданий' });
+    }
 });
 
 app.get('/api/homework/:id/stats', verifyJWT, async (req, res) => {
-    const user = await getUserById(req.userId);
-    const hw = await pool.query('SELECT * FROM homeworks WHERE id = $1', [req.params.id]);
-    if (!hw.rows.length) return res.status(404).json({ error: 'Не найдено' });
-    const spaceId = hw.rows[0].space_id;
-    if (!(await isSpaceMember(user, spaceId))) return res.status(403).json({ error: 'Нет доступа' });
-    const isAdmin = await isSpaceAdmin(user, spaceId);
-    if (!isAdmin) return res.status(403).json({ error: 'Только преподаватель/админ' });
-    const root = isRoot(user);
-    const dueDate = hw.rows[0].due_date;
-    const now = new Date();
-    const dueDateObj = new Date(dueDate);
-    dueDateObj.setHours(23, 59, 59, 999);
-    const isOverdue = dueDateObj < now;
-    const r = await pool.query(
-        `SELECT u.id, u.full_name, u.username, u.avatar_emoji,
-                hc.completed_at, hc.attachment_url, hc.attachment_urls,
-                (hc.id IS NOT NULL) AS is_done,
-                g.grade_value
-         FROM space_members sm
-         JOIN users u ON u.id = sm.user_id
-         LEFT JOIN homework_completions hc ON hc.homework_id = $1 AND hc.user_id = u.id
-         LEFT JOIN grades g ON g.homework_id = $1 AND g.student_user_id = u.id
-         WHERE sm.space_id = $2 AND u.is_teacher = FALSE
-           AND ($3::boolean = TRUE OR COALESCE(sm.hidden_from_journal, FALSE) = FALSE)
-         ORDER BY (hc.id IS NULL) ASC, u.full_name ASC`,
-        [req.params.id, spaceId, root]
-    );
-    const students = r.rows.map(s => ({
-        id: s.id, fullName: s.full_name, username: s.username,
-        avatarEmoji: s.avatar_emoji || '👤',
-        isDone: !!s.is_done, completedAt: s.completed_at,
-        attachmentUrl: s.attachment_url,
-        attachmentUrls: s.attachment_urls || [],
-        gradeValue: s.grade_value,
-        status: s.is_done ? 'done' : (isOverdue ? 'overdue' : 'pending')
-    }));
-    const totalCount = students.length;
-    const completedCount = students.filter(s => s.isDone).length;
-    const percentage = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
-    res.json({ percentage, completed: completedCount, total: totalCount, students, dueDate, isOverdue, subjectName: hw.rows[0].subject_name });
+    try {
+        const user = await getUserById(req.userId);
+        const hw = await pool.query('SELECT * FROM homeworks WHERE id = $1', [req.params.id]);
+        if (!hw.rows.length) return res.status(404).json({ error: 'Не найдено' });
+        const spaceId = hw.rows[0].space_id;
+        if (!(await isSpaceMember(user, spaceId))) return res.status(403).json({ error: 'Нет доступа' });
+        const isAdmin = await isSpaceAdmin(user, spaceId);
+        if (!isAdmin) return res.status(403).json({ error: 'Только преподаватель/админ' });
+        const root = isRoot(user);
+        const dueDate = hw.rows[0].due_date;
+        const now = new Date();
+        const dueDateObj = new Date(dueDate);
+        dueDateObj.setHours(23, 59, 59, 999);
+        const isOverdue = dueDateObj < now;
+        const r = await pool.query(
+            `SELECT u.id, u.full_name, u.username, u.avatar_emoji,
+                    hc.completed_at, hc.attachment_url, hc.attachment_urls, hc.attachment_keys,
+                    (hc.id IS NOT NULL) AS is_done,
+                    g.grade_value
+             FROM space_members sm
+             JOIN users u ON u.id = sm.user_id
+             LEFT JOIN homework_completions hc ON hc.homework_id = $1 AND hc.user_id = u.id
+             LEFT JOIN grades g ON g.homework_id = $1 AND g.student_user_id = u.id
+             WHERE sm.space_id = $2 AND u.is_teacher = FALSE
+               AND ($3::boolean = TRUE OR COALESCE(sm.hidden_from_journal, FALSE) = FALSE)
+             ORDER BY (hc.id IS NULL) ASC, u.full_name ASC`,
+            [req.params.id, spaceId, root]
+        );
+
+        // Ключи сдач → свежие ссылки (старые записи содержат истёкшие URL)
+        const keyLists = r.rows.map(s => {
+            const fromKeys = normalizeKeyList(s.attachment_keys);
+            if (fromKeys.length) return fromKeys;
+            const fromArr = Array.isArray(s.attachment_urls) ? s.attachment_urls : [];
+            const fromSingle = s.attachment_url ? [s.attachment_url] : [];
+            return normalizeKeyList([...fromArr, ...fromSingle]);
+        });
+        const urlMap = await storage.getSignedFileUrls(keyLists.flat()).catch(() => new Map());
+
+        const students = r.rows.map((s, i) => {
+            const urls = keyLists[i].map(k => urlMap.get(k)).filter(Boolean);
+            return {
+                id: s.id, fullName: s.full_name, username: s.username,
+                avatarEmoji: s.avatar_emoji || '👤',
+                isDone: !!s.is_done, completedAt: s.completed_at,
+                attachmentUrl: urls[0] || null,
+                attachmentUrls: urls,
+                gradeValue: s.grade_value,
+                status: s.is_done ? 'done' : (isOverdue ? 'overdue' : 'pending')
+            };
+        });
+        const totalCount = students.length;
+        const completedCount = students.filter(s => s.isDone).length;
+        const percentage = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+        res.json({ percentage, completed: completedCount, total: totalCount, students, dueDate, isOverdue, subjectName: hw.rows[0].subject_name });
+    } catch (e) {
+        console.error('homework stats:', e.message);
+        res.status(500).json({ error: 'Ошибка статистики' });
+    }
 });
 
-app.post('/api/homework', verifyJWT, requireSpaceAdmin, async (req, res) => {
-    const { spaceId, subjectName, title, dueDate, attachmentUrl } = req.body;
-    if (!subjectName || !title || !dueDate) return res.status(400).json({ error: 'Заполните поля' });
-    const cleanAttachmentUrl = typeof attachmentUrl === 'string' && attachmentUrl.length > 0 ? attachmentUrl : null;
-    const r = await pool.query('INSERT INTO homeworks (space_id, subject_name, title, due_date, attachment_url) VALUES ($1,$2,$3,$4,$5) RETURNING *', [spaceId, subjectName, title, dueDate, cleanAttachmentUrl]);
-    push.notifyNewHomework(pool, spaceId, subjectName, title, dueDate).catch(() => {});
-    res.json(r.rows[0]);
+// Добавлять ДЗ может преподаватель/админ, а если в настройках группы разрешено —
+// то любой участник (members_can_post_homework → homework_post_policy = 'all').
+app.post('/api/homework', verifyJWT, async (req, res) => {
+    try {
+        const user = await getUserById(req.userId);
+        const { spaceId, subjectName, title, dueDate, attachmentUrl, attachmentUrls, fileIds, attachmentKeys } = req.body || {};
+        if (!spaceId) return res.status(400).json({ error: 'Не указана группа' });
+        if (!(await isSpaceMember(user, spaceId))) return res.status(403).json({ error: 'Нет доступа к группе' });
+
+        const settings = await getSpaceSettings(spaceId);
+        if (!settings.feature_homework) return res.status(403).json({ error: 'Домашние задания отключены в этой группе' });
+        if (!(await canPostHomework(user, spaceId))) {
+            return res.status(403).json({ error: 'Добавлять домашние задания может только преподаватель' });
+        }
+        if (!subjectName || !title || !dueDate) return res.status(400).json({ error: 'Заполните поля' });
+
+        // Собираем ключи вложений: fileIds (id записей из files) и/или сырые ключи/ссылки
+        let keys = [];
+        if (Array.isArray(fileIds) && fileIds.length) {
+            const owned = await pool.query(
+                'SELECT key FROM files WHERE id = ANY($1::uuid[]) AND user_id = $2',
+                [fileIds, user.id]
+            );
+            keys.push(...owned.rows.map(r => r.key));
+        }
+        const rawKeys = [
+            ...(Array.isArray(attachmentKeys) ? attachmentKeys : []),
+            ...(Array.isArray(attachmentUrls) ? attachmentUrls : []),
+            ...(typeof attachmentUrl === 'string' && attachmentUrl ? [attachmentUrl] : [])
+        ];
+        keys.push(...normalizeKeyList(rawKeys));
+        keys = [...new Set(keys)].slice(0, 10);
+
+        const firstUrl = keys.length ? await storage.getSignedFileUrl(keys[0]) : null;
+
+        const r = await pool.query(
+            `INSERT INTO homeworks (space_id, subject_name, title, due_date, attachment_url, attachment_keys, created_by)
+             VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+            [spaceId, subjectName, title, dueDate, firstUrl, keys, user.id]
+        );
+        push.notifyNewHomework(pool, spaceId, subjectName, title, dueDate).catch(() => {});
+
+        const row = r.rows[0];
+        // Отдаём клиенту сразу готовые ссылки (в БД лежат ключи)
+        const urlMap = await storage.getSignedFileUrls(keys).catch(() => new Map());
+        row.taskAttachmentUrls = keys.map(k => urlMap.get(k)).filter(Boolean);
+        row.taskAttachmentUrl = row.taskAttachmentUrls[0] || null;
+        io.to(`space:${spaceId}`).emit('homework_updated');
+        res.json(row);
+    } catch (e) {
+        console.error('create homework:', e.message);
+        res.status(500).json({ error: 'Ошибка сохранения задания' });
+    }
 });
 
 app.delete('/api/homework/:id', verifyJWT, async (req, res) => {
-    const user = await getUserById(req.userId);
-    const hw = await pool.query('SELECT * FROM homeworks WHERE id = $1', [req.params.id]);
-    if (!hw.rows.length) return res.status(404).json({ error: 'Не найдено' });
-    if (!(await isSpaceAdmin(user, hw.rows[0].space_id))) return res.status(403).json({ error: 'Нет прав' });
-    await pool.query('DELETE FROM homeworks WHERE id = $1', [req.params.id]);
-    res.json({ message: 'Удалено' });
+    try {
+        const user = await getUserById(req.userId);
+        const hw = await pool.query('SELECT * FROM homeworks WHERE id = $1', [req.params.id]);
+        if (!hw.rows.length) return res.status(404).json({ error: 'Не найдено' });
+        const row = hw.rows[0];
+        const isAdmin = await isSpaceAdmin(user, row.space_id);
+        const settings = await getSpaceSettings(row.space_id);
+
+        // Автор задания может удалить своё, если это разрешено настройками группы
+        const isOwnAuthor = row.created_by && row.created_by === user.id && settings.members_can_delete_own_homework;
+        if (!isAdmin && !isOwnAuthor) return res.status(403).json({ error: 'Нет прав' });
+
+        // Чистим файлы задания из хранилища
+        const keys = normalizeKeyList(row.attachment_keys);
+        if (!keys.length && row.attachment_url) {
+            const legacy = storage.extractKeyFromValue(row.attachment_url);
+            if (legacy) keys.push(legacy);
+        }
+        if (keys.length) {
+            Promise.all(keys.map(k => storage.deleteFile(k).catch(() => {}))).catch(() => {});
+        }
+
+        await pool.query('DELETE FROM homeworks WHERE id = $1', [req.params.id]);
+        io.to(`space:${row.space_id}`).emit('homework_updated');
+        res.json({ message: 'Удалено' });
+    } catch (e) {
+        console.error('delete homework:', e.message);
+        res.status(500).json({ error: 'Ошибка удаления' });
+    }
 });
 
+// Отметка о сдаче ДЗ. Принимает fileIds (id записей files), либо
+// attachmentKeys/attachments/attachment (ключи или устаревшие ссылки).
 app.post('/api/homework/:id/complete', verifyJWT, async (req, res) => {
-    const user = await getUserById(req.userId);
-    const { attachment, attachments } = req.body;
+    try {
+        const user = await getUserById(req.userId);
+        const hw = await pool.query('SELECT * FROM homeworks WHERE id = $1', [req.params.id]);
+        if (!hw.rows.length) return res.status(404).json({ error: 'Задание не найдено' });
+        const spaceId = hw.rows[0].space_id;
+        if (!(await isSpaceMember(user, spaceId))) return res.status(403).json({ error: 'Нет доступа' });
 
-    let urls = [];
-    if (Array.isArray(attachments)) {
-        urls = attachments.filter(u => typeof u === 'string' && u.length > 0);
-    } else if (typeof attachment === 'string' && attachment.length > 0) {
-        urls = [attachment];
+        const settings = await getSpaceSettings(spaceId);
+        if (!settings.feature_homework) return res.status(403).json({ error: 'Домашние задания отключены в этой группе' });
+        if (settings.homework_complete_policy === 'admins' && !(await isSpaceAdmin(user, spaceId))) {
+            return res.status(403).json({ error: 'Отмечать сдачу может только преподаватель' });
+        }
+
+        const { attachment, attachments, fileIds, attachmentKeys } = req.body || {};
+
+        let keys = [];
+        if (Array.isArray(fileIds) && fileIds.length) {
+            const owned = await pool.query(
+                'SELECT key FROM files WHERE id = ANY($1::uuid[]) AND user_id = $2',
+                [fileIds, user.id]
+            );
+            keys.push(...owned.rows.map(r => r.key));
+        }
+        const raw = [
+            ...(Array.isArray(attachmentKeys) ? attachmentKeys : []),
+            ...(Array.isArray(attachments) ? attachments : []),
+            ...(typeof attachment === 'string' && attachment ? [attachment] : [])
+        ];
+        keys.push(...normalizeKeyList(raw));
+        keys = [...new Set(keys)].slice(0, 10);
+
+        const urlMap = await storage.getSignedFileUrls(keys).catch(() => new Map());
+        const urls = keys.map(k => urlMap.get(k)).filter(Boolean);
+
+        const r = await pool.query(
+            `INSERT INTO homework_completions (homework_id, user_id, attachment_url, attachment_urls, attachment_keys)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (homework_id, user_id)
+             DO UPDATE SET attachment_url = EXCLUDED.attachment_url,
+                           attachment_urls = EXCLUDED.attachment_urls,
+                           attachment_keys = EXCLUDED.attachment_keys,
+                           completed_at = NOW()
+             RETURNING *`,
+            [req.params.id, user.id, urls[0] || null, urls, keys]
+        );
+
+        const out = r.rows[0];
+        out.attachmentUrls = urls;
+        out.attachmentUrl = urls[0] || null;
+
+        io.to(`space:${spaceId}`).emit('homework_updated');
+        res.json(out);
+    } catch (e) {
+        console.error('complete homework:', e.message);
+        res.status(500).json({ error: 'Ошибка отметки' });
     }
-    const firstUrl = urls.length > 0 ? urls[0] : null;
-
-    const r = await pool.query(
-        `INSERT INTO homework_completions (homework_id, user_id, attachment_url, attachment_urls)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (homework_id, user_id)
-         DO UPDATE SET attachment_url = EXCLUDED.attachment_url,
-                       attachment_urls = EXCLUDED.attachment_urls,
-                       completed_at = NOW()
-         RETURNING *`,
-        [req.params.id, user.id, firstUrl, urls]
-    );
-    res.json(r.rows[0]);
 });
 
 app.delete('/api/homework/:id/complete', verifyJWT, async (req, res) => {
-    const user = await getUserById(req.userId);
-    await pool.query('DELETE FROM homework_completions WHERE homework_id = $1 AND user_id = $2', [req.params.id, user.id]);
-    res.json({ message: 'Снято' });
+    try {
+        const user = await getUserById(req.userId);
+        const hw = await pool.query('SELECT * FROM homeworks WHERE id = $1', [req.params.id]);
+        if (!hw.rows.length) return res.status(404).json({ error: 'Задание не найдено' });
+        const spaceId = hw.rows[0].space_id;
+        const settings = await getSpaceSettings(spaceId);
+        if (settings.homework_complete_policy === 'admins' && !(await isSpaceAdmin(user, spaceId))) {
+            return res.status(403).json({ error: 'Снимать отметку может только преподаватель' });
+        }
+        const prev = await pool.query(
+            'SELECT * FROM homework_completions WHERE homework_id = $1 AND user_id = $2',
+            [req.params.id, user.id]
+        );
+        await pool.query('DELETE FROM homework_completions WHERE homework_id = $1 AND user_id = $2', [req.params.id, user.id]);
+        // Удаляем приложенные файлы сдачи
+        if (prev.rows.length) {
+            const keys = normalizeKeyList(prev.rows[0].attachment_keys);
+            if (!keys.length && Array.isArray(prev.rows[0].attachment_urls)) keys.push(...normalizeKeyList(prev.rows[0].attachment_urls));
+            if (keys.length) Promise.all(keys.map(k => storage.deleteFile(k).catch(() => {}))).catch(() => {});
+        }
+        io.to(`space:${spaceId}`).emit('homework_updated');
+        res.json({ message: 'Снято' });
+    } catch (e) {
+        console.error('uncomplete homework:', e.message);
+        res.status(500).json({ error: 'Ошибка' });
+    }
 });
 
 // ================= ЖУРНАЛ ОЦЕНОК =================
@@ -1076,6 +1540,12 @@ app.delete('/api/teacher-subjects/:id', verifyJWT, async (req, res) => {
 
 // ================= ЧАТ =================
 app.get('/api/chat/:spaceId/messages', verifyJWT, requireSpaceAccess, async (req, res) => {
+    try {
+    // Чат может быть отключён в настройках группы
+    const chatSettings = await getSpaceSettings(req.params.spaceId);
+    if (!chatSettings.feature_chat && !(await isSpaceAdmin(req.currentUser, req.params.spaceId))) {
+        return res.status(403).json({ error: 'Чат отключён в настройках группы' });
+    }
     const search = req.query.q;
     let query, params;
     if (search) {
@@ -1112,6 +1582,10 @@ app.get('/api/chat/:spaceId/messages', verifyJWT, requireSpaceAccess, async (req
         }
     }
     res.json(messages);
+    } catch (e) {
+        console.error('chat messages:', e.message);
+        res.status(500).json({ error: 'Ошибка загрузки сообщений' });
+    }
 });
 
 app.post('/api/chat/:spaceId/mark-read', verifyJWT, requireSpaceAccess, async (req, res) => {
@@ -1154,12 +1628,26 @@ app.get('/api/chat/unread', verifyJWT, async (req, res) => {
 app.post('/api/messages/:messageId/react', verifyJWT, async (req, res) => {
     const { emoji } = req.body;
     if (!emoji) return res.status(400).json({ error: 'Не указан эмодзи' });
+    if (typeof emoji !== 'string' || emoji.length > 10) return res.status(400).json({ error: 'Неверный эмодзи' });
     try {
-        await pool.query(`INSERT INTO message_reactions (message_id, user_id, emoji) VALUES ($1, $2, $3) ON CONFLICT (message_id, user_id) DO UPDATE SET emoji = EXCLUDED.emoji`, [req.params.messageId, req.userId, emoji]);
         const msg = await pool.query('SELECT space_id FROM chat_messages WHERE id = $1', [req.params.messageId]);
-        if (msg.rows.length) io.to(`space:${msg.rows[0].space_id}`).emit('reaction_updated', { messageId: req.params.messageId });
+        if (!msg.rows.length) return res.status(404).json({ error: 'Сообщение не найдено' });
+        const spaceId = msg.rows[0].space_id;
+        const user = await getUserById(req.userId);
+        if (!(await isSpaceMember(user, spaceId))) return res.status(403).json({ error: 'Нет доступа' });
+
+        const settings = await getSpaceSettings(spaceId);
+        if (!settings.members_can_react && !(await isSpaceAdmin(user, spaceId))) {
+            return res.status(403).json({ error: 'Реакции отключены в настройках группы' });
+        }
+
+        await pool.query(`INSERT INTO message_reactions (message_id, user_id, emoji) VALUES ($1, $2, $3) ON CONFLICT (message_id, user_id) DO UPDATE SET emoji = EXCLUDED.emoji`, [req.params.messageId, req.userId, emoji]);
+        io.to(`space:${spaceId}`).emit('reaction_updated', { messageId: req.params.messageId });
         res.json({ ok: true });
-    } catch (e) { res.status(500).json({ error: 'Ошибка' }); }
+    } catch (e) {
+        console.error('react:', e.message);
+        res.status(500).json({ error: 'Ошибка' });
+    }
 });
 
 app.delete('/api/messages/:messageId/react', verifyJWT, async (req, res) => {
@@ -1458,52 +1946,89 @@ io.on('connection', async (socket) => {
         socket.to(`space:${socket.spaceId}`).emit('user_stopped_typing', { userId: socket.userId });
     });
 
-    socket.on('send_message', async ({ message, replyToId, fileIds, mentions }) => {
-        if (!socket.userId || !socket.spaceId) return;
-        // Разрешаем пустое сообщение только если есть файлы
-        const hasFiles = Array.isArray(fileIds) && fileIds.length > 0;
-        if (!message || !message.trim()) {
-            if (!hasFiles) return; // Пустое сообщение без файлов - отклоняем
-        }
-        const user = await getUserById(socket.userId);
-        const settings = (await pool.query('SELECT * FROM system_settings WHERE id = 1')).rows[0];
-        if (settings.exams_mode && !user.is_teacher) return;
-        const member = await pool.query('SELECT * FROM space_members WHERE space_id = $1 AND user_id = $2', [socket.spaceId, user.id]);
-        if (member.rows[0]?.muted_until && new Date(member.rows[0].muted_until) > new Date()) return;
-        const text = String(message).slice(0, 2000);
-        const r = await pool.query('INSERT INTO chat_messages (space_id, user_id, message, reply_to_id) VALUES ($1,$2,$3,$4) RETURNING *', [socket.spaceId, user.id, text, replyToId || null]);
-        const messageId = r.rows[0].id;
-        if (Array.isArray(fileIds) && fileIds.length) {
-            await pool.query('UPDATE files SET message_id = $1 WHERE id = ANY($2::uuid[]) AND user_id = $3', [messageId, fileIds, user.id]);
-        }
-        let mentionedIds = [];
-        if (Array.isArray(mentions) && mentions.length) {
-            for (const uid of mentions) {
-                try {
-                    await pool.query('INSERT INTO message_mentions (message_id, mentioned_user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [messageId, uid]);
-                    mentionedIds.push(uid);
-                } catch (e) {}
+    socket.on('send_message', async ({ message, replyToId, fileIds, mentions } = {}, ack) => {
+        const reply = (payload) => { try { if (typeof ack === 'function') ack(payload); } catch (e) {} };
+        try {
+            if (!socket.userId || !socket.spaceId) return reply({ ok: false, error: 'Нет соединения с группой' });
+            // Разрешаем пустое сообщение только если есть файлы
+            const hasFiles = Array.isArray(fileIds) && fileIds.length > 0;
+            if (!message || !message.trim()) {
+                if (!hasFiles) return reply({ ok: false, error: 'Пустое сообщение' });
             }
-        }
-        const files = fileIds && fileIds.length ? (await pool.query('SELECT id, original_name, mime, size, key FROM files WHERE message_id = $1', [messageId])).rows : [];
-        const fileUrls = await Promise.all(files.map(f => storage.getSignedFileUrl(f.key)));
-        const filesWithUrls = files.map((f, i) => ({ id: f.id, name: f.original_name, mime: f.mime, size: f.size, url: fileUrls[i] }));
+            const user = await getUserById(socket.userId);
+            if (!user) return reply({ ok: false, error: 'Пользователь не найден' });
+            const settings = (await pool.query('SELECT * FROM system_settings WHERE id = 1')).rows[0];
+            if (settings && settings.exams_mode && !user.is_teacher) {
+                return reply({ ok: false, error: 'Отправка сообщений отключена на время экзаменов' });
+            }
 
-        let replyTo = null;
-        if (replyToId) {
-            const parent = await pool.query('SELECT id, message, user_id FROM chat_messages WHERE id = $1', [replyToId]);
-            if (parent.rows.length) {
-                const parentUser = await getUserById(parent.rows[0].user_id);
-                replyTo = { id: parent.rows[0].id, full_name: parentUser?.full_name, message: parent.rows[0].message };
+            const spaceSettings = await getSpaceSettings(socket.spaceId);
+            const spaceAdmin = await isSpaceAdmin(user, socket.spaceId);
+            if (!spaceSettings.feature_chat && !spaceAdmin) {
+                return reply({ ok: false, error: 'Чат отключён в настройках группы' });
             }
+            if (!spaceAdmin && !spaceSettings.members_can_chat) {
+                return reply({ ok: false, error: 'Отправка сообщений запрещена в этой группе' });
+            }
+
+            const member = await pool.query('SELECT * FROM space_members WHERE space_id = $1 AND user_id = $2', [socket.spaceId, user.id]);
+            if (member.rows[0]?.muted_until && new Date(member.rows[0].muted_until) > new Date()) {
+                return reply({ ok: false, error: 'Вы заглушены в этой группе' });
+            }
+
+            // Оставляем только валидные UUID файлов текущего пользователя
+            let validFileIds = [];
+            if (hasFiles) {
+                const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+                const candidates = fileIds.filter(id => typeof id === 'string' && uuidRe.test(id));
+                if (candidates.length) {
+                    const owned = await pool.query(
+                        'SELECT id FROM files WHERE id = ANY($1::uuid[]) AND user_id = $2',
+                        [candidates, user.id]
+                    );
+                    validFileIds = owned.rows.map(r => r.id);
+                }
+            }
+
+            const text = String(message || '').slice(0, 2000);
+            const r = await pool.query('INSERT INTO chat_messages (space_id, user_id, message, reply_to_id) VALUES ($1,$2,$3,$4) RETURNING *', [socket.spaceId, user.id, text, replyToId || null]);
+            const messageId = r.rows[0].id;
+            if (validFileIds.length) {
+                await pool.query('UPDATE files SET message_id = $1 WHERE id = ANY($2::uuid[]) AND user_id = $3', [messageId, validFileIds, user.id]);
+            }
+            let mentionedIds = [];
+            if (Array.isArray(mentions) && mentions.length) {
+                for (const uid of mentions) {
+                    try {
+                        await pool.query('INSERT INTO message_mentions (message_id, mentioned_user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [messageId, uid]);
+                        mentionedIds.push(uid);
+                    } catch (e) {}
+                }
+            }
+            const files = validFileIds.length ? (await pool.query('SELECT id, original_name, mime, size, key FROM files WHERE message_id = $1', [messageId])).rows : [];
+            const fileUrls = await Promise.all(files.map(f => storage.getSignedFileUrl(f.key)));
+            const filesWithUrls = files.map((f, i) => ({ id: f.id, name: f.original_name, mime: f.mime, size: f.size, url: fileUrls[i] }));
+
+            let replyTo = null;
+            if (replyToId) {
+                const parent = await pool.query('SELECT id, message, user_id FROM chat_messages WHERE id = $1', [replyToId]);
+                if (parent.rows.length) {
+                    const parentUser = await getUserById(parent.rows[0].user_id);
+                    replyTo = { id: parent.rows[0].id, full_name: parentUser?.full_name, message: parent.rows[0].message };
+                }
+            }
+            const fullMessage = {
+                ...r.rows[0], full_name: user.full_name, username: user.username,
+                is_teacher: user.is_teacher, avatar_emoji: user.avatar_emoji,
+                reactions: [], files: filesWithUrls, reply_to: replyTo
+            };
+            io.to(`space:${socket.spaceId}`).emit('new_message', fullMessage);
+            push.notifyChatMessage(pool, socket.spaceId, user, text, { replyToId, mentionedIds, messageId }).catch(e => console.error('push chat:', e.message));
+            reply({ ok: true, messageId, message: fullMessage });
+        } catch (e) {
+            console.error('send_message:', e.message);
+            reply({ ok: false, error: 'Не удалось отправить сообщение' });
         }
-        const fullMessage = {
-            ...r.rows[0], full_name: user.full_name, username: user.username,
-            is_teacher: user.is_teacher, avatar_emoji: user.avatar_emoji,
-            reactions: [], files: filesWithUrls, reply_to: replyTo
-        };
-        io.to(`space:${socket.spaceId}`).emit('new_message', fullMessage);
-        push.notifyChatMessage(pool, socket.spaceId, user, text, { replyToId, mentionedIds, messageId }).catch(e => console.error('push chat:', e.message));
     });
 
     socket.on('delete_message', async ({ messageId }) => {
@@ -1568,8 +2093,33 @@ async function ensureSchema() {
         `ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES chat_messages(id) ON DELETE SET NULL`,
         `ALTER TABLE journal_students ADD COLUMN IF NOT EXISTS sort_order INT DEFAULT 0`,
         `ALTER TABLE homework_completions ADD COLUMN IF NOT EXISTS attachment_urls TEXT[] DEFAULT '{}'`,
+        `ALTER TABLE homework_completions ADD COLUMN IF NOT EXISTS attachment_keys TEXT[] DEFAULT '{}'`,
         `ALTER TABLE homeworks ADD COLUMN IF NOT EXISTS attachment_url TEXT`,
+        `ALTER TABLE homeworks ADD COLUMN IF NOT EXISTS attachment_keys TEXT[] DEFAULT '{}'`,
+        `ALTER TABLE homeworks ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES users(id) ON DELETE SET NULL`,
         `ALTER TABLE rpg_state ADD COLUMN IF NOT EXISTS extra JSONB DEFAULT '{}'::jsonb`,
+        `CREATE TABLE IF NOT EXISTS space_settings (
+            space_id UUID PRIMARY KEY REFERENCES spaces(id) ON DELETE CASCADE,
+            homework_post_policy VARCHAR(20) NOT NULL DEFAULT 'admins',
+            homework_complete_policy VARCHAR(20) NOT NULL DEFAULT 'all',
+            feature_schedule BOOLEAN NOT NULL DEFAULT TRUE,
+            feature_homework BOOLEAN NOT NULL DEFAULT TRUE,
+            feature_grades BOOLEAN NOT NULL DEFAULT TRUE,
+            feature_chat BOOLEAN NOT NULL DEFAULT TRUE,
+            feature_games BOOLEAN NOT NULL DEFAULT TRUE,
+            feature_files BOOLEAN NOT NULL DEFAULT TRUE,
+            members_can_see_members BOOLEAN NOT NULL DEFAULT TRUE,
+            members_can_chat BOOLEAN NOT NULL DEFAULT TRUE,
+            members_can_react BOOLEAN NOT NULL DEFAULT TRUE,
+            members_can_view_others_grades BOOLEAN NOT NULL DEFAULT FALSE,
+            members_can_share_grades BOOLEAN NOT NULL DEFAULT TRUE,
+            members_can_delete_own_homework BOOLEAN NOT NULL DEFAULT TRUE,
+            only_teachers_grade BOOLEAN NOT NULL DEFAULT TRUE,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_by UUID REFERENCES users(id) ON DELETE SET NULL
+        )`,
+        `ALTER TABLE space_settings ADD COLUMN IF NOT EXISTS members_can_manage BOOLEAN NOT NULL DEFAULT TRUE`,
+        `CREATE INDEX IF NOT EXISTS idx_homeworks_created_by ON homeworks(created_by)`,
         `CREATE INDEX IF NOT EXISTS idx_journal_students_order ON journal_students(space_id, subject_name, sort_order)`,
         `CREATE INDEX IF NOT EXISTS idx_grades_date_space ON grades(space_id, lesson_date DESC)`,
         `CREATE INDEX IF NOT EXISTS idx_grades_space_subject ON grades(space_id, subject_name)`,
