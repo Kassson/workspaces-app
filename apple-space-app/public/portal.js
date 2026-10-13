@@ -121,28 +121,51 @@ function currentHwContainerId() {
     return _hwContainerId || 'mainContent';
 }
 
+// Может ли текущий пользователь добавлять ДЗ в этой группе
+function canPostHomeworkHere(isAdmin) {
+    if (isAdmin || currentUser?.isTeacher) return true;
+    if (!currentUser?.isTeacherVerified && !currentUser?.isTeacher) return false;
+    const s = spaceSettings();
+    return !!s && s.homework_post_policy === 'all';
+}
+
+// Может ли текущий пользователь отмечать сдачу ДЗ
+function canCompleteHomeworkHere(isAdmin) {
+    if (isAdmin || currentUser?.isTeacher) return true;
+    const s = spaceSettings();
+    if (!s || s.homework_complete_policy === undefined) return true;
+    return s.homework_complete_policy === 'all';
+}
+
 async function renderHomeworkTab(container, spaceId, isAdmin) {
     if (!spaceId) { container.innerHTML = emptySpaceState(); return; }
     // Сохраняем ID контейнера для использования в callback-функциях
-    _hwContainerId = container.id;
+    if (container && container.id) _hwContainerId = container.id;
     container.innerHTML = '<p class="empty-state">Загрузка…</p>';
     try {
         const list = await apiGet(`/api/homework/${spaceId}`);
+        const canAdd = canPostHomeworkHere(isAdmin);
         let html = `<h1 class="page-title">Домашние задания</h1>`;
         html += `<div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
             <input type="text" id="hwSearch" class="form-control" placeholder="Поиск по ДЗ..." style="flex:1; min-width:200px;">
-            ${isAdmin ? `<button class="btn-small" onclick="openAddHomeworkSheet('${spaceId}')">Добавить</button>` : ''}
+            ${canAdd ? `<button class="btn-small" onclick="openAddHomeworkSheet('${spaceId}')">Добавить</button>` : ''}
         </div>`;
         html += `<div id="hwList"></div>`;
         container.innerHTML = html;
         const searchInput = document.getElementById('hwSearch');
         const renderList = (query = '') => {
-            const filtered = query
-                ? list.filter(hw => hw.title.toLowerCase().includes(query.toLowerCase()) || hw.subject_name.toLowerCase().includes(query.toLowerCase()))
+            const q = String(query || '').toLowerCase();
+            const filtered = q
+                ? list.filter(hw => String(hw.title || '').toLowerCase().includes(q) || String(hw.subject_name || '').toLowerCase().includes(q))
                 : list;
             const listBox = document.getElementById('hwList');
+            if (!listBox) return;
             if (!filtered.length) { listBox.innerHTML = '<p class="empty-state">Заданий пока нет</p>'; return; }
-            listBox.innerHTML = filtered.map(hw => homeworkCardHtml(hw, isAdmin, spaceId)).join('');
+            // Учитель может удалять любые ДЗ; ученик — только свои (если разрешено)
+            listBox.innerHTML = filtered.map(hw => homeworkCardHtml(
+                { ...hw, can_submit: canCompleteHomeworkHere(isAdmin), can_delete: isAdmin || (hw.created_by && hw.created_by === currentUser?.id) },
+                isAdmin, spaceId
+            )).join('');
         };
         renderList();
         searchInput.addEventListener('input', (e) => renderList(e.target.value));
@@ -155,6 +178,8 @@ function homeworkCardHtml(hw, isAdmin, spaceId) {
         ? `<span class="grade-badge" style="background:#30d158;color:#fff;padding:3px 10px;border-radius:8px;font-weight:700;">${hw.grade_value}</span>`
         : '';
     const isTeacher = !!currentUser?.isTeacher;
+    const canSubmit = !isTeacher && hw.can_submit !== false;
+    const canDelete = isAdmin || hw.can_delete === true;
 
     const photoUrls = Array.isArray(hw.attachment_urls) && hw.attachment_urls.length
         ? hw.attachment_urls.filter(u => !!u)
@@ -166,7 +191,7 @@ function homeworkCardHtml(hw, isAdmin, spaceId) {
             const photosJson = JSON.stringify(photoUrls).replace(/"/g, '&quot;');
             const previewHtml = photoUrls.length
                 ? `<div style="display:inline-flex; align-items:center; gap:6px; vertical-align:middle;">
-                    <img src="${photoUrls[0]}" class="hw-photo-preview" data-photos="${photosJson}" onclick="openHwGallery(this)" style="max-width:64px;max-height:64px;object-fit:cover;border-radius:8px;cursor:pointer;display:block;">
+                    <img src="${escapeHtml(photoUrls[0])}" class="hw-photo-preview" data-photos="${photosJson}" onclick="openHwGallery(this)" style="max-width:64px;max-height:64px;object-fit:cover;border-radius:8px;cursor:pointer;display:block;" alt="Фото сдачи">
                     ${photoUrls.length > 1 ? `<span style="font-size:0.75rem;color:var(--text-secondary);font-weight:600;">+${photoUrls.length - 1}</span>` : ''}
                    </div>`
                 : '';
@@ -174,8 +199,10 @@ function homeworkCardHtml(hw, isAdmin, spaceId) {
                 <span class="badge badge-green">Сдано</span>
                 ${gradeHtml}
                 ${previewHtml}
-                <button class="btn-small" onclick="uncompleteHomework('${hw.id}','${spaceId}')">Отменить</button>
+                ${canSubmit ? `<button class="btn-small" onclick="uncompleteHomework('${hw.id}','${spaceId}')">Отменить</button>` : ''}
             `;
+        } else if (!canSubmit) {
+            personalActions = '';
         } else {
             const remote = !!systemSettings.remote_mode;
             const doneOption = remote ? '' : `
@@ -201,20 +228,33 @@ function homeworkCardHtml(hw, isAdmin, spaceId) {
         }
     }
 
-    const adminActions = isAdmin
+    const adminActions = canDelete
         ? `
-            <button class="btn-small" onclick="openHomeworkStats('${hw.id}')">Статистика</button>
+            ${isAdmin ? `<button class="btn-small" onclick="openHomeworkStats('${hw.id}')">Статистика</button>` : ''}
             <button class="btn-small" onclick="deleteHomework('${hw.id}','${spaceId}')">Удалить</button>
         `
+        : (isAdmin ? `<button class="btn-small" onclick="openHomeworkStats('${hw.id}')">Статистика</button>` : '');
+
+    // Фото самого задания (сохраняем как массив, поддержка нескольких вложений)
+    const taskPhotos = Array.isArray(hw.taskAttachmentUrls) && hw.taskAttachmentUrls.length
+        ? hw.taskAttachmentUrls.filter(u => !!u)
+        : (hw.taskAttachmentUrl ? [hw.taskAttachmentUrl] : (hw.attachment_url ? [hw.attachment_url] : []));
+    const taskPhotosJson = JSON.stringify(taskPhotos).replace(/"/g, '&quot;');
+    const taskAttachmentHtml = taskPhotos.length
+        ? `<div class="hw-task-attachments">
+            <img src="${escapeHtml(taskPhotos[0])}" class="hw-task-photo" data-photos="${taskPhotosJson}" onclick="openHwGallery(this)" style="max-width:120px;max-height:120px;object-fit:cover;border-radius:10px;cursor:pointer;display:block;margin:6px 0;" alt="Вложение к заданию">
+            ${taskPhotos.length > 1 ? `<button class="btn-small" onclick="openImageViewer(${JSON.stringify(taskPhotos).replace(/"/g, '&quot;')}, 0)">Ещё ${taskPhotos.length - 1} фото</button>` : ''}
+           </div>`
         : '';
 
-    const taskAttachmentHtml = hw.attachment_url
-        ? `<img src="${hw.attachment_url}" class="hw-task-photo" onclick="openImageViewer(['${hw.attachment_url}'], 0)" style="max-width:100px;max-height:100px;object-fit:cover;border-radius:10px;cursor:pointer;display:block;margin:6px 0;">`
+    const authorHtml = hw.author_name
+        ? `<span class="hw-author" style="font-size:0.75rem;color:var(--text-secondary);">добавил(а) ${escapeHtml(hw.author_name)}</span>`
         : '';
 
     return `<div class="hw-card ${hw.is_done && !isTeacher ? 'done' : ''}">
         <div class="hw-top"><span class="hw-subject">${escapeHtml(hw.subject_name)}</span><span class="hw-due">до ${due}</span></div>
         <div class="hw-title">${escapeHtml(hw.title)}</div>
+        ${authorHtml}
         ${taskAttachmentHtml}
         <div class="hw-actions">
             ${personalActions}
@@ -274,12 +314,17 @@ async function submitHomeworkPhoto(id, spaceId, input) {
     if (!files.length) return;
     try {
         const uploaded = await uploadFiles(files, spaceId);
-        const urls = uploaded.filter(f => f && f.url).map(f => f.url);
-        if (!urls.length) throw new Error('Не удалось загрузить фото');
-        await apiPost(`/api/homework/${id}/complete`, { attachments: urls });
-        showToast(urls.length > 1 ? `Загружено фото: ${urls.length}` : 'Фото загружено', 'success');
+        const fileIds = uploadedFileIds(uploaded);
+        if (!fileIds.length) {
+            const failed = uploaded.find(f => f && f.error);
+            throw new Error(failed ? failed.error : 'Не удалось загрузить фото');
+        }
+        // Передаём id файлов — сервер сам сохранит ключи и выдаст свежие ссылки
+        await apiPost(`/api/homework/${id}/complete`, { fileIds });
+        showToast(fileIds.length > 1 ? `Загружено фото: ${fileIds.length}` : 'Фото загружено', 'success');
         renderHomeworkTab(document.getElementById(currentHwContainerId()), spaceId, !!currentSpace?.is_admin);
-    } catch (e) { showToast(e.error || 'Не удалось загрузить фото', 'error'); }
+    } catch (e) { showToast(e.error || e.message || 'Не удалось загрузить фото', 'error'); }
+    finally { input.value = ''; }
 }
 async function deleteHomework(id, spaceId) {
     const ok = await showConfirm('Удалить задание?', 'Это действие нельзя отменить', 'Удалить', 'Отмена', true);
@@ -290,7 +335,6 @@ async function deleteHomework(id, spaceId) {
         renderHomeworkTab(document.getElementById(currentHwContainerId()), spaceId, true);
     } catch (e) { showToast(e.error || 'Ошибка', 'error'); }
 }
-function currentHwContainerId() { return document.getElementById('tab-hw') ? 'tab-hw' : 'tab-homework'; }
 
 // ===================== СТАТИСТИКА ДЗ =====================
 async function openHomeworkStats(homeworkId) {
@@ -1240,6 +1284,12 @@ async function openStartSharing() {
     if (!currentSpace) return;
     const spaceId = currentSpace.id;
 
+    // Группа может запретить обмен оценками
+    const st = spaceSettings();
+    if (st && st.members_can_share_grades === false) {
+        return showToast('Обмен оценками отключён в настройках группы', 'error');
+    }
+
     let members = [];
     try { members = await apiGet(`/api/spaces/${spaceId}/members`); }
     catch (e) { return showToast('Ошибка загрузки', 'error'); }
@@ -1423,105 +1473,114 @@ let _pendingChatFiles = [];
 let _uploadProgressCallback = null;
 
 // ===================== ФУНКЦИИ ЗАГРУЗКИ ФАЙЛОВ =====================
-async function uploadFiles(files, spaceId) {
+// Единственная реализация uploadFiles (перекрывает одноимённую из shared.js).
+// Загружает файлы по одному через XHR, чтобы показывать прогресс, и ВСЕГДА
+// возвращает массив вида [{id,name,mime,size,url}] либо [{error,name}].
+// Прогресс привязывается только к переданному списку pendingList (чат).
+async function uploadFiles(files, spaceId, pendingList) {
+    const list = Array.isArray(files) ? files : [];
+    const pending = Array.isArray(pendingList) ? pendingList : null;
     const results = [];
-    const totalFiles = files.length;
+    const totalFiles = list.length;
     let uploadedCount = 0;
-    
-    for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        
-        // Отмечаем файл как загружающийся
-        if (_pendingChatFiles[i]) {
-            _pendingChatFiles[i].isUploading = true;
-            _pendingChatFiles[i].uploadProgress = 0;
+
+    for (let i = 0; i < list.length; i++) {
+        const file = list[i];
+        const pendingItem = pending ? pending[i] : null;
+
+        if (pendingItem) {
+            pendingItem.isUploading = true;
+            pendingItem.uploadProgress = 0;
             renderFilePreview();
         }
-        
+
         try {
             const formData = new FormData();
             formData.append('file', file);
             formData.append('spaceId', spaceId);
-            
+
             const xhr = new XMLHttpRequest();
-            
-            // Создаем промис для отслеживания загрузки
+
             const uploadPromise = new Promise((resolve, reject) => {
                 xhr.upload.addEventListener('progress', (e) => {
-                    if (e.lengthComputable) {
-                        const percent = Math.round((e.loaded / e.total) * 100);
-                        
-                        // Обновляем прогресс конкретного файла
-                        if (_pendingChatFiles[i]) {
-                            _pendingChatFiles[i].uploadProgress = percent;
-                            renderFilePreview();
-                        }
-                        
-                        // Также вызываем общий callback для совместимости
-                        const overallPercent = Math.round(((uploadedCount + e.loaded / e.total) / totalFiles) * 100);
-                        if (_uploadProgressCallback) {
-                            _uploadProgressCallback(overallPercent, file.name);
-                        }
+                    if (!e.lengthComputable) return;
+                    const percent = Math.round((e.loaded / e.total) * 100);
+
+                    if (pendingItem) {
+                        pendingItem.uploadProgress = percent;
+                        renderFilePreview();
+                    }
+
+                    const overallPercent = Math.round(((uploadedCount + e.loaded / e.total) / totalFiles) * 100);
+                    if (_uploadProgressCallback) {
+                        _uploadProgressCallback(overallPercent, file.name);
                     }
                 });
-                
+
                 xhr.addEventListener('load', () => {
-                    if (xhr.status === 200) {
-                        try {
-                            const response = JSON.parse(xhr.responseText);
-                            resolve(response);
-                        } catch (e) {
-                            reject(new Error('Ошибка парсинга ответа'));
-                        }
+                    let parsed = null;
+                    try { parsed = JSON.parse(xhr.responseText); } catch (e) { parsed = null; }
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        if (!parsed || typeof parsed !== 'object') return reject(new Error('Некорректный ответ сервера'));
+                        if (parsed.error) return reject(new Error(parsed.error));
+                        resolve(parsed);
                     } else {
-                        try {
-                            const error = JSON.parse(xhr.responseText);
-                            reject(new Error(error.error || 'Ошибка загрузки'));
-                        } catch (e) {
-                            reject(new Error('Ошибка загрузки файла'));
-                        }
+                        reject(new Error((parsed && parsed.error) || `Ошибка загрузки (${xhr.status})`));
                     }
                 });
-                
+
                 xhr.addEventListener('error', () => reject(new Error('Ошибка сети')));
                 xhr.addEventListener('abort', () => reject(new Error('Загрузка отменена')));
+                xhr.addEventListener('timeout', () => reject(new Error('Превышено время загрузки')));
             });
-            
+
             xhr.open('POST', '/api/files/upload');
+            xhr.timeout = 120000;
             xhr.setRequestHeader('Authorization', `Bearer ${localStorage.getItem('token')}`);
             xhr.send(formData);
-            
+
             const result = await uploadPromise;
             results.push(result);
             uploadedCount++;
-            
-            // Завершаем загрузку файла
-            if (_pendingChatFiles[i]) {
-                _pendingChatFiles[i].isUploading = false;
-                _pendingChatFiles[i].uploadProgress = 100;
+
+            if (pendingItem) {
+                pendingItem.isUploading = false;
+                pendingItem.uploadProgress = 100;
                 renderFilePreview();
             }
-            
         } catch (e) {
             console.error('Ошибка загрузки файла:', file.name, e.message);
-            showToast(`Ошибка: ${file.name} - ${e.message}`, 'error');
-            results.push({ error: e.message });
-            
-            // Снимаем флаг загрузки при ошибке
-            if (_pendingChatFiles[i]) {
-                _pendingChatFiles[i].isUploading = false;
+            showToast(`Ошибка: ${file.name} — ${e.message}`, 'error');
+            results.push({ error: e.message, name: file.name });
+            if (pendingItem) {
+                pendingItem.isUploading = false;
                 renderFilePreview();
             }
         }
     }
-    
+
     return results;
 }
+
+// Достаёт id успешно загруженных файлов (только валидные UUID)
+function uploadedFileIds(uploaded) {
+    const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    return (Array.isArray(uploaded) ? uploaded : [])
+        .map(f => f && f.id)
+        .filter(id => typeof id === 'string' && uuidRe.test(id));
+}
+
 
 
 
 function renderChatTab(container, spaceId, isAdmin, currentUserId) {
     if (!spaceId) { container.innerHTML = emptySpaceState(); return; }
+    if (!spaceFeatureEnabled('chat') && !isAdmin) {
+        container.innerHTML = '<h1 class="page-title">Чат</h1><p class="empty-state">Чат отключён в настройках группы.</p>';
+        return;
+    }
+    const settings = spaceSettings();
+    const readOnlyChat = !!settings && !settings.members_can_chat && !isAdmin;
     container.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:6px;">
             <h1 class="page-title" style="margin:0;">Чат группы</h1>
@@ -1555,6 +1614,17 @@ function renderChatTab(container, spaceId, isAdmin, currentUserId) {
         chatJoinedSpace = spaceId;
     }
 
+    // Чат только для чтения, если группа запретила участникам писать
+    if (readOnlyChat) {
+        const row = container.querySelector('.chat-input-row');
+        if (row) row.style.display = 'none';
+        const notice = container.querySelector('.chat-blocked-notice');
+        if (notice) {
+            notice.textContent = 'Отправка сообщений запрещена в этой группе.';
+            notice.classList.remove('hidden');
+        }
+    }
+
     const muteBtn = document.getElementById('chatMuteBtn');
     if (muteBtn) {
         refreshChatMuteBtn(spaceId);
@@ -1568,16 +1638,8 @@ function renderChatTab(container, spaceId, isAdmin, currentUserId) {
         searchTimeout = setTimeout(() => loadChatHistory(spaceId, isAdmin, currentUserId, e.target.value), 300);
     });
     
-    // Обработка Enter для отправки сообщения
-    const chatInput = document.getElementById('chatInput');
-    if (chatInput) {
-        chatInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendChatMessage(spaceId);
-            }
-        });
-    }
+    // Обработка Enter для отправки сообщения выполняется ниже (input.onkeydown),
+    // дублирующий addEventListener приводил к двойной отправке сообщений.
 
     // Обработка скролла чата
     const chatMessages = document.getElementById('chatMessages');
@@ -1589,13 +1651,6 @@ function renderChatTab(container, spaceId, isAdmin, currentUserId) {
                 scrollBtn.style.display = distFromBottom > 300 ? 'flex' : 'none';
             }
         });
-        
-        const scrollBtn = document.getElementById('chatScrollDownBtn');
-        if (scrollBtn) {
-            scrollBtn.addEventListener('click', () => {
-                chatMessages.scrollTop = chatMessages.scrollHeight;
-            });
-        }
     }
 
     // Обработка Enter для отправки сообщения
@@ -1630,12 +1685,6 @@ function renderChatTab(container, spaceId, isAdmin, currentUserId) {
         scrollBtn.addEventListener('click', () => {
             if (box) box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
         });
-    }
-
-    // Удаляем старые обработчики перед добавлением новых
-    if (window.__chatScrollHandler) {
-        document.removeEventListener('click', window.__chatScrollHandler);
-        window.__chatScrollHandler = null;
     }
 
     socket.off('new_message'); socket.off('message_deleted'); socket.off('reaction_updated');
@@ -1686,11 +1735,14 @@ function renderFilePreview() {
         const isImage = f.type.startsWith('image/');
         const progress = f.uploadProgress || 0;
         const isUploading = f.isUploading || false;
-        
+        // Превью берём из кэша: перерисовка (прогресс загрузки) не должна
+        // «терять» уже прочитанную миниатюру.
+        const preview = f.previewUrl;
+
         html += `
             <div id="file-preview-${i}" style="width:80px;height:80px;background:var(--input-bg);border-radius:10px;display:flex;align-items:center;justify-content:center;position:relative;overflow:visible;">
-                <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;border-radius:10px;">
-                    ${isImage ? '<div id="file-img-' + i + '" style="font-size:10px;color:var(--text-secondary);">📷</div>' : `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`}
+                <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;border-radius:10px;${preview ? `background-image:url(${preview});background-size:cover;background-position:center;` : ''}">
+                    ${preview ? '' : (isImage ? '<div id="file-img-' + i + '" style="font-size:10px;color:var(--text-secondary);">📷</div>' : `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`)}
                     
                     ${isUploading ? `
                     <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);border-radius:10px;">
@@ -1721,21 +1773,19 @@ function renderFilePreview() {
     html += '</div>';
     box.innerHTML = html;
     
-    // Загружаем превью изображений
-    _pendingChatFiles.forEach((f, i) => {
-        if (f.type.startsWith('image/')) {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const imgContainer = document.getElementById(`file-img-${i}`);
-                if (imgContainer && imgContainer.parentElement) {
-                    imgContainer.parentElement.style.backgroundImage = `url(${e.target.result})`;
-                    imgContainer.parentElement.style.backgroundSize = 'cover';
-                    imgContainer.parentElement.style.backgroundPosition = 'center';
-                    imgContainer.remove();
-                }
-            };
-            reader.readAsDataURL(f);
-        }
+    // Дочитываем превью только для тех файлов, которые ещё не в кэше
+    _pendingChatFiles.forEach((f) => {
+        if (!f.type.startsWith('image/') || f.previewUrl || f._previewLoading) return;
+        f._previewLoading = true;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            f.previewUrl = e.target.result;
+            f._previewLoading = false;
+            // Перерисовываем только если чат всё ещё открыт
+            if (document.getElementById('filePreviewContainer')) renderFilePreview();
+        };
+        reader.onerror = () => { f._previewLoading = false; };
+        reader.readAsDataURL(f);
     });
 }
 
@@ -1885,20 +1935,24 @@ function cancelReply() { _replyToId = null; document.getElementById('replyPrevie
 
 async function sendChatMessage(spaceId) {
     const input = document.getElementById('chatInput');
+    if (!input) return;
+    if (input.dataset.sending === '1') return; // защита от двойной отправки
     const text = input.value.trim();
     const files = _pendingChatFiles || [];
     if (!text && !files.length) return;
-    
+
     const sendBtn = document.querySelector('.chat-input-row button[class*="btn-primary"]');
     if (sendBtn) sendBtn.disabled = true;
-    
+    input.dataset.sending = '1';
+
+    let indicator = null;
     try {
         let fileIds = [];
         if (files.length) {
             // Показываем индикатор загрузки
-            const uploadIndicator = document.createElement('div');
-            uploadIndicator.id = 'uploadIndicator';
-            uploadIndicator.style.cssText = `
+            indicator = document.createElement('div');
+            indicator.id = 'uploadIndicator';
+            indicator.style.cssText = `
                 padding: 8px 12px;
                 background: var(--accent-blue-light, rgba(0, 136, 204, 0.1));
                 border-left: 3px solid #0088cc;
@@ -1909,81 +1963,41 @@ async function sendChatMessage(spaceId) {
                 justify-content: space-between;
                 align-items: center;
             `;
-            uploadIndicator.innerHTML = `
+            indicator.innerHTML = `
                 <div style="display: flex; align-items: center; gap: 8px; flex: 1;">
                     <div style="width: 16px; height: 16px; border: 2px solid #0088cc; border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
                     <div id="uploadStatus">Загрузка файлов: 0%</div>
                 </div>
             `;
-            
-            // Добавляем стиль для анимации
+
             if (!document.getElementById('uploadSpinStyle')) {
                 const style = document.createElement('style');
                 style.id = 'uploadSpinStyle';
                 style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
                 document.head.appendChild(style);
             }
-            
+
             const filePreviewContainer = document.getElementById('filePreviewContainer');
             if (filePreviewContainer && filePreviewContainer.parentElement) {
-                filePreviewContainer.parentElement.insertBefore(uploadIndicator, filePreviewContainer);
+                filePreviewContainer.parentElement.insertBefore(indicator, filePreviewContainer);
             }
-            
-            // Устанавливаем callback для отслеживания прогресса
+
             _uploadProgressCallback = (percent, fileName) => {
                 const statusEl = document.getElementById('uploadStatus');
-                if (statusEl) {
-                    statusEl.textContent = `Загрузка ${fileName}: ${percent}%`;
-                }
+                if (statusEl) statusEl.textContent = `Загрузка ${fileName}: ${percent}%`;
             };
-            
-            const uploaded = await uploadFiles(files, spaceId);
-            
-            // Логируем ответ для отладки
-            console.log('Результат загрузки файлов:', uploaded);
-            
-            // Фильтруем только успешно загруженные файлы
-            // Проверяем разные возможные форматы ответа: {id}, {fileId}, {file_id}, {url}
-            const successfulUploads = uploaded.filter(f => {
-                if (!f) return false;
-                if (f.error) return false;
-                // Проверяем наличие любого из возможных идентификаторов
-                return f.id || f.fileId || f.file_id || f.url;
-            });
-            
-            // Извлекаем ID из разных возможных полей
-            fileIds = successfulUploads.map(f => {
-                const id = f.id || f.fileId || f.file_id;
-                if (id) return id;
-                // Если ID нет, но есть URL, пытаемся извлечь ID из URL
-                if (f.url) {
-                    const match = f.url.match(/\/files\/([^/]+)/);
-                    return match ? match[1] : f.url;
-                }
-                return null;
-            }).filter(id => id !== null);
-            
-            console.log('Извлечённые fileIds:', fileIds);
-            
-            // Показываем ошибки для неудачных загрузок
+
+            // Прогресс привязываем именно к чату
+            const uploaded = await uploadFiles(files, spaceId, _pendingChatFiles);
             const failedUploads = uploaded.filter(f => f && f.error);
             if (failedUploads.length > 0) {
                 const errorMsg = failedUploads.map(f => `${f.name || 'файл'}: ${f.error}`).join(', ');
-                console.error('Ошибки загрузки файлов:', errorMsg);
                 showToast(`Ошибки загрузки: ${errorMsg}`, 'error', 5000);
             }
-            
-            // Если ни один файл не загрузился, показываем ошибку и не отправляем сообщение
-            if (files.length > 0 && fileIds.length === 0) {
-                throw new Error('Не удалось загрузить файлы');
-            }
-            
-            // Удаляем индикатор загрузки
-            const indicator = document.getElementById('uploadIndicator');
-            if (indicator) indicator.remove();
-            _uploadProgressCallback = null;
+            fileIds = uploadedFileIds(uploaded);
+            if (fileIds.length === 0) throw new Error('Не удалось загрузить файлы');
         }
-        
+
         const mentions = [];
         const mentionRegex = /@([a-zA-Z0-9_]+)/g;
         let match;
@@ -1995,23 +2009,43 @@ async function sendChatMessage(spaceId) {
                 for (const nick of mentions) { const found = members.find(m => m.username === nick); if (found) mentionIds.push(found.id); }
             } catch (e) {}
         }
-                                // Если нет текста, но есть файлы - отправляем пустой текст
-        // (сервер теперь разрешает это)
-        const messageText = text;
-        
-        const messageData = { message: messageText, replyToId: _replyToId, fileIds, mentions: mentionIds };
-        console.log('Отправка сообщения с данными:', messageData);
-        socket.emit('send_message', messageData);
+
+        const messageData = { message: text, replyToId: _replyToId, fileIds, mentions: mentionIds };
+
+        // Ждём подтверждения сервера — иначе сообщение могло «потеряться»,
+        // а пользователь видел бы ложный успех.
+        const ack = await new Promise((resolve) => {
+            let done = false;
+            const timer = setTimeout(() => { if (!done) { done = true; resolve({ ok: false, error: 'Сервер не ответил. Проверьте соединение.' }); } }, 15000);
+            try {
+                socket.emit('send_message', messageData, (res) => {
+                    if (done) return;
+                    done = true;
+                    clearTimeout(timer);
+                    resolve(res || { ok: true });
+                });
+            } catch (e) {
+                done = true;
+                clearTimeout(timer);
+                resolve({ ok: false, error: 'Нет соединения с сервером' });
+            }
+        });
+
+        if (!ack.ok) throw new Error(ack.error || 'Не удалось отправить сообщение');
+
         input.value = '';
         cancelReply();
         _pendingChatFiles = [];
         renderFilePreview();
         socket.emit('typing_stop');
         showToast('Сообщение отправлено', 'success');
-    } catch (e) { 
-        showToast(e.error || e.message || 'Ошибка отправки', 'error'); 
+    } catch (e) {
+        showToast(e.error || e.message || 'Ошибка отправки', 'error');
     } finally {
+        if (indicator) indicator.remove();
+        _uploadProgressCallback = null;
         if (sendBtn) sendBtn.disabled = false;
+        delete input.dataset.sending;
     }
 }
 function deleteChatMessage(id) { socket.emit('delete_message', { messageId: id }); }
@@ -2031,7 +2065,15 @@ async function refreshChatMuteBtn(spaceId) {
     try { const m = await getChatMute(spaceId); btn.textContent = formatMuteLabel(m); } catch (e) {}
 }
 let _chatMutePanel = null;
-function closeChatMutePanel() { if (_chatMutePanel) { _chatMutePanel.remove(); _chatMutePanel = null; } }
+let _chatMuteDocHandler = null;
+function closeChatMutePanel() {
+    if (_chatMutePanel) { _chatMutePanel.remove(); _chatMutePanel = null; }
+    // Снимаем обработчик щелчка вне панели, иначе он накапливается
+    if (_chatMuteDocHandler) {
+        document.removeEventListener('click', _chatMuteDocHandler);
+        _chatMuteDocHandler = null;
+    }
+}
 
 function openChatMutePanel(spaceId) {
     if (_chatMutePanel) { closeChatMutePanel(); return; }
@@ -2062,13 +2104,13 @@ function openChatMutePanel(spaceId) {
         closeChatMutePanel();
     });
     setTimeout(() => {
-        const handler = (ev) => {
-            if (!_chatMutePanel) { document.removeEventListener('click', handler); return; }
+        if (!_chatMutePanel) return;
+        _chatMuteDocHandler = (ev) => {
+            if (!_chatMutePanel) { closeChatMutePanel(); return; }
             if (_chatMutePanel.contains(ev.target) || ev.target === btn) return;
             closeChatMutePanel();
-            document.removeEventListener('click', handler);
         };
-        document.addEventListener('click', handler);
+        document.addEventListener('click', _chatMuteDocHandler);
     }, 0);
 }
 
@@ -2078,6 +2120,12 @@ function getMemberDisplayStatus(m) { return m.custom_status || ROLE_LABELS[m.rol
 
 async function renderMembersTab(container, spaceId, isAdmin) {
     if (!spaceId) { container.innerHTML = emptySpaceState(); return; }
+    // Список участников может быть скрыт от обычных учеников
+    const settings = spaceSettings();
+    if (settings && settings.members_can_see_members === false && !isAdmin && !currentUser?.isTeacher) {
+        container.innerHTML = '<h1 class="page-title">Участники группы</h1><p class="empty-state">Список участников скрыт в настройках группы.</p>';
+        return;
+    }
     container.innerHTML = '<p class="empty-state">Загрузка…</p>';
     try {
         const members = await apiGet(`/api/spaces/${spaceId}/members`);
@@ -2278,6 +2326,221 @@ async function deleteSpace(spaceId, spaceName) {
     } catch (e) { showToast(e.error || 'Ошибка удаления', 'error'); }
 }
 
+// ===================== НАСТРОЙКИ ГРУППЫ (преподаватель) =====================
+// Состояние настроек текущей группы доступно клиенту локально, чтобы разделы
+// можно было включать/выключать без дополнительных запросов.
+let _spaceSettings = null;
+
+function spaceSettings() {
+    if (_spaceSettings) return _spaceSettings;
+    return (currentSpace && currentSpace.settings) || null;
+}
+function spaceFeatureEnabled(feature) {
+    const s = spaceSettings();
+    if (!s) return true;               // не знаем — не мешаем работать
+    const key = 'feature_' + feature;
+    if (s[key] === undefined) return true;
+    return !!s[key];
+}
+function setLocalSpaceSettings(next) {
+    _spaceSettings = next;
+    if (currentSpace) currentSpace.settings = next;
+}
+
+async function renderSpaceSettingsSection() {
+    const box = document.getElementById('spaceSettingsContent');
+    if (!box) return;
+    if (!currentSpace) {
+        box.innerHTML = '<p class="empty-state">Выберите группу</p><button class="btn-primary" onclick="openJoinSpaceForm()">Присоединиться по коду</button>';
+        return;
+    }
+    const isAdmin = !!currentSpace.is_admin || !!currentUser?.isTeacher;
+    if (!isAdmin) {
+        box.innerHTML = `<p style="margin:0;color:var(--text-secondary);">Настройки группы доступны преподавателю и админам группы.</p>`;
+        return;
+    }
+
+    box.innerHTML = '<p class="empty-state">Загрузка…</p>';
+    try {
+        const data = await apiGet(`/api/spaces/${currentSpace.id}/settings`);
+        setLocalSpaceSettings(data.settings);
+        const s = data.settings;
+        const space = data.space;
+
+        const sw = (key, label, hint) => `
+            <label class="settings-line" style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--divider);cursor:pointer;">
+                <span>
+                    <span style="display:block;">${escapeHtml(label)}</span>
+                    ${hint ? `<span style="display:block;font-size:0.75rem;color:var(--text-secondary);">${escapeHtml(hint)}</span>` : ''}
+                </span>
+                <input type="checkbox" data-space-setting="${key}" ${s[key] ? 'checked' : ''} style="width:20px;height:20px;flex-shrink:0;">
+            </label>`;
+
+        box.innerHTML = `
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+                <div>
+                    <div style="font-weight:600;">${escapeHtml(space.name)}</div>
+                    <div style="font-size:0.8rem;color:var(--text-secondary);">Код приглашения: <span class="code-pill">${escapeHtml(space.invite_code || '')}</span></div>
+                </div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                    <button class="btn-small" onclick="openRenameSpaceSheet()">Переименовать</button>
+                    <button class="btn-small" onclick="rotateInviteCode()">Сменить код</button>
+                </div>
+            </div>
+
+            <h4 style="margin:18px 0 2px;font-size:0.95rem;">Разделы группы</h4>
+            <p style="margin:0 0 6px;font-size:0.78rem;color:var(--text-secondary);">Выключенные разделы скрываются у всех участников группы.</p>
+            ${sw('feature_schedule', 'Расписание', 'Пары, замены, экспорт в календарь')}
+            ${sw('feature_homework', 'Домашние задания', 'Задания, сдача фото, статистика')}
+            ${sw('feature_grades', 'Журнал оценок', 'Оценки и посещаемость')}
+            ${sw('feature_chat', 'Чат', 'Общий чат группы и вложения')}
+            ${sw('feature_games', 'Игры', 'Игровой центр и таблица лидеров')}
+            ${sw('feature_files', 'Файлы', 'Загрузка и отправка файлов')}
+
+            <h4 style="margin:18px 0 2px;font-size:0.95rem;">Права участников</h4>
+            ${sw('members_can_see_members', 'Видят список участников', 'Иначе список виден только админам')}
+            ${sw('members_can_chat', 'Могут писать в чат', 'Выключите, чтобы чат был только для чтения')}
+            ${sw('members_can_react', 'Могут ставить реакции', 'Эмодзи-реакции на сообщения')}
+            ${sw('members_can_delete_own_homework', 'Могут удалять своё ДЗ', 'Только задания, созданные ими')}
+            ${sw('members_can_share_grades', 'Могут делиться оценками', 'Открывать свой журнал другим ученикам')}
+            ${sw('members_can_view_others_grades', 'Видят оценки друг друга', 'Осторожно: открывает журнал всей группы')}
+            ${sw('only_teachers_grade', 'Оценки ставит только преподаватель', 'Ученики не могут менять оценки')}
+
+            <h4 style="margin:18px 0 2px;font-size:0.95rem;">Кто может добавлять ДЗ</h4>
+            <div class="form-group" style="margin-top:4px;">
+                <select id="spaceHomeworkPostPolicy" class="form-control">
+                    <option value="admins" ${s.homework_post_policy === 'admins' ? 'selected' : ''}>Только преподаватель и админы</option>
+                    <option value="all" ${s.homework_post_policy === 'all' ? 'selected' : ''}>Все участники группы</option>
+                </select>
+            </div>
+
+            <h4 style="margin:18px 0 2px;font-size:0.95rem;">Права админов группы</h4>
+            <div class="form-group" style="margin-top:4px;">
+                <select id="spaceAdminPolicy" class="form-control">
+                    <option value="manage" ${s.members_can_manage !== false ? 'selected' : ''}>Полное управление участниками</option>
+                    <option value="readonly" ${s.members_can_manage === false ? 'selected' : ''}>Только просмотр (без управления)</option>
+                </select>
+                <p style="font-size:0.75rem;color:var(--text-secondary);margin:6px 0 0;">
+                    Админ группы — ученик, назначенный в разделе «Участники». Преподаватель управляет всегда.
+                </p>
+            </div>
+
+            <button class="btn-primary" style="margin-top:14px;" onclick="saveSpaceSettings()">Сохранить настройки</button>
+            <div id="spaceSettingsStatus" style="font-size:0.8rem;color:var(--text-secondary);margin-top:8px;"></div>
+        `;
+
+        // Тумблеры применяем сразу (как в iOS-настройках)
+        box.querySelectorAll('input[data-space-setting]').forEach(input => {
+            input.addEventListener('change', () => {
+                saveSpaceSetting(input.dataset.spaceSetting, input.checked);
+            });
+        });
+    } catch (e) {
+        box.innerHTML = `<p class="empty-state">Ошибка: ${escapeHtml(e.error || e.message || '')}</p>`;
+    }
+}
+
+async function saveSpaceSetting(key, value) {
+    if (!currentSpace) return;
+    const status = document.getElementById('spaceSettingsStatus');
+    if (status) status.textContent = 'Сохранение…';
+    try {
+        const saved = await apiPost(`/api/spaces/${currentSpace.id}/settings`, { [key]: value });
+        setLocalSpaceSettings(saved);
+        if (status) status.textContent = 'Сохранено';
+        // Некоторые настройки влияют на доступные разделы — перерисуем интерфейс
+        applySpaceFeatureVisibility();
+    } catch (e) {
+        if (status) status.textContent = '';
+        showToast(e.error || 'Не удалось сохранить', 'error');
+    }
+}
+
+async function saveSpaceSettings() {
+    if (!currentSpace) return;
+    const policyEl = document.getElementById('spaceHomeworkPostPolicy');
+    const adminEl = document.getElementById('spaceAdminPolicy');
+    const patch = {};
+    if (policyEl) patch.homework_post_policy = policyEl.value;
+    if (adminEl) patch.members_can_manage = adminEl.value === 'manage';
+    const status = document.getElementById('spaceSettingsStatus');
+    if (status) status.textContent = 'Сохранение…';
+    try {
+        const saved = await apiPost(`/api/spaces/${currentSpace.id}/settings`, patch);
+        setLocalSpaceSettings(saved);
+        if (status) status.textContent = 'Настройки сохранены';
+        applySpaceFeatureVisibility();
+        showToast('Настройки группы сохранены', 'success');
+    } catch (e) {
+        if (status) status.textContent = '';
+        showToast(e.error || 'Не удалось сохранить', 'error');
+    }
+}
+
+function openRenameSpaceSheet() {
+    if (!currentSpace) return;
+    showFormSheet('Название группы', `
+        <div class="form-group">
+            <input name="name" class="form-control" value="${escapeHtml(currentSpace.name || '')}" maxlength="100" required>
+        </div>
+    `, async (fd) => {
+        const name = (fd.get('name') || '').trim();
+        if (!name) throw new Error('Введите название');
+        const r = await apiPost(`/api/spaces/${currentSpace.id}/rename`, { name });
+        currentSpace.name = r.name;
+        const label = document.getElementById('currentSpaceLabel');
+        if (label) label.textContent = r.name;
+        closeDynamicSheet();
+        showToast('Название группы изменено', 'success');
+        renderSpaceActions();
+        renderSpaceSettingsSection();
+    }, 'Сохранить');
+}
+
+// Скрывает/показывает разделы и кнопки согласно настройкам группы
+function applySpaceFeatureVisibility() {
+    const map = {
+        'tab-schedule': 'schedule',
+        'tab-hw': 'homework',
+        'tab-grades': 'grades',
+        'tab-chat': 'chat',
+        'tab-games': 'games'
+    };
+    for (const [tabId, feature] of Object.entries(map)) {
+        const enabled = spaceFeatureEnabled(feature);
+        document.querySelectorAll(`[data-tab="${tabId}"]`).forEach(el => {
+            el.style.display = enabled ? '' : 'none';
+        });
+        // Если активный раздел отключили — уводим пользователя на доступный
+        const section = document.getElementById(tabId);
+        if (section && !enabled && section.classList.contains('active')) {
+            const fallback = Object.keys(map).find(id => spaceFeatureEnabled(map[id]));
+            if (fallback && typeof showTab === 'function') showTab(fallback);
+        }
+    }
+}
+
+function openSpaceOverview() {
+    if (!currentSpace) return;
+    const root = document.getElementById('dynamicSheetRoot');
+    root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div><p class="empty-state">Загрузка…</p></div>`;
+    document.getElementById('sheetOverlay').classList.add('show');
+    apiGet(`/api/spaces/${currentSpace.id}/overview`).then(data => {
+        root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div>
+            <h2 class="app-title" style="font-size:1.3rem;">${escapeHtml(data.space.name)}</h2>
+            <div class="settings-card" style="margin-top:10px;">
+                <div class="member-row"><div class="member-info"><div class="member-name">Учеников</div></div><b>${data.stats.students}</b></div>
+                <div class="member-row"><div class="member-info"><div class="member-name">Заданий</div></div><b>${data.stats.homeworks}</b></div>
+                <div class="member-row"><div class="member-info"><div class="member-name">Оценок</div></div><b>${data.stats.grades}</b></div>
+                <div class="member-row"><div class="member-info"><div class="member-name">Сообщений в чате</div></div><b>${data.stats.messages}</b></div>
+            </div>
+            <button class="btn-secondary" style="margin-top:12px;" onclick="closeDynamicSheet()">Закрыть</button>
+        </div>`;
+    }).catch(e => {
+        root.innerHTML = `<div class="sheet show" id="dynamicSheet"><p class="empty-state">${escapeHtml(e.error || 'Ошибка')}</p><button class="btn-secondary" onclick="closeDynamicSheet()">Закрыть</button></div>`;
+    });
+}
+
 // ===================== ПРОФИЛЬ =====================
 const EMOJI_LIST = ['👤','👨','👩','🧑','👦','👧','👨‍🎓','👩‍🎓','🧑‍🎓','👨‍🏫','👩‍🏫','😀','😎','🤓','🥳','🤔','😴','🧐','🥸','🤠','😺','🐶','🐱','🦊','🐼','🐨','🦁','🐯','🦉','🐧','🍕','🍔','🍟','🌮','🍣','🍎','🍓','🍉','☕','🍩','🎂','⚽','🏀','🎮','🎧','🎸','🎨','🚀','⚡','🔥','⭐','🌈','💎','🎯','🏆','🥇','👑','💡','📚','✏️','🎓'];
 let _selectedEmoji = '👤';
@@ -2321,7 +2584,11 @@ function pickEmoji(e) { _selectedEmoji = e; openEditProfile(true); }
 
 function showFormSheet(title, bodyHtml, onSubmit, submitLabel = 'Сохранить') {
     const root = document.getElementById('dynamicSheetRoot');
-    root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div><h2 class="app-title" style="font-size:1.3rem;">${title}</h2><form id="dynamicSheetForm">${bodyHtml}<button type="submit" class="btn-primary">${submitLabel}</button><button type="button" class="btn-secondary" onclick="closeDynamicSheet()">Отмена</button></form></div>`;
+    // Название подставляем только текстом: раньше пользовательские данные
+    // (имя ученика, предмет урока) попадали в <h2> как разметка.
+    root.innerHTML = `<div class="sheet show" id="dynamicSheet"><div class="sheet-handle"></div><h2 class="app-title" style="font-size:1.3rem;" id="dynamicSheetTitle"></h2><form id="dynamicSheetForm">${bodyHtml}<button type="submit" class="btn-primary">${escapeHtml(submitLabel)}</button><button type="button" class="btn-secondary" onclick="closeDynamicSheet()">Отмена</button></form></div>`;
+    const titleEl = document.getElementById('dynamicSheetTitle');
+    if (titleEl) titleEl.textContent = String(title == null ? '' : title);
     document.getElementById('sheetOverlay').classList.add('show');
     document.getElementById('dynamicSheetForm').onsubmit = async (e) => {
         e.preventDefault();
@@ -2369,6 +2636,59 @@ async function deleteLessonPermanently(id, spaceId) {
     try { await apiDelete(`/api/schedule/${id}`); closeDynamicSheet(); renderScheduleUnified(document.getElementById('tab-schedule'), spaceId, true); showToast('Урок удалён', 'success'); }
     catch (e) { showToast(e.error || 'Ошибка', 'error'); }
 }
+
+// Импорт расписания из текста (день / № урока / предмет / кабинет)
+function openScheduleImport() {
+    const spaceId = currentSpace?.id;
+    if (!spaceId) return showToast('Выберите группу', 'error');
+    showFormSheet('Импорт расписания', `
+        <p class="app-subtitle" style="text-align:left;margin-bottom:10px;">
+            Вставьте строки в формате: <b>День &nbsp;№ урока &nbsp;Предмет &nbsp;Кабинет</b>.
+            Разделитель — табуляция или два пробела.
+        </p>
+        <div class="form-group">
+            <textarea name="text" class="form-control" rows="9" placeholder="ПОНЕДЕЛЬНИК&#9;1&#9;Математика&#9;204" required style="font-family:monospace;font-size:0.85rem;"></textarea>
+        </div>
+        <div class="form-group">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                <input type="checkbox" name="replaceAll"> Заменить всё расписание группы
+            </label>
+        </div>
+    `, async (fd) => {
+        const text = fd.get('text') || '';
+        const replaceAll = fd.get('replaceAll') === 'on';
+        const r = await apiPost('/api/schedule/import', { spaceId, text, replaceAll });
+        closeDynamicSheet();
+        renderScheduleUnified(document.getElementById('tab-schedule'), spaceId, true);
+        let msg = `Импортировано пар: ${r.imported}`;
+        if (Array.isArray(r.errors) && r.errors.length) msg += `. Проблемные строки: ${r.errors.slice(0, 5).join(', ')}`;
+        showToast(msg, 'success', 6000);
+    }, 'Импортировать');
+}
+
+// Выгрузка расписания в текстовый файл (шаблон для последующего импорта)
+async function exportSchedule() {
+    const spaceId = currentSpace?.id;
+    if (!spaceId) return showToast('Выберите группу', 'error');
+    try {
+        const res = await fetch(`/api/schedule/${spaceId}/export`, { headers: authHeaders() });
+        if (!res.ok) {
+            let err = 'Ошибка выгрузки';
+            try { err = (await res.json()).error || err; } catch (e) {}
+            throw new Error(err);
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `raspisanie_${(currentSpace?.name || 'group').replace(/[^\wа-яА-ЯёЁ-]+/g, '_')}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+        showToast('Расписание выгружено', 'success');
+    } catch (e) { showToast(e.message || 'Ошибка выгрузки', 'error'); }
+}
 function openAddHomeworkSheet(spaceId) {
     showFormSheet('Новое домашнее задание', `
         <div class="form-group"><input name="subjectName" class="form-control" placeholder="Предмет" required></div>
@@ -2376,21 +2696,29 @@ function openAddHomeworkSheet(spaceId) {
         <div class="form-group"><input name="dueDate" type="date" class="form-control" required></div>
         <div class="form-group">
             <label class="btn-small" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
-                📎 Прикрепить фото задания (опционально)
-                <input type="file" name="attachment" accept="image/*" style="display:none" onchange="handleHwAttachmentPreview(this)">
+                📎 Прикрепить файлы к заданию (опционально)
+                <input type="file" name="attachment" accept="image/*,application/pdf" multiple style="display:none" onchange="handleHwAttachmentPreview(this)">
             </label>
             <div id="hwAttachmentPreview" style="margin-top:8px;"></div>
         </div>
     `, async (fd) => {
-        let attachmentUrl = null;
-        const file = fd.get('attachment');
-        if (file && file instanceof File && file.size > 0) {
-            const uploaded = await uploadFiles([file], spaceId);
-            const first = uploaded.find(f => f && f.url);
-            if (!first) throw new Error('Не удалось загрузить фото');
-            attachmentUrl = first.url;
+        let fileIds = [];
+        const files = fd.getAll('attachment').filter(f => f && typeof f === 'object' && f.size > 0);
+        if (files.length) {
+            const uploaded = await uploadFiles(files, spaceId);
+            fileIds = uploadedFileIds(uploaded);
+            if (!fileIds.length) {
+                const failed = uploaded.find(f => f && f.error);
+                throw new Error(failed ? failed.error : 'Не удалось загрузить файлы');
+            }
         }
-        await apiPost('/api/homework', { spaceId, subjectName: fd.get('subjectName'), title: fd.get('title'), dueDate: fd.get('dueDate'), attachmentUrl });
+        await apiPost('/api/homework', {
+            spaceId,
+            subjectName: fd.get('subjectName'),
+            title: fd.get('title'),
+            dueDate: fd.get('dueDate'),
+            fileIds
+        });
         showToast('ДЗ добавлено', 'success');
         renderHomeworkTab(document.getElementById(currentHwContainerId()), spaceId, true);
     }, 'Добавить');
@@ -2398,10 +2726,15 @@ function openAddHomeworkSheet(spaceId) {
 function handleHwAttachmentPreview(input) {
     const box = document.getElementById('hwAttachmentPreview');
     if (!box) return;
-    const file = input.files && input.files[0];
-    if (!file) { box.innerHTML = ''; return; }
-    const url = URL.createObjectURL(file);
-    box.innerHTML = `<img src="${url}" style="max-width:120px;max-height:120px;object-fit:cover;border-radius:10px;display:block;">`;
+    const files = Array.from(input.files || []);
+    if (!files.length) { box.innerHTML = ''; return; }
+    box.innerHTML = files.map((file, i) => {
+        if (file.type && file.type.startsWith('image/')) {
+            const url = URL.createObjectURL(file);
+            return `<img src="${url}" style="max-width:90px;max-height:90px;object-fit:cover;border-radius:10px;display:inline-block;margin:0 6px 6px 0;" alt="${escapeHtml(file.name)}">`;
+        }
+        return `<span class="code-pill" style="display:inline-block;margin:0 6px 6px 0;">📄 ${escapeHtml(file.name)}</span>`;
+    }).join('');
 }
 function openJoinSpaceForm() {
     showFormSheet('Присоединиться к группе', `<div class="form-group"><input name="code" class="form-control" placeholder="Код приглашения" required style="text-transform:uppercase;"></div>`, async (fd) => {
@@ -2476,12 +2809,24 @@ async function renderPushSettingsCard() {
         <p style="color:var(--text-secondary);font-size:0.8rem;margin-top:12px;">Ответы и упоминания, а также объявления колледжа приходят всегда.</p>
         <button class="btn-primary" id="pushSettingsBtn" style="margin-top:12px;">Настроить браузерные уведомления</button>`;
 
+    // Локальная изменяемая копия: раньше каждое переключение сохраняло снимок
+    // настроек, снятый при отрисовке, и второе переключение откатывало первое.
+    const livePrefs = { ...prefs };
+
     box.querySelectorAll('input[data-pref]').forEach(input => {
         input.addEventListener('change', async () => {
-            const newPrefs = { ...prefs };
-            newPrefs[input.dataset.pref] = input.checked;
-            try { await saveNotificationPrefs(newPrefs); showToast('Настройки сохранены', 'success'); }
-            catch (e) { showToast('Ошибка', 'error'); }
+            const key = input.dataset.pref;
+            const prev = livePrefs[key];
+            livePrefs[key] = input.checked;
+            try {
+                const saved = await saveNotificationPrefs(livePrefs);
+                if (saved && typeof saved === 'object') Object.assign(livePrefs, saved);
+                showToast('Настройки сохранены', 'success');
+            } catch (e) {
+                livePrefs[key] = prev;
+                input.checked = prev;
+                showToast(e.error || 'Не удалось сохранить', 'error');
+            }
         });
     });
     box.querySelector('#pushSettingsBtn').addEventListener('click', openPushSettingsModal);

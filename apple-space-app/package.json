@@ -5,11 +5,11 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node dev-check-encoding.js && node dev-static-check.js && node dev-api-test.js",
-    "test:api": "node dev-api-test.js",
-    "test:static": "node dev-static-check.js",
-    "test:encoding": "node dev-check-encoding.js",
-    "icons": "node dev-make-icons.js"
+    "test": "node test-encoding.js && node test-static.js && node test-api.js",
+    "test:api": "node test-api.js",
+    "test:static": "node test-static.js",
+    "test:encoding": "node test-encoding.js",
+    "icons": "node tools-make-icons.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",
@@ -29,6 +29,6 @@
     "web-push": "^3.6.7"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   }
 }

@@ -1,0 +1,93 @@
+# ============================================================================
+#  render.yaml — инфраструктура как код для Render.
+#  Достаточно подключить репозиторий GitHub и выбрать Blueprint: Render сам
+#  создаст веб-сервис и базу данных.
+#
+#  Значения sync: false Render спросит при первом деплое — их нельзя хранить
+#  в репозитории (пароли, ключи).
+# ============================================================================
+
+databases:
+  - name: workspaces-db
+    databaseName: workspaces
+    user: workspaces
+    plan: free
+    region: frankfurt
+    postgresMajorVersion: "16"
+
+services:
+  - type: web
+    name: workspaces-app
+    runtime: node
+    plan: free
+    region: frankfurt
+    branch: main
+    autoDeploy: true
+    # --include=dev не нужен: сборки нет, только node server.js
+    buildCommand: npm ci --omit=dev
+    startCommand: node server.js
+    # Проверяем, что процесс действительно поднялся
+    healthCheckPath: /api/health
+    envVars:
+      # --- база данных: Render подставит строку подключения сам ---
+      - key: DATABASE_URL
+        fromDatabase:
+          name: workspaces-db
+          property: connectionString
+
+      # --- обязательные секреты (Render спросит при деплое) ---
+      - key: JWT_SECRET
+        sync: false
+      - key: ROOT_TEACHER_PASSWORD
+        sync: false
+      - key: ROOT_TEACHER_EMAIL
+        sync: false
+
+      # --- прочее ---
+      - key: NODE_VERSION
+        value: "20"
+      # Замените на реальный адрес сервиса после первого деплоя
+      - key: ALLOWED_ORIGIN
+        sync: false
+      - key: APP_URL
+        sync: false
+      - key: SCHEDULE_TIMEZONE
+        value: Europe/Moscow
+
+      # --- хранилище файлов ---
+      # ВАРИАНТ A (рекомендуется): заполните ключи Yandex Object Storage —
+      # файлы будут переживать деплои даже на бесплатном тарифе.
+      - key: YC_ACCESS_KEY_ID
+        sync: false
+      - key: YC_SECRET_ACCESS_KEY
+        sync: false
+      - key: YC_BUCKET_NAME
+        sync: false
+      - key: YC_REGION
+        value: ru-central1
+      - key: YC_ENDPOINT
+        value: https://storage.yandexcloud.net
+
+      # ВАРИАНТ B: если ключи YC_* не заданы, включится локальный режим.
+      # Без платного диска данные на бесплатном тарифе не сохраняются.
+      - key: LOCAL_UPLOAD_DIR
+        value: /var/data/uploads
+
+      # --- push-уведомления (необязательно) ---
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        sync: false
+
+    # ----------------------------------------------------------------------
+    #  Постоянный диск. ВКЛЮЧАЙТЕ ТОЛЬКО НА ПЛАТНОМ ТАРИФЕ —
+    #  на free-плане Render отклонит деплой с диском.
+    #  Если включаете: раскомментируйте блок и НЕ задавайте LOCAL_UPLOAD_DIR
+    #  другим значением.
+    # ----------------------------------------------------------------------
+    # disk:
+    #   name: workspaces-uploads
+    #   mountPath: /var/data
+    #   sizeGB: 1

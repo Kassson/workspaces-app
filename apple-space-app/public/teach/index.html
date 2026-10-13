@@ -7,12 +7,12 @@
     <meta name="theme-color" content="#f5f7fa">
     <link rel="manifest" href="/manifest.json">
     <link rel="icon" href="/icon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/style.css?v=11">
+    <link rel="stylesheet" href="/style.css?v=13">
 
     <!-- Версия приложения — при смене чистим кэш и снимаем SW -->
     <script>
     (function(){
-        var APP_VERSION = '11';
+        var APP_VERSION = '13';
         try {
             var saved = localStorage.getItem('appVersion');
             if (saved !== APP_VERSION) {
@@ -276,7 +276,13 @@
                     <h3>Настройки пространства</h3>
                     <p style="color:var(--text-secondary); font-size:0.85rem;">Для выбранного пространства</p>
                     <button class="btn-secondary" style="margin-bottom:8px;" onclick="rotateInviteCode()">Сменить код приглашения</button>
-                    <button class="btn-secondary" onclick="openBlacklist()">Чёрный список</button>
+                    <button class="btn-secondary" style="margin-bottom:8px;" onclick="openBlacklist()">Чёрный список</button>
+                    <button class="btn-secondary" onclick="openSpaceOverview()">Сводка по группе</button>
+                </div>
+
+                <div class="settings-card" id="spaceSettingsCard">
+                    <h3>Настройки группы</h3>
+                    <div id="spaceSettingsContent"></div>
                 </div>
 
                 <div class="settings-card" id="deleteSpaceCard" style="display:none;">
@@ -335,7 +341,7 @@
     <div id="dynamicSheetRoot"></div>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="/shared.js?v=11"></script>
+    <script src="/shared.js?v=13"></script>
     <script>
         const errorMsg = document.getElementById('errorMsg');
         function switchView(viewId) {
@@ -587,6 +593,7 @@
                 renderPushSettingsCard();
                 refreshThemeButtons();
                 renderDeleteSpaceCard();
+                renderSpaceSettingsSection();
             }
             if (tabId === 'tab-auths') loadResetRequests();
         }
@@ -617,6 +624,7 @@
                 if (label) label.textContent = found.name;
             }
             renderAllSpacesList();
+            if (typeof applySpaceFeatureVisibility === 'function') applySpaceFeatureVisibility();
             const activeTab = document.querySelector('.tab-section.active')?.id || 'tab-schedule';
             loadTabContent(activeTab);
         }
@@ -761,6 +769,27 @@
             hideLoadingScreen();
         }
         boot();
+
+        // Изменения названия/настроек группы применяем сразу у всех участников
+        socket.on('space_updated', (space) => {
+            if (space && currentSpace && space.id === currentSpace.id) {
+                currentSpace.name = space.name;
+                const label = document.getElementById('currentSpaceLabel');
+                if (label) label.textContent = space.name;
+                renderAllSpacesList();
+                renderDeleteSpaceCard();
+                renderSpaceSettingsSection();
+            }
+        });
+        socket.on('space_settings_updated', ({ spaceId, settings }) => {
+            if (currentSpace && spaceId === currentSpace.id) {
+                currentSpace.settings = settings;
+                if (typeof setLocalSpaceSettings === 'function') setLocalSpaceSettings(settings);
+                applySpaceFeatureVisibility();
+                const active = document.querySelector('.tab-section.active')?.id;
+                if (active === 'tab-settings') renderSpaceSettingsSection();
+            }
+        });
     </script>
 </body>
 </html>

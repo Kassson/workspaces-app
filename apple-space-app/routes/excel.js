@@ -11,6 +11,30 @@ const upload = multer({
     limits: { fileSize: 5 * 1024 * 1024 }
 });
 
+// Ошибки multer (например, слишком большой файл) нужно отдавать как JSON
+function uploadMiddleware(handler) {
+    return (req, res, next) => {
+        handler(req, res, (err) => {
+            if (!err) return next();
+            if (err instanceof multer.MulterError) {
+                if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Файл слишком большой (максимум 5 МБ)' });
+                return res.status(400).json({ error: 'Ошибка загрузки: ' + err.message });
+            }
+            console.error('excel multer:', err.message);
+            return res.status(500).json({ error: 'Ошибка загрузки файла' });
+        });
+    };
+}
+
+// RFC 5987: ASCII-имя + filename* с UTF-8
+function contentDisposition(fileName) {
+    const ascii = String(fileName).replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_');
+    return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+}
+
+const MONTH_KEY_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+function isValidMonthKey(mk) { return MONTH_KEY_RE.test(String(mk || '').trim()); }
+
 const MONTH_NAMES_RU = ['', 'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
 
 function getDaysInMonth(year, month) {
@@ -121,6 +145,9 @@ function parseCellValue(raw) {
     const grade = m[1] ? parseInt(m[1], 10) : null;
     const att = m[2] === 'Н' ? 'absent' : m[2] === 'О' ? 'late' : 'present';
     if (!grade && att === 'present') return null;
+    // Схема допускает только 2..5; иначе INSERT падал на CHECK и ячейка
+    // молча терялась, хотя импорт отвечал «успешно».
+    if (grade !== null && (grade < 2 || grade > 5)) return null;
     return { grade, attendance: att };
 }
 
@@ -141,10 +168,31 @@ async function safeLoadWorkbook(buffer) {
     }
     try {
         const zip = await JSZip.loadAsync(buffer);
+        const removePaths = [];
         for (const path of Object.keys(zip.files)) {
-            if (path.includes('persons') || path.includes('threadedComment') || path.includes('comments')) {
-                zip.remove(path);
+            // Только сами части комментариев. Файлы вида
+            // xl/worksheets/_rels/... НЕ трогаем — они нужны для остальных связей.
+            if (/(^|\/)(persons|threadedComments?|comments)[^/]*\.xml$/i.test(path)) {
+                removePaths.push(path);
             }
+        }
+        if (!removePaths.length) throw new Error('нет частей комментариев для удаления');
+        for (const path of removePaths) zip.remove(path);
+        // Из .rels и [Content_Types].xml убираем ССЫЛКИ на удалённые части,
+        // иначе ExcelJS падает на undefined при разборе связей.
+        for (const path of Object.keys(zip.files)) {
+            if (!/\.rels$/i.test(path) && path !== '[Content_Types].xml') continue;
+            const file = zip.file(path);
+            if (!file) continue;
+            let xml = await file.async('string');
+            const before = xml;
+            for (const removed of removePaths) {
+                const base = removed.split('/').pop();
+                const esc = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                xml = xml.replace(new RegExp(`<Relationship[^>]*Target="[^"]*${esc}"[^>]*/>`, 'gi'), '');
+                xml = xml.replace(new RegExp(`<Override[^>]*PartName="[^"]*${esc}"[^>]*/>`, 'gi'), '');
+            }
+            if (xml !== before) zip.file(path, xml);
         }
         const cleanedBuffer = await zip.generateAsync({ type: 'nodebuffer' });
         const wb = new ExcelJS.Workbook();
@@ -287,6 +335,7 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
             const { spaceId } = req.params;
             const { subject, month } = req.query;
             if (!subject || !month) return res.status(400).json({ error: 'Нужны subject и month' });
+            if (!isValidMonthKey(month)) return res.status(400).json({ error: 'Неверный месяц (ожидается YYYY-MM)' });
 
             const isMember = await pool.query(
                 'SELECT 1 FROM space_members WHERE space_id = $1 AND user_id = $2',
@@ -367,11 +416,14 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
 
             const fileName = `journal-${subject}-${month}.xlsx`;
             res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-            res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
+            res.setHeader('Content-Disposition', contentDisposition(fileName));
             await wb.xlsx.write(res);
             res.end();
         } catch (e) {
             console.error('excel export:', e.message);
+            // Заголовки уже отправлены — json() бросит ERR_HTTP_HEADERS_SENT
+            // и ответ «зависнет» навсегда. Просто закрываем поток.
+            if (res.headersSent) { res.end(); return; }
             res.status(500).json({ error: 'Ошибка выгрузки: ' + e.message });
         }
     });
@@ -389,6 +441,7 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
             const { spaceId } = req.params;
             const { subject, month } = req.query;
             if (!subject || !month) return res.status(400).json({ error: 'Нужны subject и month' });
+            if (!isValidMonthKey(month)) return res.status(400).json({ error: 'Неверный месяц (ожидается YYYY-MM)' });
 
             const isMember = await pool.query(
                 'SELECT 1 FROM space_members WHERE space_id = $1 AND user_id = $2',
@@ -410,11 +463,12 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
 
             const fileName = `template-${subject}-${month}.xlsx`;
             res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-            res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
+            res.setHeader('Content-Disposition', contentDisposition(fileName));
             await wb.xlsx.write(res);
             res.end();
         } catch (e) {
             console.error('excel template:', e.message);
+            if (res.headersSent) { res.end(); return; }
             res.status(500).json({ error: 'Ошибка шаблона: ' + e.message });
         }
     });
@@ -456,16 +510,26 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                 if (!dayColumns.length) return res.status(400).json({ error: 'Не найдены дни месяца в строке 3' });
 
                 const isSuperAdmin = user.rows[0].is_teacher_verified;
+
+                // Проверяем доступ именно к этой группе. Раньше spaceId из URL
+                // никак не проверялся, а «проверка» teacher_subjects сама создавала
+                // себе разрешающую запись — писать оценки можно было в любую группу.
+                const memberOfSpace = await pool.query(
+                    'SELECT 1 FROM space_members WHERE space_id = $1 AND user_id = $2',
+                    [spaceId, req.userId]
+                );
+                if (!memberOfSpace.rows.length && !isSuperAdmin) {
+                    return res.status(403).json({ error: 'Нет доступа к этой группе' });
+                }
+
+                // Учитель может вести только свои предметы (проверенные — любые)
                 if (!isSuperAdmin) {
                     const subjCheck = await pool.query(
                         'SELECT 1 FROM teacher_subjects WHERE space_id = $1 AND teacher_id = $2 AND subject_name = $3',
                         [spaceId, req.userId, subject]
                     );
                     if (!subjCheck.rows.length) {
-                        await pool.query(
-                            'INSERT INTO teacher_subjects (space_id, teacher_id, subject_name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
-                            [spaceId, req.userId, subject]
-                        );
+                        return res.status(403).json({ error: `Предмет «${subject}» не закреплён за вами в этой группе` });
                     }
                 }
 
@@ -502,6 +566,7 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
 
                 let inserted = 0, updated = 0, skipped = 0, studentsAdded = 0;
                 const errors = [];
+                const affectedStudents = new Map(); // userId → последняя оценка
 
                 const maxOrderQ = await pool.query(
                     'SELECT COALESCE(MAX(sort_order), 0) AS m FROM journal_students WHERE space_id = $1 AND subject_name = $2',
@@ -509,65 +574,69 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                 );
                 let nextOrder = (maxOrderQ.rows[0].m || 0);
 
-                for (let r = headerRow + 1; r <= ws.rowCount; r++) {
-                    let studentName = String(ws.getCell(r, 1).value || '').trim();
-                    if (!studentName) continue;
+                // Импорт идёт одной транзакцией: раньше сбой в середине оставлял
+                // журнал наполовину залитым, а клиент всё равно видел «успех».
+                const client = await pool.connect();
+                try {
+                    await client.query('BEGIN');
 
-                    const existingJournalName = await pool.query(
-                        `SELECT student_name,
-                                LENGTH(student_name) - LENGTH(REPLACE(student_name, ' ', '')) AS word_count
-                         FROM journal_students
-                         WHERE space_id = $1 AND subject_name = $2
-                           AND name_key(student_name) = name_key($3)
-                         ORDER BY word_count DESC, student_name
-                         LIMIT 1`,
-                        [spaceId, subject, studentName]
-                    );
-                    if (existingJournalName.rows.length) {
-                        studentName = existingJournalName.rows[0].student_name;
-                    } else {
-                        const existingGradeName = await pool.query(
+                    for (let r = headerRow + 1; r <= ws.rowCount; r++) {
+                        let studentName = String(ws.getCell(r, 1).value || '').trim();
+                        if (!studentName) continue;
+
+                        const existingJournalName = await client.query(
                             `SELECT student_name,
                                     LENGTH(student_name) - LENGTH(REPLACE(student_name, ' ', '')) AS word_count
-                             FROM grades
+                             FROM journal_students
                              WHERE space_id = $1 AND subject_name = $2
                                AND name_key(student_name) = name_key($3)
                              ORDER BY word_count DESC, student_name
                              LIMIT 1`,
                             [spaceId, subject, studentName]
                         );
-                        if (existingGradeName.rows.length) {
-                            studentName = existingGradeName.rows[0].student_name;
+                        if (existingJournalName.rows.length) {
+                            studentName = existingJournalName.rows[0].student_name;
+                        } else {
+                            const existingGradeName = await client.query(
+                                `SELECT student_name,
+                                        LENGTH(student_name) - LENGTH(REPLACE(student_name, ' ', '')) AS word_count
+                                 FROM grades
+                                 WHERE space_id = $1 AND subject_name = $2
+                                   AND name_key(student_name) = name_key($3)
+                                 ORDER BY word_count DESC, student_name
+                                 LIMIT 1`,
+                                [spaceId, subject, studentName]
+                            );
+                            if (existingGradeName.rows.length) {
+                                studentName = existingGradeName.rows[0].student_name;
+                            }
                         }
-                    }
 
-                    const member = findMemberByKey(studentName);
-                    const studentUserId = member?.id || null;
+                        const member = findMemberByKey(studentName);
+                        const studentUserId = member?.id || null;
 
-                    const exists = await pool.query(
-                        'SELECT id FROM journal_students WHERE space_id = $1 AND subject_name = $2 AND student_name = $3',
-                        [spaceId, subject, studentName]
-                    );
-                    if (!exists.rows.length) {
-                        nextOrder++;
-                        try {
-                            await pool.query(
+                        const exists = await client.query(
+                            'SELECT id FROM journal_students WHERE space_id = $1 AND subject_name = $2 AND student_name = $3',
+                            [spaceId, subject, studentName]
+                        );
+                        if (!exists.rows.length) {
+                            nextOrder++;
+                            const ins = await client.query(
                                 'INSERT INTO journal_students (space_id, subject_name, student_name, sort_order) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
                                 [spaceId, subject, studentName, nextOrder]
                             );
-                            studentsAdded++;
-                        } catch (e) {}
-                    }
+                            // Считаем только реально добавленных (ON CONFLICT DO NOTHING)
+                            if (ins.rowCount === 1) studentsAdded++;
+                        }
 
-                    for (const dc of dayColumns) {
-                        const raw = ws.getCell(r, dc.col).value;
-                        const parsed = parseCellValue(raw);
-                        if (!parsed) { continue; }
+                        for (const dc of dayColumns) {
+                            const raw = ws.getCell(r, dc.col).value;
+                            const parsed = parseCellValue(raw);
+                            if (!parsed) { skipped++; continue; }
 
-                        const dateStr = `${year}-${String(m).padStart(2, '0')}-${String(dc.day).padStart(2, '0')}`;
+                            const dateStr = `${year}-${String(m).padStart(2, '0')}-${String(dc.day).padStart(2, '0')}`;
 
-                        try {
-                            const existing = await pool.query(
+                            const existing = await client.query(
                                 `SELECT id FROM grades
                                  WHERE space_id = $1 AND student_name = $2 AND subject_name = $3
                                    AND lesson_date = $4::date AND teacher_id = $5`,
@@ -575,13 +644,13 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                             );
 
                             if (existing.rows.length) {
-                                await pool.query(
+                                await client.query(
                                     `UPDATE grades SET grade_value = $1, attendance = $2, student_user_id = COALESCE(student_user_id, $4), updated_at = NOW() WHERE id = $3`,
                                     [parsed.grade, parsed.attendance, existing.rows[0].id, studentUserId]
                                 );
                                 updated++;
                             } else {
-                                await pool.query(
+                                await client.query(
                                     `INSERT INTO grades (space_id, student_user_id, student_name, subject_name, teacher_id, grade_value, attendance, lesson_date)
                                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date)`,
                                     [spaceId, studentUserId, studentName, subject, req.userId, parsed.grade, parsed.attendance, dateStr]
@@ -590,16 +659,26 @@ function registerExcelRoutes(app, pool, verifyJWT, requireSpaceAdmin) {
                             }
 
                             if (parsed.grade && studentUserId) {
-                                try {
-                                    const push = require('../push');
-                                    push.notifyGrade(pool, studentUserId, subject, parsed.grade).catch(() => {});
-                                } catch (e) {}
+                                affectedStudents.set(studentUserId, parsed.grade);
                             }
-                        } catch (e) {
-                            errors.push(`Строка ${r}, день ${dc.day}: ${e.message}`);
                         }
                     }
+
+                    await client.query('COMMIT');
+                } catch (e) {
+                    try { await client.query('ROLLBACK'); } catch (e2) {}
+                    throw e;
+                } finally {
+                    client.release();
                 }
+
+                // Уведомления — по одному на ученика, а не на каждую ячейку
+                try {
+                    const push = require('../push');
+                    for (const [userId, grade] of affectedStudents) {
+                        push.notifyGrade(pool, userId, subject, grade).catch(() => {});
+                    }
+                } catch (e) {}
 
                 // ============================================================
                 //  АВТОСОРТИРОВКА A→Я ПО ФАМИЛИИ после импорта.

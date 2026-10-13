@@ -2,12 +2,34 @@
 //  sw.js — Service Worker
 //  Network-first для ВСЕГО. Мгновенная активация. Оповещение клиентов.
 // ============================================================================
-const CACHE_NAME = 'workspaces-v12';
+const CACHE_NAME = 'workspaces-v13';
+
+// Минимальный набор для оффлайн-запуска
+const PRECACHE = [
+    '/',
+    '/index.html',
+    '/teach/index.html',
+    '/style.css',
+    '/shared.js',
+    '/portal.js',
+    '/game.js',
+    '/manifest.json',
+    '/icon.svg',
+    '/icon-192.png',
+    '/icon-512.png'
+];
 
 self.addEventListener('install', (event) => {
     // Не ждём закрытия вкладок — активируемся сразу
     self.skipWaiting();
-    event.waitUntil(Promise.resolve());
+    event.waitUntil(
+        caches.open(CACHE_NAME)
+            // Отдельные неудачи не должны ломать установку SW
+            .then(cache => Promise.all(PRECACHE.map(url =>
+                cache.add(url).catch(() => {})
+            )))
+            .catch(() => {})
+    );
 });
 
 self.addEventListener('activate', (event) => {
@@ -46,9 +68,13 @@ self.addEventListener('fetch', (event) => {
                 return response;
             })
             .catch(() => {
-                return caches.match(event.request).then(cached => {
+                return caches.match(event.request, { ignoreSearch: true }).then(cached => {
                     if (cached) return cached;
-                    if (event.request.mode === 'navigate') return caches.match('/');
+                    if (event.request.mode === 'navigate') {
+                        // Для /teach отдаём «учительскую» оболочку, а не студенческую
+                        const shell = url.pathname.startsWith('/teach') ? '/teach/index.html' : '/index.html';
+                        return caches.match(shell).then(s => s || caches.match('/'));
+                    }
                     return new Response('Offline', { status: 503 });
                 });
             })

@@ -5,6 +5,7 @@
 
 let activeGame = null;
 let activeGameCleanup = null;
+let rpgResetInProgress = false;
 
 function stopActiveGame() {
     if (activeGameCleanup) {
@@ -12,10 +13,15 @@ function stopActiveGame() {
         activeGameCleanup = null;
     }
     activeGame = null;
+    // index.html проверяет именно window.activeGame: `let` в классическом
+    // скрипте создаёт лексическую привязку и НЕ становится свойством window,
+    // поэтому проверка всегда была истинной и убивала запущенную игру.
+    window.activeGame = null;
     document.querySelectorAll('.game-fullscreen').forEach(el => el.remove());
 }
 
 function waitForLayout(area, callback, attempts = 0) {
+    if (!area || !area.isConnected) { console.warn('game area unavailable'); return; }
     if (attempts > 60) { console.warn('game layout timeout'); return; }
     requestAnimationFrame(() => {
         if (area.clientWidth > 0 && area.clientHeight > 0) {
@@ -39,9 +45,19 @@ function fmtScore(n) {
     return Math.floor(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }
 
+// Для дробных характеристик (урон, DPS): показываем десятые,
+// иначе покупка «+8% урона» не меняла бы число на экране.
+function fmtStat(n) {
+    const v = Number(n);
+    if (!isFinite(v)) return '0';
+    if (Math.abs(v) >= 100) return fmtScore(v);
+    return String(Math.round(v * 10) / 10).replace('.', ',');
+}
+
 function fmtGameTime(sec) {
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
+    const t = Math.max(0, Math.floor(Number(sec) || 0));
+    const m = Math.floor(t / 60);
+    const s = t % 60;
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
@@ -97,6 +113,7 @@ function startGame(gameId) {
     `;
     document.body.appendChild(overlay);
     activeGame = gameId;
+    window.activeGame = gameId;
 
     const area = document.getElementById('gameArea');
     waitForLayout(area, () => {
@@ -153,6 +170,10 @@ async function openLeaderboard(gameId) {
         </div>
     `;
     overlay.appendChild(modal);
+    // Повторный вызов openLeaderboard() создавал второй оверлей с тем же id,
+    // из-за чего строки уходили в «мёртвое» окно, а видимое навсегда
+    // оставалось на «Загрузка…».
+    document.getElementById('leaderboardOverlay')?.remove();
     document.body.appendChild(overlay);
 
     const close = () => overlay.remove();
@@ -171,7 +192,8 @@ async function openLeaderboard(gameId) {
     globalData = globalRes || [];
 
     const tabs = modal.querySelectorAll('.lb-tab');
-    const body = document.getElementById('lbBody');
+    // Ищем строго внутри своего модального окна, а не по всему документу
+    const body = modal.querySelector('#lbBody');
 
     function renderTab(tabId) {
         tabs.forEach(t => {
@@ -206,7 +228,8 @@ function renderLeaderboardRow(row, idx, gameId) {
 
     const name = escapeHtml(row.full_name || row.username || 'Аноним');
     const username = escapeHtml(row.username || '');
-    const emoji = row.avatar_emoji || '👤';
+    // avatar_emoji задаёт сам пользователь — без экранирования это хранимый XSS
+    const emoji = escapeHtml(row.avatar_emoji || '👤');
     const score = row.score || 0;
 
     let detailsHtml = '';
@@ -316,11 +339,13 @@ function rpgPickMonsterIdx(stage) {
 }
 function rpgRegularHp(stage, poolIdx) {
     const base = 9 * Math.pow(1.33, stage - 1);
-    return Math.max(3, Math.ceil(base * RPG_MONSTER_POOL[poolIdx].hpMul));
+    const m = RPG_MONSTER_POOL[poolIdx] || RPG_MONSTER_POOL[0];
+    return Math.max(3, Math.ceil(base * m.hpMul));
 }
 function rpgRegularReward(stage, poolIdx) {
     const base = 3 * Math.pow(1.27, stage - 1);
-    return Math.max(1, Math.ceil(base * RPG_MONSTER_POOL[poolIdx].rewardMul));
+    const m = RPG_MONSTER_POOL[poolIdx] || RPG_MONSTER_POOL[0];
+    return Math.max(1, Math.ceil(base * m.rewardMul));
 }
 // Боссы заметно крепче обычных монстров того же этапа — тапами "в лоб" их не унести
 function rpgBossHp(stage) {
@@ -337,14 +362,21 @@ function rpgBossResistance(stage) {
     return Math.min(0.6, 0.04 + stage * 0.02);
 }
 function rpgComputeStats(up) {
-    const dmgMul = (1 + up.potion * 0.08) * (1 + up.crystal * 0.1);
+    // up может прийти пустым/частичным (старое сохранение) — иначе таймер
+    // пассивного дохода падал и ВСЯ строка статистики замирала.
+    up = up || rpgDefaultUpgrades();
+    const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+    const potion = num(up.potion), crystal = num(up.crystal), sword = num(up.sword);
+    const guild = num(up.guild), warrior = num(up.warrior), tower = num(up.tower);
+    const armor = num(up.armor), artifact = num(up.artifact), forge = num(up.forge);
+    const dmgMul = (1 + potion * 0.08) * (1 + crystal * 0.1);
     return {
-        tapDamage: (1 + up.sword) * dmgMul,
-        dps: (up.guild * 2 + up.warrior * 1 + up.tower * 6) * dmgMul,
-        coinMul: 1 + up.armor * 0.15,
-        speedMul: 1 + up.artifact * 0.15,
-        critChance: Math.min(0.6, up.artifact * 0.02),
-        penetration: Math.min(0.75, up.forge * 0.04),
+        tapDamage: (1 + sword) * dmgMul,
+        dps: (guild * 2 + warrior * 1 + tower * 6) * dmgMul,
+        coinMul: 1 + armor * 0.15,
+        speedMul: 1 + artifact * 0.15,
+        critChance: Math.min(0.6, artifact * 0.02),
+        penetration: Math.min(0.75, forge * 0.04),
         dmgMul
     };
 }
@@ -365,7 +397,10 @@ async function startRpgClicker(area, forcedState = null, skipServerLoad = false)
         catch (e) { state = loadRpgState(); }
     }
     state = rpgMigrateState(state);
-
+    
+    // Флаг активности игры для управления уведомлениями
+    state._gameActive = true;
+    
     area.innerHTML = `
         <div style="display:flex;flex-direction:column;height:100%;background:linear-gradient(180deg,#1a1f2e,#0f1419);color:#fff;">
             <div style="padding:12px 14px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;">
@@ -440,9 +475,10 @@ async function startRpgClicker(area, forcedState = null, skipServerLoad = false)
     }
 
     function updateUI() {
-        const stats = rpgComputeStats(state.extra.upgrades);
-        
-        // Защита от вызова до загрузки DOM
+        const stats = rpgComputeStats((state.extra && state.extra.upgrades) || rpgDefaultUpgrades());
+
+        // Каждый элемент обновляем отдельно: раньше отсутствие ЛЮБОГО одного
+        // элемента замораживало всю строку статистики целиком.
         const rpgCoins = document.getElementById('rpgCoins');
         const rpgGems = document.getElementById('rpgGems');
         const rpgLevel = document.getElementById('rpgLevel');
@@ -451,19 +487,16 @@ async function startRpgClicker(area, forcedState = null, skipServerLoad = false)
         const rpgCrit = document.getElementById('rpgCrit');
         const rpgPen = document.getElementById('rpgPen');
         const rpgStageLabel = document.getElementById('rpgStageLabel');
-        
-        if (!rpgCoins || !rpgGems || !rpgLevel || !rpgDmg || !rpgDps || !rpgCrit || !rpgPen || !rpgStageLabel) {
-            console.warn('RPG UI элементы ещё не загружены');
-            return;
-        }
-        
-        rpgCoins.textContent = fmtScore(state.coins);
-        rpgGems.textContent = fmtScore(state.extra.gems);
-        rpgLevel.textContent = state.level;
-        rpgDmg.textContent = fmtScore(stats.tapDamage);
-        rpgDps.textContent = fmtScore(stats.dps);
-        rpgCrit.textContent = Math.round(stats.critChance * 100) + '%';
-        rpgPen.textContent = Math.round(stats.penetration * 100) + '%';
+
+        if (rpgCoins) rpgCoins.textContent = fmtScore(state.coins);
+        if (rpgGems) rpgGems.textContent = fmtScore(state.extra.gems);
+        if (rpgLevel) rpgLevel.textContent = state.level;
+        // Урон и DPS дробные (зелья/кристаллы дают +8%/+10%) — округление вниз
+        // скрывало эффект покупок, поэтому показываем десятые.
+        if (rpgDmg) rpgDmg.textContent = fmtStat(stats.tapDamage);
+        if (rpgDps) rpgDps.textContent = fmtStat(stats.dps);
+        if (rpgCrit) rpgCrit.textContent = Math.round(stats.critChance * 100) + '%';
+        if (rpgPen) rpgPen.textContent = Math.round(stats.penetration * 100) + '%';
 
         const t = currentTargetInfo();
         if (monsterEl) monsterEl.textContent = t.emoji;
@@ -480,7 +513,7 @@ async function startRpgClicker(area, forcedState = null, skipServerLoad = false)
         const required = rpgKillsRequired(state.level);
         if (stageProgressLabel) stageProgressLabel.textContent = t.isBoss ? 'Бой с боссом!' : `${state.killsOnLevel} / ${required}`;
         if (stageProgressBar) stageProgressBar.style.width = (t.isBoss ? 100 : Math.min(100, (state.killsOnLevel / required) * 100)) + '%';
-        rpgStageLabel.textContent = `Этап ${state.level}`;
+        if (rpgStageLabel) rpgStageLabel.textContent = `Этап ${state.level}`;
     }
 
     function persistLocal() { saveRpgState(state); }
@@ -492,7 +525,7 @@ async function startRpgClicker(area, forcedState = null, skipServerLoad = false)
 
     function onTargetKilled() {
         const ex = state.extra;
-        const stats = rpgComputeStats(ex.upgrades);
+        const stats = rpgComputeStats((ex && ex.upgrades) || rpgDefaultUpgrades());
         state.killsTotal++;
 
         if (ex.bossActive) {
@@ -502,7 +535,10 @@ async function startRpgClicker(area, forcedState = null, skipServerLoad = false)
             ex.gems += gems;
             state.level++;
             state.killsOnLevel = 0;
-            showToast(`Босс повержен! +${fmtScore(reward)} 🪙, +${gems} 💎, уровень ${state.level}!`, 'success');
+            // Уведомление о победе над боссом показываем только если игра активна
+            if (state._gameActive) {
+                showToast(`Босс повержен! +${fmtScore(reward)} 🪙, +${gems} 💎, уровень ${state.level}!`, 'success');
+            }
             rpgCheckNewUnlocks(state.level);
             spawnRegularMonster();
         } else {
@@ -517,7 +553,7 @@ async function startRpgClicker(area, forcedState = null, skipServerLoad = false)
 
     function tapTarget(e) {
         e.preventDefault();
-        const stats = rpgComputeStats(state.extra.upgrades);
+        const stats = rpgComputeStats((state.extra && state.extra.upgrades) || rpgDefaultUpgrades());
         const now = Date.now();
         if (now - lastAttackTime < 100 / stats.speedMul) return;
         lastAttackTime = now;
@@ -626,7 +662,7 @@ async function startRpgClicker(area, forcedState = null, skipServerLoad = false)
     };
 
     const passiveTimer = setInterval(() => {
-        const stats = rpgComputeStats(state.extra.upgrades);
+        const stats = rpgComputeStats((state.extra && state.extra.upgrades) || rpgDefaultUpgrades());
         if (stats.dps > 0) {
             const ex = state.extra;
             if (ex.bossActive) {
@@ -643,7 +679,7 @@ async function startRpgClicker(area, forcedState = null, skipServerLoad = false)
 
     const now = Date.now();
     if (state.lastOnline && state.lastOnline > 0) {
-        const stats = rpgComputeStats(state.extra.upgrades);
+        const stats = rpgComputeStats((state.extra && state.extra.upgrades) || rpgDefaultUpgrades());
         const elapsed = Math.min((now - state.lastOnline) / 1000, 4 * 3600);
         const offlineIncome = Math.floor(stats.dps * 0.4 * elapsed);
         if (offlineIncome > 1) {
@@ -674,9 +710,12 @@ async function startRpgClicker(area, forcedState = null, skipServerLoad = false)
         clearInterval(serverSyncTimer);
         state.lastOnline = Date.now();
         persistLocal();
-        saveRpgStateToServer(state);
+        // При сбросе прогресса старый «догоняющий» save не должен перезаписать новый
+        if (!rpgResetInProgress) saveRpgStateToServer(state);
         window.rpgToggleShop = null;
         window.rpgBuy = null;
+        // Важно: сбрасываем флаг активности игры, чтобы уведомления не показывались после выхода
+        state._gameActive = false;
     };
 }
 
@@ -719,6 +758,16 @@ function rpgMigrateState(state) {
         if (typeof ex.upgrades[k] !== 'number') ex.upgrades[k] = 0;
     }
 
+    // Индекс монстра из повреждённого/устаревшего сохранения ломал старт игры
+    const clampedPoolIdx = Math.min(
+        Math.max(0, Math.floor(Number(ex.monsterPoolIdx) || 0)),
+        RPG_MONSTER_POOL.length - 1
+    );
+    if (clampedPoolIdx !== ex.monsterPoolIdx) {
+        ex.monsterPoolIdx = clampedPoolIdx;
+        ex.monsterHp = 0; // пересоздадим монстра с корректными характеристиками
+    }
+
     const required = rpgKillsRequired(state.level);
     if (state.killsOnLevel > required) state.killsOnLevel = required;
 
@@ -743,8 +792,23 @@ async function loadRpgStateAsync() {
     if (!server) return local;
     server = rpgMigrateState(server);
 
-    const scoreOf = st => (st.level || 1) * 10000 + (st.killsTotal || 0) * 100 + Math.floor((st.coins || 0) / 10);
-    return scoreOf(server) > scoreOf(local) ? server : local;
+    // Сравниваем не только «очки»: покупка в магазине уменьшает монеты,
+    // поэтому устаревший серверный снимок мог «победить» и откатить покупки.
+    const upSum = st => Object.values((st.extra && st.extra.upgrades) || {})
+        .reduce((a, v) => a + (Number(v) || 0), 0);
+    const scoreOf = st => (st.level || 1) * 10000 + (st.killsTotal || 0) * 100
+        + Math.floor((st.coins || 0) / 10) + upSum(st) * 500;
+
+    const best = scoreOf(server) > scoreOf(local) ? server : local;
+    const other = best === server ? local : server;
+
+    // Не теряем уже купленные улучшения и кристаллы
+    if (upSum(other) > upSum(best)) {
+        best.extra = best.extra || {};
+        best.extra.upgrades = other.extra.upgrades;
+        best.extra.gems = Math.max(Number(best.extra.gems) || 0, Number(other.extra.gems) || 0);
+    }
+    return best;
 }
 
 async function saveRpgStateToServer(s) {
@@ -770,11 +834,16 @@ async function resetRpgGame() {
     if (!confirm('Вы уверены? Весь прогресс будет потерян!')) return;
 
     // Останавливаем все таймеры предыдущей игры
+    // (их «догоняющий» save подавляем, иначе старый прогресс вернётся на сервер)
+    rpgResetInProgress = true;
     if (activeGameCleanup) {
         try { activeGameCleanup(); } catch (e) {}
         activeGameCleanup = null;
     }
-
+    
+    // Ждём немного, чтобы старые таймеры точно завершились
+    await new Promise(r => setTimeout(r, 50));
+    
     const newState = defaultRpgState();
     
     // Сначала сохраняем локально
@@ -786,13 +855,20 @@ async function resetRpgGame() {
         console.log('Прогресс сброшен на сервере');
     } catch (e) { 
         console.error('Ошибка сброса на сервере:', e);
+    } finally {
+        rpgResetInProgress = false;
     }
-
+    
     showToast('Прогресс сброшен', 'info');
     
     // Перезагружаем игру с принудительным использованием нового состояния
     // Передаём флаг, что это сброс, чтобы не загружать с сервера
-    activeGameCleanup = await startRpgClicker(document.getElementById('gameArea'), newState, true);
+    const area = document.getElementById('gameArea');
+    if (area) {
+        // Очищаем область перед запуском новой игры
+        area.innerHTML = '<p style="text-align:center;padding:60px 20px;color:#8d99a5;">Загрузка прогресса…</p>';
+        activeGameCleanup = await startRpgClicker(area, newState, true);
+    }
 }
 
 // ============================================================================
@@ -829,11 +905,16 @@ function startSnake(area) {
     let speed = 120;
 
     function spawnFood() {
-        food = {
-            x: Math.floor(Math.random() * cols),
-            y: Math.floor(Math.random() * rows)
-        };
-        if (snake.some(s => s.x === food.x && s.y === food.y)) spawnFood();
+        // Собираем свободные клетки: рекурсивный подбор мог уйти в глубокую
+        // рекурсию, когда поле почти заполнено.
+        const free = [];
+        for (let x = 0; x < cols; x++) {
+            for (let y = 0; y < rows; y++) {
+                if (!snake.some(s => s.x === x && s.y === y)) free.push({ x, y });
+            }
+        }
+        if (!free.length) return; // поле заполнено — победа
+        food = free[Math.floor(Math.random() * free.length)];
     }
 
     function setDir(newDir) {
@@ -879,7 +960,11 @@ function startSnake(area) {
         const head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
 
         if (head.x < 0 || head.x >= cols || head.y < 0 || head.y >= rows) { gameOver(); return; }
-        if (snake.some(s => s.x === head.x && s.y === head.y)) { gameOver(); return; }
+        // Хвост, который сейчас сдвинется, не должен считаться столкновением —
+        // иначе «погоня за собственным хвостом» обрывала игру.
+        const grows = (head.x === food.x && head.y === food.y);
+        const body = grows ? snake : snake.slice(0, -1);
+        if (body.some(s => s.x === head.x && s.y === head.y)) { gameOver(); return; }
 
         snake.unshift(head);
         if (head.x === food.x && head.y === food.y) {
@@ -934,7 +1019,13 @@ function startSnake(area) {
             </div>
         `;
         area.appendChild(ov);
-        ov.querySelector('#snRetry').addEventListener('click', () => { ov.remove(); startSnake(area); });
+        ov.querySelector('#snRetry').addEventListener('click', () => {
+            ov.remove();
+            // Снимаем обработчики прошлой партии, иначе они накапливаются
+            document.removeEventListener('keydown', onKey);
+            window.removeEventListener('resize', resize);
+            startSnake(area);
+        });
         ov.querySelector('#snRating').addEventListener('click', () => openLeaderboard('snake-arena'));
     }
 
@@ -1013,6 +1104,8 @@ function start2048(area) {
 
     function gameOver() {
         gameEnded = true;
+        // Клавиши больше не должны перехватываться после конца партии
+        document.removeEventListener('keydown', onKey);
         submitGameScore('2048', score);
         const ov = document.createElement('div');
         ov.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,0.7);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;z-index:10;';
@@ -1025,7 +1118,11 @@ function start2048(area) {
             </div>
         `;
         area.appendChild(ov);
-        ov.querySelector('#g2048Retry').addEventListener('click', () => { ov.remove(); start2048(area); });
+        ov.querySelector('#g2048Retry').addEventListener('click', () => {
+            ov.remove();
+            document.removeEventListener('keydown', onKey);
+            start2048(area);
+        });
         ov.querySelector('#g2048Rating').addEventListener('click', () => openLeaderboard('2048'));
     }
 

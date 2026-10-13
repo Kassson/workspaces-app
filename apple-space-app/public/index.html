@@ -8,12 +8,12 @@
     <link rel="manifest" href="/manifest.json">
     <link rel="icon" href="/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="/icon.svg">
-    <link rel="stylesheet" href="style.css?v=11">
+    <link rel="stylesheet" href="style.css?v=13">
 
     <!-- Версия приложения — при смене чистим кэш и снимаем SW -->
     <script>
     (function(){
-        var APP_VERSION = '11';
+        var APP_VERSION = '13';
         try {
             var saved = localStorage.getItem('appVersion');
             if (saved !== APP_VERSION) {
@@ -197,6 +197,11 @@
                     <div id="spaceActionsContent"></div>
                 </div>
 
+                <div class="settings-card" id="spaceSettingsCard">
+                    <h3>Настройки группы</h3>
+                    <div id="spaceSettingsContent"></div>
+                </div>
+
                 <div class="settings-card" id="pushSettingsContainer"></div>
 
                 <div class="settings-card">
@@ -251,8 +256,8 @@
     <div id="dynamicSheetRoot"></div>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="shared.js?v=11"></script>
-    <script src="game.js?v=12"></script>
+    <script src="shared.js?v=13"></script>
+    <script src="game.js?v=13"></script>
     <script>
         const errorMsg = document.getElementById('errorMsg');
         function switchView(viewId) {
@@ -361,7 +366,7 @@
             if (tabId === 'tab-members') renderMembersTab(document.getElementById('tab-members'), spaceId, isAdmin);
             if (tabId === 'tab-chat') renderChatTab(document.getElementById('tab-chat'), spaceId, isAdmin, currentUser?.id);
             if (tabId === 'tab-games') { if (!window.activeGame) renderGamesMenu(document.getElementById('tab-games')); }
-            if (tabId === 'tab-settings') { renderSpaceActions(); renderPushSettingsCard(); refreshThemeButtons(); }
+            if (tabId === 'tab-settings') { renderSpaceActions(); renderSpaceSettingsSection(); renderPushSettingsCard(); refreshThemeButtons(); }
         }
 
         async function reloadSpaces() {
@@ -376,6 +381,7 @@
                 currentSpace = found;
                 if (label) label.textContent = found.name;
             }
+            if (typeof applySpaceFeatureVisibility === 'function') applySpaceFeatureVisibility();
             renderSpaceActions();
             const activeTab = document.querySelector('.tab-section.active')?.id || 'tab-schedule';
             loadTabContent(activeTab);
@@ -460,6 +466,14 @@
             startPresenceTracking();
             updateBadges();
 
+            // Ярлыки из manifest.json открывают приложение сразу на нужном разделе
+            try {
+                const wantedTab = new URLSearchParams(location.search).get('tab');
+                if (wantedTab && document.getElementById(wantedTab)) {
+                    showTab(wantedTab, document.querySelector(`[data-tab="${wantedTab}"]`));
+                }
+            } catch (e) {}
+
             hideLoadingScreen();
         }
         boot();
@@ -467,6 +481,26 @@
         socket.on('members_updated', () => {
             const active = document.querySelector('.tab-section.active')?.id;
             if (active === 'tab-members') loadTabContent('tab-members');
+        });
+
+        // Изменения названия/настроек группы применяем сразу у всех участников
+        socket.on('space_updated', (space) => {
+            if (space && currentSpace && space.id === currentSpace.id) {
+                currentSpace.name = space.name;
+                const label = document.getElementById('currentSpaceLabel');
+                if (label) label.textContent = space.name;
+                renderSpaceActions();
+                renderSpaceSettingsSection();
+            }
+        });
+        socket.on('space_settings_updated', ({ spaceId, settings }) => {
+            if (currentSpace && spaceId === currentSpace.id) {
+                currentSpace.settings = settings;
+                if (typeof setLocalSpaceSettings === 'function') setLocalSpaceSettings(settings);
+                applySpaceFeatureVisibility();
+                const active = document.querySelector('.tab-section.active')?.id;
+                if (active === 'tab-settings') renderSpaceSettingsSection();
+            }
         });
     </script>
 </body>
